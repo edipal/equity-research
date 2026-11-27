@@ -162,7 +162,9 @@ def _detect_manifest_lossy_features(namelist: list[str]) -> set[str]:
             features.add("charts")
         elif low.startswith(("xl/pivottables/", "xl/pivotcache/")):
             features.add("pivot_tables")
-        elif low.startswith(("xl/slicers/", "xl/timelines/")):
+        elif low.startswith(
+            ("xl/slicers/", "xl/slicercaches/", "xl/timelines/", "xl/timelinecaches/")
+        ):
             features.add("slicers_or_timelines")
         elif (
             low.startswith("xl/drawings/")
@@ -339,6 +341,7 @@ def scan_workbook_formulas(
 
     try:
         ws_v_by_title = {ws.title: ws for ws in wb_values.worksheets}
+        title_by_lower = {ws.title.lower(): ws.title for ws in wb_values.worksheets}
         if capture_sheet_grids or capture_defined_names:
             sheetnames = [ws.title for ws in wb_values.worksheets]
 
@@ -357,8 +360,9 @@ def scan_workbook_formulas(
                         r_idx, c_idx = coordinate_to_tuple(ref_clean)
                     except Exception:
                         continue
-                    defined_names_map[dn_name] = (sheet_title, r_idx, c_idx)
-                    extra_grid_sheets_lower.add(sheet_title.lower())
+                    canon_title = title_by_lower.get(sheet_title.lower(), sheet_title)
+                    defined_names_map[dn_name] = (canon_title, r_idx, c_idx)
+                    extra_grid_sheets_lower.add(canon_title.lower())
                     break
 
         target_grid_sheets_lower = _DEFAULT_CAPTURED_GRID_SHEETS | extra_grid_sheets_lower

@@ -385,6 +385,7 @@ def main(argv: list[str] | None = None) -> int:
             return _fail(
                 output_path,
                 f"Output directory does not exist: {output_path.parent}",
+                source_file=xlsx_path,
             )
 
     # Detect LibreOffice and enforce its presence for write modes (--in-place / --output)
@@ -417,6 +418,7 @@ def main(argv: list[str] | None = None) -> int:
         dest_path = xlsx_path
 
     is_in_place = dest_path is not None and _is_same_file(dest_path, xlsx_path)
+    err_source_file = xlsx_path if args.output else None
 
     # Single streaming OOXML pass to (1) detect Excel What-If data tables (<f t="dataTable">)
     # and LibreOffice-lossy Excel features before any in-place overwrite, and (2) count on-disk
@@ -434,7 +436,7 @@ def main(argv: list[str] | None = None) -> int:
         lossy_features = xml_info.get("lossy_features", [])
     except WorkbookLoadError as exc:
         if is_in_place:
-            return _fail(xlsx_path, str(exc))
+            return _fail(xlsx_path, str(exc), source_file=err_source_file)
         warnings.append(
             f"Could not inspect input XML for Excel What-If data tables or uncached formulas: {exc}"
         )
@@ -456,6 +458,7 @@ def main(argv: list[str] | None = None) -> int:
                     "Use the default non-destructive check (--check-only) for safe read-only "
                     "auditing, or pass --output <new.xlsx> if a re-exported copy is explicitly desired."
                 ),
+                source_file=err_source_file,
                 extra=extra_dt,
             )
         if args.output:
@@ -481,6 +484,7 @@ def main(argv: list[str] | None = None) -> int:
                     "Use the default non-destructive check (--check-only) for safe read-only "
                     "auditing, or pass --output <new.xlsx> to preserve the original file."
                 ),
+                source_file=err_source_file,
                 extra={"lossy_features": lossy_features},
             )
         if args.output:
@@ -514,6 +518,7 @@ def main(argv: list[str] | None = None) -> int:
                 return _fail(
                     dest_path or xlsx_path,
                     lo_err or "LibreOffice recalculation failed.",
+                    source_file=err_source_file,
                 )
 
             recalculated = True
@@ -528,6 +533,7 @@ def main(argv: list[str] | None = None) -> int:
                     return _fail(
                         dest_path,
                         f"Failed to write recalculated workbook to '{dest_path}': {exc}",
+                        source_file=err_source_file,
                     )
                 modified_file = True
                 scan_target = dest_path
@@ -548,7 +554,12 @@ def main(argv: list[str] | None = None) -> int:
         try:
             scan = scan_workbook(scan_target)
         except WorkbookLoadError as exc:
-            return _fail(reported_file, str(exc), recalculated=recalculated)
+            return _fail(
+                reported_file,
+                str(exc),
+                source_file=err_source_file,
+                recalculated=recalculated,
+            )
 
     on_disk_uncached: int | None
     if is_check_only and recalculated:

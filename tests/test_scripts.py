@@ -2089,18 +2089,20 @@ class TestRecalcXlsx(unittest.TestCase):
                 self.assertTrue(out_chart_path.exists())
                 self.assertEqual(chart_path.read_bytes(), orig_chart_bytes)
 
-            # 2. Pivot table, slicer, drawing XML, VBA macro, form control, and sparklines
+            # 2. Pivot table, slicer/timeline (including caches), drawing XML, VBA macro, form control, and sparklines
             feature_cases = [
                 ("pivot_tables", {"xl/pivotTables/pivotTable1.xml": b"<pivotTableDefinition/>"}, None),
                 ("slicers_or_timelines", {"xl/slicers/slicer1.xml": b"<slicers/>"}, None),
+                ("slicers_or_timelines", {"xl/slicerCaches/slicerCache1.xml": b"<slicerCacheDefinition/>"}, None),
+                ("slicers_or_timelines", {"xl/timelineCaches/timelineCache1.xml": b"<timelineCacheDefinition/>"}, None),
                 ("drawings_or_shapes", {"xl/drawings/drawing1.xml": b"<wsDr/>"}, None),
                 ("vba_macros", {"xl/vbaProject.bin": b"VBA"}, None),
                 ("form_or_activex_controls", {"xl/ctrlProps/ctrlProp1.xml": b"<formControlPr/>"}, None),
                 ("sparklines", {}, "sparklines"),
             ]
-            for expected_feature, extra_entries, xml_mode in feature_cases:
-                with self.subTest(feature=expected_feature):
-                    fpath = Path(tmp) / f"feat_{expected_feature}.xlsx"
+            for idx, (expected_feature, extra_entries, xml_mode) in enumerate(feature_cases):
+                with self.subTest(feature=expected_feature, extra_entries=list(extra_entries)):
+                    fpath = Path(tmp) / f"feat_{idx}_{expected_feature}.xlsx"
                     wb_f = openpyxl.Workbook()
                     ws_f = wb_f.active
                     ws_f["A1"] = 1
@@ -2148,6 +2150,81 @@ class TestRecalcXlsx(unittest.TestCase):
             wb_c.save(comment_path)
             wb_c.close()
             self.assertEqual(xlsx_scan_mod.inspect_workbook_xml(comment_path)["lossy_features"], [])
+
+    def test_output_error_paths_include_uniform_source_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src_path = Path(tmp) / "input.xlsx"
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws["A1"] = 10
+            wb.save(src_path)
+            wb.close()
+
+            expected_src = str(src_path.resolve())
+
+            # 1. Missing --output parent directory
+            missing_dir_out = Path(tmp) / "does_not_exist" / "out.xlsx"
+            rc_dir, payload_dir = self._run_main([str(src_path), "--output", str(missing_dir_out)])
+            self.assertEqual(rc_dir, 1, payload_dir)
+            self.assertEqual(payload_dir["status"], "error")
+            self.assertEqual(payload_dir.get("source_file"), expected_src)
+            self.assertEqual(Path(payload_dir["file"]), missing_dir_out.resolve())
+
+            # 2. LibreOffice conversion failure under --output
+            out_path = Path(tmp) / "recalced.xlsx"
+            fail_proc = mock.MagicMock()
+            fail_proc.returncode = 1
+            fail_proc.communicate.return_value = ("", "soffice crashed")
+            with (
+                mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value="/usr/bin/soffice"),
+                mock.patch.object(recalc_xlsx_mod.subprocess, "Popen", return_value=fail_proc),
+            ):
+                rc_lo, payload_lo = self._run_main([str(src_path), "--output", str(out_path)])
+            self.assertEqual(rc_lo, 1, payload_lo)
+            self.assertEqual(payload_lo["status"], "error")
+            self.assertEqual(payload_lo.get("source_file"), expected_src)
+            self.assertEqual(Path(payload_lo["file"]), out_path.resolve())
+
+            # 3. atomic_copy OSError under --output
+            def ok_popen(cmd, **kwargs):
+                outdir = Path(cmd[cmd.index("--outdir") + 1])
+                shutil.copyfile(src_path, outdir / f"{src_path.stem}.xlsx")
+                proc = mock.MagicMock()
+                proc.returncode = 0
+                proc.communicate.return_value = ("", "")
+                return proc
+
+            with (
+                mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value="/usr/bin/soffice"),
+                mock.patch.object(recalc_xlsx_mod.subprocess, "Popen", side_effect=ok_popen),
+                mock.patch.object(
+                    recalc_xlsx_mod,
+                    "atomic_copy",
+                    side_effect=PermissionError("Read-only target"),
+                ),
+            ):
+                rc_copy, payload_copy = self._run_main([str(src_path), "--output", str(out_path)])
+            self.assertEqual(rc_copy, 1, payload_copy)
+            self.assertEqual(payload_copy["status"], "error")
+            self.assertEqual(payload_copy.get("source_file"), expected_src)
+            self.assertEqual(Path(payload_copy["file"]), out_path.resolve())
+
+            # 4. Post-recalc scan_workbook WorkbookLoadError under --output
+            with (
+                mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value="/usr/bin/soffice"),
+                mock.patch.object(recalc_xlsx_mod.subprocess, "Popen", side_effect=ok_popen),
+                mock.patch.object(
+                    recalc_xlsx_mod,
+                    "scan_workbook",
+                    side_effect=recalc_xlsx_mod.WorkbookLoadError("Corrupt output"),
+                ),
+            ):
+                rc_scan, payload_scan = self._run_main([str(src_path), "--output", str(out_path)])
+            self.assertEqual(rc_scan, 1, payload_scan)
+            self.assertEqual(payload_scan["status"], "error")
+            self.assertEqual(payload_scan.get("source_file"), expected_src)
+            self.assertEqual(Path(payload_scan["file"]), out_path.resolve())
+            self.assertTrue(payload_scan["recalculated_with_libreoffice"])
 
 
 @unittest.skipIf(openpyxl is None, "openpyxl is required for DCF validation tests")
@@ -3567,6 +3644,263 @@ class TestValidateDcf(unittest.TestCase):
             self.assertEqual(spy_load.call_count, 2, "Expected exactly 2 openpyxl.load_workbook calls (never 3)")
             # Label-scan fallback extracts DCF once and WACC once (= 2 total, never 4)
             self.assertEqual(spy_extract.call_count, 2, "Expected _extract_rate_rows once per sheet (DCF + WACC)")
+
+    def test_named_out_of_bounds_tg_and_negative_pv_tv_caught_without_exit_multiple_mis_pairing(self) -> None:
+        if recalc_xlsx_mod.find_soffice() is None:
+            self.skipTest("LibreOffice (soffice) is required for end-to-end DCF skeleton named-range repro")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # 1. Exact repro under Case = 2 (Base active) with TerminalGrowth_Bull = 2.5 (250%) and 1.0 (100%)
+            for bad_tg, expected_pct in ((2.5, "250.00%"), (1.0, "100.00%")):
+                with self.subTest(case=2, bad_tg=bad_tg):
+                    model_path = Path(tmp) / f"case2_tg_{str(bad_tg).replace('.', '_')}.xlsx"
+                    build_proc = subprocess.run(
+                        [sys.executable, str(BUILD_DCF_SKELETON_PATH), "--output", str(model_path), "--case", "2"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertEqual(build_proc.returncode, 0, build_proc.stdout + build_proc.stderr)
+
+                    wb = openpyxl.load_workbook(model_path)
+                    wb["DCF"]["C57"] = bad_tg
+                    wb.save(model_path)
+                    wb.close()
+
+                    recalc_proc = subprocess.run(
+                        [sys.executable, str(RECALC_XLSX_PATH), str(model_path), "30", "--in-place"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertEqual(recalc_proc.returncode, 0, recalc_proc.stdout + recalc_proc.stderr)
+
+                    res = validate_dcf_mod.validate_dcf_model(str(model_path))
+                    self.assertEqual(res["status"], "FAIL", res)
+                    self.assertEqual(res["warning_count"], 0, res["warnings"])
+                    self.assertTrue(
+                        any(f"Terminal growth ({expected_pct} at DCF!C57) >= WACC" in e for e in res["errors"]),
+                        res["errors"],
+                    )
+
+            # 2. Exact repro under Case = 3 (Bull active) with TerminalGrowth_Bull = 2.5:
+            #    MUST FAIL with g >= WACC error AND MUST NOT emit bogus Exit Multiple TV % of EV warning
+            model_c3 = Path(tmp) / "case3_tg_2_5.xlsx"
+            build_c3 = subprocess.run(
+                [sys.executable, str(BUILD_DCF_SKELETON_PATH), "--output", str(model_c3), "--case", "3"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(build_c3.returncode, 0, build_c3.stdout + build_c3.stderr)
+
+            wb3 = openpyxl.load_workbook(model_c3)
+            wb3["DCF"]["C57"] = 2.5
+            wb3.save(model_c3)
+            wb3.close()
+
+            recalc_c3 = subprocess.run(
+                [sys.executable, str(RECALC_XLSX_PATH), str(model_c3), "30", "--in-place"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(recalc_c3.returncode, 0, recalc_c3.stdout + recalc_c3.stderr)
+
+            res_c3 = validate_dcf_mod.validate_dcf_model(str(model_c3))
+            self.assertEqual(res_c3["status"], "FAIL", res_c3)
+            self.assertTrue(
+                any("Terminal growth (250.00% at DCF!C57) >= WACC" in e for e in res_c3["errors"]),
+                res_c3["errors"],
+            )
+            self.assertFalse(
+                any("typically should be 50-70%" in w for w in res_c3["warnings"]),
+                f"Bogus Exit Multiple TV % of EV warning emitted: {res_c3['warnings']}",
+            )
+            self.assertTrue(
+                any("is non-positive" in w for w in res_c3["warnings"]),
+                f"Expected explicit non-positive TV/EV warning, got: {res_c3['warnings']}",
+            )
+
+    def test_named_invalid_wacc_negative_tv_ev_and_non_numeric_named_cells(self) -> None:
+        from openpyxl.workbook.defined_name import DefinedName
+
+        def _make_named_wb(path: Path, **overrides) -> None:
+            wb = openpyxl.Workbook()
+            ws_dcf = wb.active
+            ws_dcf.title = "DCF"
+            ws_dcf["A1"] = "Bear TG"
+            ws_dcf["B1"] = overrides.get("tg_bear", 0.02)
+            ws_dcf["A2"] = "Base TG"
+            ws_dcf["B2"] = overrides.get("tg_base", 0.025)
+            ws_dcf["A3"] = "Bull TG"
+            ws_dcf["B3"] = overrides.get("tg_bull", 0.03)
+            ws_dcf["A4"] = "PV of Terminal Value"
+            ws_dcf["B4"] = overrides.get("pv_tv", 600.0)
+            ws_dcf["A5"] = "Enterprise Value"
+            ws_dcf["B5"] = overrides.get("ev", 1000.0)
+            # Downstream Exit Multiple TV row that must NEVER be paired with named Perpetuity EV
+            ws_dcf["A8"] = "PV of Exit Multiple TV"
+            ws_dcf["B8"] = 2500.0
+            ws_dcf["A12"] = "Sensitivity Analysis"
+
+            ws_wacc = wb.create_sheet("WACC")
+            ws_wacc["A1"] = "Bear WACC"
+            ws_wacc["B1"] = overrides.get("wacc_bear", 0.11)
+            ws_wacc["A2"] = "Base WACC"
+            ws_wacc["B2"] = overrides.get("wacc_base", 0.09)
+            ws_wacc["A3"] = "Bull WACC"
+            ws_wacc["B3"] = overrides.get("wacc_bull", 0.08)
+
+            wb.defined_names["TerminalGrowth_Bear"] = DefinedName("TerminalGrowth_Bear", attr_text="DCF!$B$1")
+            wb.defined_names["TerminalGrowth_Base"] = DefinedName("TerminalGrowth_Base", attr_text="DCF!$B$2")
+            wb.defined_names["TerminalGrowth_Bull"] = DefinedName("TerminalGrowth_Bull", attr_text="DCF!$B$3")
+            wb.defined_names["WACC_Bear"] = DefinedName("WACC_Bear", attr_text="WACC!$B$1")
+            wb.defined_names["WACC_Base"] = DefinedName("WACC_Base", attr_text="WACC!$B$2")
+            wb.defined_names["WACC_Bull"] = DefinedName("WACC_Bull", attr_text="WACC!$B$3")
+            if overrides.get("define_pv_tv", True):
+                wb.defined_names["PV_TerminalValue"] = DefinedName("PV_TerminalValue", attr_text="DCF!$B$4")
+            if overrides.get("define_ev", True):
+                wb.defined_names["EnterpriseValue"] = DefinedName("EnterpriseValue", attr_text="DCF!$B$5")
+            wb.save(path)
+            wb.close()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # 1. Negative WACC_Bull (-2.00%) -> FAIL with non-positive WACC error
+            p_neg_wacc = Path(tmp) / "neg_wacc.xlsx"
+            _make_named_wb(p_neg_wacc, wacc_bull=-0.02, tg_bull=-0.05)
+            res_neg = validate_dcf_mod.validate_dcf_model(str(p_neg_wacc))
+            self.assertEqual(res_neg["status"], "FAIL", res_neg)
+            self.assertTrue(
+                any("Non-positive WACC (-2.00% at WACC!B3)" in e for e in res_neg["errors"]),
+                res_neg["errors"],
+            )
+            self.assertFalse(
+                any("-5.00%" in i and "-2.00%" in i for i in res_neg["info"]),
+                f"Should not emit pass checkmark against negative WACC: {res_neg['info']}",
+            )
+
+            # 2. Over-100% WACC_Bull (1.05 = 105%) -> FAIL with >= 100% decimal-entry error
+            p_high_wacc = Path(tmp) / "high_wacc.xlsx"
+            _make_named_wb(p_high_wacc, wacc_bull=1.05)
+            res_high = validate_dcf_mod.validate_dcf_model(str(p_high_wacc))
+            self.assertEqual(res_high["status"], "FAIL", res_high)
+            self.assertTrue(
+                any("WACC (105.00% at WACC!B3) is >= 100%" in e for e in res_high["errors"]),
+                res_high["errors"],
+            )
+
+            # 3. Extreme negative TerminalGrowth_Bull (-2.5 = -250%) -> FAIL
+            p_neg_tg = Path(tmp) / "neg_tg.xlsx"
+            _make_named_wb(p_neg_tg, tg_bull=-2.5)
+            res_neg_tg = validate_dcf_mod.validate_dcf_model(str(p_neg_tg))
+            self.assertEqual(res_neg_tg["status"], "FAIL", res_neg_tg)
+            self.assertTrue(
+                any("Terminal growth (-250.00% at DCF!B3) is <= -100%" in e for e in res_neg_tg["errors"]),
+                res_neg_tg["errors"],
+            )
+
+            # 4. Boolean or text string in named rate cells -> FAIL explicitly (never silently dropped or coerced)
+            for bad_val in (True, "2.5%"):
+                with self.subTest(bad_tg_val=bad_val):
+                    p_bad_tg = Path(tmp) / f"bad_tg_{type(bad_val).__name__}.xlsx"
+                    _make_named_wb(p_bad_tg, tg_bull=bad_val)
+                    res_btg = validate_dcf_mod.validate_dcf_model(str(p_bad_tg))
+                    self.assertEqual(res_btg["status"], "FAIL", res_btg)
+                    self.assertTrue(
+                        any("non-numeric value" in e and "DCF!B3" in e for e in res_btg["errors"]),
+                        res_btg["errors"],
+                    )
+
+                with self.subTest(bad_wacc_val=bad_val):
+                    p_bad_w = Path(tmp) / f"bad_wacc_{type(bad_val).__name__}.xlsx"
+                    _make_named_wb(p_bad_w, wacc_bull=bad_val)
+                    res_bw = validate_dcf_mod.validate_dcf_model(str(p_bad_w))
+                    self.assertEqual(res_bw["status"], "FAIL", res_bw)
+                    self.assertTrue(
+                        any("non-numeric value" in e and "WACC!B3" in e for e in res_bw["errors"]),
+                        res_bw["errors"],
+                    )
+
+            # 5. Non-positive or non-numeric named PV_TerminalValue / EnterpriseValue (including partial naming)
+            #    must warn cleanly and NEVER fall back to pair Exit Multiple TV (2500) with EV (1000) -> 250%
+            for label, kwargs in (
+                ("neg_pv_tv_only_named", {"pv_tv": -500.0, "define_ev": False}),
+                ("neg_ev_both_named", {"pv_tv": -500.0, "ev": -200.0}),
+                ("zero_ev_only_named", {"ev": 0.0, "define_pv_tv": False}),
+                ("nm_pv_tv", {"pv_tv": "NM"}),
+            ):
+                with self.subTest(case=label):
+                    p_tv = Path(tmp) / f"tv_{label}.xlsx"
+                    _make_named_wb(p_tv, **kwargs)
+                    res_tv = validate_dcf_mod.validate_dcf_model(str(p_tv))
+                    self.assertFalse(
+                        any("typically should be 50-70%" in w for w in res_tv["warnings"]),
+                        f"Mis-paired Exit Multiple TV on {label}: {res_tv['warnings']}",
+                    )
+                    self.assertTrue(
+                        any(("is non-positive" in w or "non-numeric value" in w) for w in res_tv["warnings"]),
+                        res_tv["warnings"],
+                    )
+
+    def test_defined_name_case_insensitive_sheet_title_resolves_in_scan_and_validator(self) -> None:
+        from openpyxl.workbook.defined_name import DefinedName
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "mixed_case_defined_names.xlsx"
+            wb = openpyxl.Workbook()
+            ws_dcf = wb.active
+            ws_dcf.title = "DCF"
+            ws_dcf["A1"] = "Row 1"
+            ws_dcf["B2"] = 0.025
+            ws_dcf["B3"] = 600.0
+            ws_dcf["B4"] = 1000.0
+            ws_dcf["A10"] = "Sensitivity Analysis"
+
+            ws_wacc = wb.create_sheet("WACC")
+            ws_wacc["D10"] = 0.095
+
+            ws_extra = wb.create_sheet("Assumptions")
+            ws_extra["C5"] = 0.03
+
+            # Deliberately use lowercase / mixed-case sheet titles in defined-name formulas
+            wb.defined_names["DCF_WACC"] = DefinedName("DCF_WACC", attr_text="wacc!$D$10")
+            wb.defined_names["TerminalGrowth_Bear"] = DefinedName("TerminalGrowth_Bear", attr_text="dcf!$B$2")
+            wb.defined_names["TerminalGrowth_Base"] = DefinedName("TerminalGrowth_Base", attr_text="Dcf!$B$2")
+            wb.defined_names["TerminalGrowth_Bull"] = DefinedName("TerminalGrowth_Bull", attr_text="assumptions!$C$5")
+            wb.defined_names["PV_TerminalValue"] = DefinedName("PV_TerminalValue", attr_text="dcf!$B$3")
+            wb.defined_names["EnterpriseValue"] = DefinedName("EnterpriseValue", attr_text="DCF!$B$4")
+            wb.save(path)
+            wb.close()
+
+            # 1. scan_workbook_formulas canonicalizes sheet titles in defined_names to worksheet casing
+            scan = xlsx_scan_mod.scan_workbook_formulas(
+                path, capture_sheet_grids=True, capture_defined_names=True
+            )
+            self.assertEqual(scan["defined_names"]["DCF_WACC"], ("WACC", 10, 4))
+            self.assertEqual(scan["defined_names"]["TerminalGrowth_Bear"], ("DCF", 2, 2))
+            self.assertEqual(scan["defined_names"]["TerminalGrowth_Bull"], ("Assumptions", 5, 3))
+            self.assertIn("Assumptions", scan["sheet_grids"])
+
+            # 2. DCFModelValidator resolves every mixed-case defined name and passes cleanly
+            validator = validate_dcf_mod.DCFModelValidator(str(path))
+            self.assertEqual(validator._named_metrics["wacc"][0], 0.095)
+            self.assertEqual(validator._named_metrics["wacc"][1], "WACC!D10")
+            self.assertEqual(validator._named_scenario_tg["bull"][0], 0.03)
+            self.assertEqual(validator._named_scenario_tg["bull"][1], "Assumptions!C5")
+
+            res = validator.validate_all()
+            self.assertEqual(res["status"], "PASS", res)
+            self.assertEqual(res["error_count"], 0, res["errors"])
+            self.assertEqual(res["warning_count"], 0, res["warnings"])
+
+            # 3. Direct defense-in-depth check on _resolve_named_metric with un-canonicalized sheet title
+            direct = validate_dcf_mod._resolve_named_metric(
+                {"dcf_wacc": ("wacc", 10, 4)},
+                validate_dcf_mod.NAMED_WACC_ALIASES,
+                {"WACC": {10: {4: (0.095, "D10")}}},
+            )
+            self.assertEqual(direct, (0.095, "WACC!D10", "WACC", 10, 4))
 
 
 @unittest.skipIf(openpyxl is None, "openpyxl is required for DCF skeleton tests")

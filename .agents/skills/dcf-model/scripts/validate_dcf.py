@@ -6,6 +6,7 @@ Validates Excel DCF models for formula errors and common DCF mistakes
 """
 
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -33,10 +34,12 @@ if _REPO_SCRIPTS_DIR is not None:
     if _repo_scripts_str not in sys.path:
         sys.path.insert(0, _repo_scripts_str)
 
+_EXCEL_ERRORS_FALLBACK = ("#REF!", "#DIV/0!", "#VALUE!", "#NAME?", "#N/A", "#NUM!", "#NULL!")
 _XLSX_SCAN_IMPORT_ERROR: Optional[str] = None
 try:
-    from xlsx_scan import scan_workbook_formulas  # noqa: E402
+    from xlsx_scan import EXCEL_ERRORS, scan_workbook_formulas  # noqa: E402
 except ModuleNotFoundError:
+    EXCEL_ERRORS = _EXCEL_ERRORS_FALLBACK
     scan_workbook_formulas = None  # type: ignore[assignment]
     _XLSX_SCAN_IMPORT_ERROR = _MISSING_XLSX_SCAN_MESSAGE
 
@@ -173,8 +176,8 @@ NAMED_SCENARIO_WACC_ALIASES = {
 
 
 def _is_number(value) -> bool:
-    """Return True for numeric values while excluding Python booleans."""
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    """Return True for finite numeric values while excluding Python booleans."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
 _SENS_AXIS_TERM = (
@@ -358,19 +361,34 @@ def _is_ev_label(text: str) -> bool:
     )
 
 
+def _lookup_sheet_grid(
+    grids_by_sheet: dict[str, Optional[dict[int, dict[int, tuple[Any, str]]]]],
+    sheet_title: str,
+) -> tuple[str, Optional[dict[int, dict[int, tuple[Any, str]]]]]:
+    """Look up a sheet grid by exact title first, falling back to case-insensitive match."""
+    grid = grids_by_sheet.get(sheet_title)
+    if grid is not None:
+        return sheet_title, grid
+    target_lower = sheet_title.lower()
+    for canon_title, candidate_grid in grids_by_sheet.items():
+        if canon_title.lower() == target_lower and candidate_grid is not None:
+            return canon_title, candidate_grid
+    return sheet_title, None
+
+
 def _resolve_named_metric(
     defined_names_lower: dict[str, tuple[str, int, int]],
     aliases: tuple[str, ...],
     grids_by_sheet: dict[str, Optional[dict[int, dict[int, tuple[Any, str]]]]],
-    value_predicate,
+    value_predicate=None,
 ) -> Optional[tuple[float, str, str, int, int]]:
-    """Resolve the first matching workbook-level named range pointing to a numeric cell."""
+    """Resolve the first matching workbook-level named range pointing to a finite numeric cell."""
     for alias in aliases:
         target = defined_names_lower.get(alias)
         if target is None:
             continue
         sheet_title, row_idx, col_idx = target
-        grid = grids_by_sheet.get(sheet_title)
+        canon_title, grid = _lookup_sheet_grid(grids_by_sheet, sheet_title)
         if grid is None:
             continue
         cell_entry = grid.get(row_idx, {}).get(col_idx)
@@ -379,8 +397,31 @@ def _resolve_named_metric(
         val, coord = cell_entry
         if _is_number(val):
             fval = float(val)
-            if value_predicate(fval):
-                return (fval, f"{sheet_title}!{coord}", sheet_title, row_idx, col_idx)
+            if value_predicate is None or value_predicate(fval):
+                return (fval, f"{canon_title}!{coord}", canon_title, row_idx, col_idx)
+    return None
+
+
+def _find_invalid_named_metric(
+    defined_names_lower: dict[str, tuple[str, int, int]],
+    aliases: tuple[str, ...],
+    grids_by_sheet: dict[str, Optional[dict[int, dict[int, tuple[Any, str]]]]],
+) -> Optional[tuple[Any, str]]:
+    """Return (raw_value, 'Sheet!Coord') if an explicitly named cell holds a non-numeric value."""
+    for alias in aliases:
+        target = defined_names_lower.get(alias)
+        if target is None:
+            continue
+        sheet_title, row_idx, col_idx = target
+        canon_title, grid = _lookup_sheet_grid(grids_by_sheet, sheet_title)
+        if grid is None:
+            continue
+        cell_entry = grid.get(row_idx, {}).get(col_idx)
+        if cell_entry is None:
+            continue
+        val, coord = cell_entry
+        if not _is_number(val):
+            return (val, f"{canon_title}!{coord}")
     return None
 
 
@@ -409,6 +450,9 @@ class DCFModelValidator:
         self._named_metrics: dict[str, tuple[float, str, str, int, int]] = {}
         self._named_scenario_tg: dict[str, tuple[float, str, str, int, int]] = {}
         self._named_scenario_wacc: dict[str, tuple[float, str, str, int, int]] = {}
+        self._invalid_named_metrics: dict[str, tuple[Any, str]] = {}
+        self._invalid_named_scenario_tg: dict[str, tuple[Any, str]] = {}
+        self._invalid_named_scenario_wacc: dict[str, tuple[Any, str]] = {}
 
         if scan_workbook_formulas is not None:
             # Single lockstep read_only=True pass collecting formulas, errors, sheet grids, and defined names
@@ -428,37 +472,56 @@ class DCFModelValidator:
             defined_names_lower = {name.lower(): target for name, target in raw_defined_names.items()}
             grids_by_sheet: dict[str, Optional[dict[int, dict[int, tuple[Any, str]]]]] = dict(sheet_grids)
 
+            # Accept any finite numeric value for explicitly bound workbook named ranges so
+            # out-of-bounds mistakes (e.g., typing 2.5 for 2.5% or negative WACC/TV) are
+            # caught explicitly rather than silently dropped.
             metric_specs = (
-                ('wacc', NAMED_WACC_ALIASES, lambda v: 0 < v < 1),
-                ('terminal_growth', NAMED_TG_ALIASES, lambda v: -1 < v < 1),
-                ('pv_terminal_value', NAMED_PV_TV_ALIASES, lambda v: v > 0),
-                ('enterprise_value', NAMED_EV_ALIASES, lambda v: v > 0),
+                ('wacc', NAMED_WACC_ALIASES),
+                ('terminal_growth', NAMED_TG_ALIASES),
+                ('pv_terminal_value', NAMED_PV_TV_ALIASES),
+                ('enterprise_value', NAMED_EV_ALIASES),
             )
-            for key, aliases, predicate in metric_specs:
-                resolved = _resolve_named_metric(
-                    defined_names_lower, aliases, grids_by_sheet, predicate
-                )
+            for key, aliases in metric_specs:
+                resolved = _resolve_named_metric(defined_names_lower, aliases, grids_by_sheet)
                 if resolved is not None:
                     self._named_metrics[key] = resolved
+                else:
+                    invalid = _find_invalid_named_metric(defined_names_lower, aliases, grids_by_sheet)
+                    if invalid is not None:
+                        self._invalid_named_metrics[key] = invalid
 
             for scenario in SCENARIO_NAMES:
                 resolved_tg = _resolve_named_metric(
                     defined_names_lower,
                     NAMED_SCENARIO_TG_ALIASES[scenario],
                     grids_by_sheet,
-                    lambda v: -1 < v < 1,
                 )
                 if resolved_tg is not None:
                     self._named_scenario_tg[scenario] = resolved_tg
+                else:
+                    invalid_tg = _find_invalid_named_metric(
+                        defined_names_lower,
+                        NAMED_SCENARIO_TG_ALIASES[scenario],
+                        grids_by_sheet,
+                    )
+                    if invalid_tg is not None:
+                        self._invalid_named_scenario_tg[scenario] = invalid_tg
 
                 resolved_wacc = _resolve_named_metric(
                     defined_names_lower,
                     NAMED_SCENARIO_WACC_ALIASES[scenario],
                     grids_by_sheet,
-                    lambda v: 0 < v < 1,
                 )
                 if resolved_wacc is not None:
                     self._named_scenario_wacc[scenario] = resolved_wacc
+                else:
+                    invalid_wacc = _find_invalid_named_metric(
+                        defined_names_lower,
+                        NAMED_SCENARIO_WACC_ALIASES[scenario],
+                        grids_by_sheet,
+                    )
+                    if invalid_wacc is not None:
+                        self._invalid_named_scenario_wacc[scenario] = invalid_wacc
 
         self.errors: list[str] = []
         self.warnings: list[str] = []
@@ -788,11 +851,34 @@ class DCFModelValidator:
                         seen_wacc_coords.add(w_coord)
                         all_wacc_entries.append((w_val, w_coord))
 
+            # Report any explicitly named terminal growth cells containing non-numeric values
+            seen_invalid_tg_coords: set[str] = set()
+            invalid_tg_items: list[tuple[str, Any, str]] = []
+            for scenario in SCENARIO_NAMES:
+                if scenario in self._invalid_named_scenario_tg:
+                    raw_val, coord = self._invalid_named_scenario_tg[scenario]
+                    invalid_tg_items.append((scenario.title(), raw_val, coord))
+            if 'terminal_growth' in self._invalid_named_metrics:
+                raw_val, coord = self._invalid_named_metrics['terminal_growth']
+                invalid_tg_items.append(('Active', raw_val, coord))
+            for label, raw_val, coord in invalid_tg_items:
+                if coord in seen_invalid_tg_coords:
+                    continue
+                seen_invalid_tg_coords.add(coord)
+                if not (isinstance(raw_val, str) and raw_val in EXCEL_ERRORS):
+                    self.errors.append(
+                        f"CRITICAL: Named terminal growth ({label} at {coord}) has non-numeric value ({raw_val!r})."
+                    )
+
             has_any_tg = bool(self._named_scenario_tg) or named_tg is not None or bool(tg_rows)
             has_any_wacc = bool(all_wacc_entries)
-            if not has_any_tg:
+            has_invalid_named_tg = bool(invalid_tg_items)
+            has_invalid_named_wacc = (
+                'wacc' in self._invalid_named_metrics or bool(self._invalid_named_scenario_wacc)
+            )
+            if not has_any_tg and not has_invalid_named_tg:
                 self.errors.append("Could not locate terminal growth rate on DCF sheet")
-            if not has_any_wacc:
+            if not has_any_wacc and not has_invalid_named_wacc:
                 self.errors.append("Could not locate WACC value on DCF or WACC sheet")
             if not has_any_tg or not has_any_wacc:
                 return
@@ -899,6 +985,15 @@ class DCFModelValidator:
                         f"WACC ({w_val:.2%} at {w_coord}). "
                         "This creates infinite value and is mathematically invalid."
                     )
+                elif tg_val <= -1.0:
+                    self.errors.append(
+                        f"CRITICAL: Terminal growth ({tg_val:.2%} at {tg_coord}) is <= -100% — "
+                        "verify decimal entry (e.g., enter -0.02 for -2%)."
+                    )
+                elif w_val <= 0:
+                    # Non-positive WACC is flagged as CRITICAL in _check_wacc_range();
+                    # avoid emitting a misleading pass checkmark against an invalid discount rate.
+                    continue
                 elif len(pairs) == 1:
                     self.info.append(f"✓ Terminal growth ({tg_val:.2%}) < WACC ({w_val:.2%})")
                 else:
@@ -972,15 +1067,43 @@ class DCFModelValidator:
                             seen_rounded.add(key)
                             wacc_entries.append((val, coord))
 
+            seen_invalid_wacc_coords: set[str] = set()
+            invalid_wacc_items: list[tuple[str, Any, str]] = []
+            if 'wacc' in self._invalid_named_metrics:
+                raw_val, coord = self._invalid_named_metrics['wacc']
+                invalid_wacc_items.append(('DCF_WACC', raw_val, coord))
+            for scenario in SCENARIO_NAMES:
+                if scenario in self._invalid_named_scenario_wacc:
+                    raw_val, coord = self._invalid_named_scenario_wacc[scenario]
+                    invalid_wacc_items.append((scenario.title(), raw_val, coord))
+            for label, raw_val, coord in invalid_wacc_items:
+                if coord in seen_invalid_wacc_coords:
+                    continue
+                seen_invalid_wacc_coords.add(coord)
+                if not (isinstance(raw_val, str) and raw_val in EXCEL_ERRORS):
+                    self.errors.append(
+                        f"CRITICAL: Named WACC ({label} at {coord}) has non-numeric value ({raw_val!r})."
+                    )
+
             if wacc_entries:
                 for wacc, coord in wacc_entries:
-                    if wacc < 0.05 or wacc > 0.20:
+                    if wacc <= 0:
+                        self.errors.append(
+                            f"CRITICAL: Non-positive WACC ({wacc:.2%} at {coord}) — "
+                            "discount rate must be positive."
+                        )
+                    elif wacc >= 1.0:
+                        self.errors.append(
+                            f"CRITICAL: WACC ({wacc:.2%} at {coord}) is >= 100% — "
+                            "verify decimal entry (e.g., enter 0.10 for 10%)."
+                        )
+                    elif wacc < 0.05 or wacc > 0.20:
                         self.warnings.append(
                             f"WACC ({wacc:.2%} at {coord}) is outside typical range (5%-20%). Verify calculation."
                         )
                     else:
                         self.info.append(f"✓ WACC ({wacc:.2%}) in reasonable range")
-            else:
+            elif not invalid_wacc_items:
                 self.errors.append("Could not locate WACC value for range check")
 
         except Exception as e:
@@ -993,13 +1116,47 @@ class DCFModelValidator:
                 # Missing DCF sheet already recorded as error in check_sheet_structure()
                 return
 
+            invalid_tv = self._invalid_named_metrics.get('pv_terminal_value')
+            invalid_ev = self._invalid_named_metrics.get('enterprise_value')
+            if invalid_tv is not None or invalid_ev is not None:
+                if invalid_tv is not None:
+                    raw_val, coord = invalid_tv
+                    self.warnings.append(
+                        f"Named PV_TerminalValue at {coord} has non-numeric value ({raw_val!r}) — "
+                        "skipping TV % of EV ratio check."
+                    )
+                if invalid_ev is not None:
+                    raw_val, coord = invalid_ev
+                    self.warnings.append(
+                        f"Named EnterpriseValue at {coord} has non-numeric value ({raw_val!r}) — "
+                        "skipping TV % of EV ratio check."
+                    )
+                return
+
             named_tv = self._named_metrics.get('pv_terminal_value')
             named_ev = self._named_metrics.get('enterprise_value')
             terminal_value: Optional[float] = named_tv[0] if named_tv is not None else None
             tv_row: Optional[int] = (
-                named_tv[3] if (named_tv is not None and named_tv[2] == 'DCF') else None
+                named_tv[3] if (named_tv is not None and named_tv[2].lower() == 'dcf') else None
             )
             enterprise_value: Optional[float] = named_ev[0] if named_ev is not None else None
+
+            # When explicitly bound named ranges are non-positive, warn directly instead of
+            # falling through to label-scan unrelated rows (e.g., Exit Multiple TV).
+            if enterprise_value is not None and enterprise_value <= 0:
+                ev_loc = f" at {named_ev[1]}" if named_ev is not None else ""
+                self.warnings.append(
+                    f"Enterprise Value ({enterprise_value:,.2f}{ev_loc}) is non-positive — "
+                    "skipping TV % of EV ratio check (verify cash flows, WACC, and terminal growth)."
+                )
+                return
+            if terminal_value is not None and terminal_value <= 0:
+                tv_loc = f" at {named_tv[1]}" if named_tv is not None else ""
+                self.warnings.append(
+                    f"PV of Terminal Value ({terminal_value:,.2f}{tv_loc}) is non-positive — "
+                    "check terminal value assumptions (e.g., terminal growth >= WACC or negative terminal FCF)."
+                )
+                return
 
             if terminal_value is None or enterprise_value is None:
                 pv_tv_candidates: list[tuple[int, float]] = []
