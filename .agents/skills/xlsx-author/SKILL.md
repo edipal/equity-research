@@ -12,7 +12,7 @@ Build institutional-grade Excel (`.xlsx`) workbooks programmatically in Antigrav
 - Default output location:
   - Single-company models: `research/companies/<TICKER>/models/<name>.xlsx`
   - Sector / peer comps: `research/sectors/<sector-slug>/comps/<name>.xlsx`
-  - Ad-hoc outputs: `./out/<name>.xlsx` (create parent directories if needed)
+  - Stock screens / cross-sector schedules: `research/screens/<name>.xlsx` (create parent directories if needed)
 - Always save the generating Python script alongside or in a clearly documented path so the model can be refreshed reproducibly.
 - Return the workspace file path and a formula-audit summary in your final response.
 

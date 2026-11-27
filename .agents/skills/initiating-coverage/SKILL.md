@@ -11,7 +11,7 @@ Create institutional-quality equity research initiation reports through a struct
 
 This skill produces comprehensive first-time coverage reports following institutional standards (JPMorgan, Goldman Sachs, Morgan Stanley format). Tasks are executed individually, each verifying prerequisites before proceeding.
 
-**Default Font**: Times New Roman throughout all documents (unless user specifies otherwise).
+**Default Font**: Calibri throughout all documents (unless user specifies otherwise).
 
 ---
 
@@ -47,11 +47,8 @@ When user requests:
 2. **When user explicitly requests all tasks together:**
    ```
    I understand you'd like to complete the entire initiation report pipeline.
-   Currently, this skill supports executing one task at a time, which allows
-   for better quality control and review at each stage.
-
-   We're working on a seamless end-to-end workflow that will make this process
-   more automated, but for now, we'll need to complete each task separately.
+   This skill executes one task at a time to enforce quality-control gates,
+   verify numbers against primary filings, and allow analyst review at each stage.
 
    Would you like to start with Task 1 (Company Research)?
    ```
@@ -85,11 +82,11 @@ Each task specifies exact deliverables. Do NOT create:
 **Why**: These extras waste context and are not part of the professional workflow.
 
 **What TO deliver**:
-- ✅ Task 1: Research document (.md) — **NOTHING ELSE**
-- ✅ Task 2: Financial model (.xlsx) — **NOTHING ELSE**
-- ✅ Task 3: Valuation analysis (.md) + Excel tabs added to Task 2 file — **NOTHING ELSE**
-- ✅ Task 4: Charts zip file (.zip) — **NOTHING ELSE**
-- ✅ Task 5: Final report (.docx) — **NOTHING ELSE**
+- ✅ Task 1: `research/companies/<TICKER>/reports/<TICKER>_Research_Document_<Date>.md` — **NOTHING ELSE**
+- ✅ Task 2: `research/companies/<TICKER>/models/<TICKER>_Historical_Financials_<Date>.xlsx` (when extracting from filings) and `research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx` — **NOTHING ELSE**
+- ✅ Task 3: `research/companies/<TICKER>/reports/<TICKER>_Valuation_Analysis_<Date>.md` + valuation tabs added to `<TICKER>_Financial_Model_<Date>.xlsx` — **NOTHING ELSE**
+- ✅ Task 4: 25–35 chart PNGs + `chart_index.txt` saved directly in `research/companies/<TICKER>/reports/charts/` — **NOTHING ELSE**
+- ✅ Task 5: `research/companies/<TICKER>/reports/<TICKER>_Initiation_Report_<Date>.docx` — **NOTHING ELSE**
 
 **If a deliverable is not listed above, DO NOT CREATE IT.**
 
@@ -194,7 +191,7 @@ Request 5: Task 5 - Report Assembly (requires ALL previous task outputs)
 - TAM sizing
 - Risk assessment (8-12 risks)
 
-**File name**: `[Company]_Research_Document_[Date].md`
+**File path**: `research/companies/<TICKER>/reports/<TICKER>_Research_Document_<Date>.md`
 
 **⚠️ DELIVER ONLY THIS 1 FILE. NO completion summaries, no extra documents.**
 
@@ -253,9 +250,11 @@ Optional:
   5. **Scenarios** - Bull/Base/Bear comparison table
   6. **DCF Inputs** - Prepared for Task 3 valuation
 
-**File name**: `[Company]_Financial_Model_[Date].xlsx`
+**File paths**:
+- `research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx` (primary deliverable)
+- `research/companies/<TICKER>/models/<TICKER>_Historical_Financials_<Date>.xlsx` (optional intermediate extraction workbook when pulling raw 3–5 yr statements from 10-K filings in Step 1)
 
-**⚠️ DELIVER ONLY THIS 1 FILE. NO completion summaries, no extra documents.**
+**⚠️ DELIVER ONLY THESE MODEL FILE(S). NO completion summaries, no extra documents.**
 
 **⚠️ DO NOT TAKE SHORTCUTS:**
 - ✅ If extracting financials: Extract ALL line items from 3 financial statements (3-5 years)
@@ -326,8 +325,8 @@ Required from model:
 - Key catalysts (3-5)
 
 **Files**:
-- `[Company]_Valuation_Analysis_[Date].md` (written analysis document)
-- Excel tabs added to `[Company]_Financial_Model_[Date].xlsx` (from Task 2)
+- `research/companies/<TICKER>/reports/<TICKER>_Valuation_Analysis_<Date>.md` (written analysis document)
+- Excel tabs added to `research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx` (from Task 2)
   - DCF tab with calculations
   - Sensitivity analysis tab
   - Comparable companies tab
@@ -424,12 +423,11 @@ Required from External Sources:
 
 **Process**:
 1. Verify model and valuation outputs are accessible
-2. Load detailed instructions from references/task4-chart-generation.md
-3. Execute chart generation workflow
-4. Package all charts into a zip file
-5. Deliver zip file
+2. Load detailed instructions from `references/task4-chart-generation.md`
+3. Execute chart generation workflow via Python (`matplotlib`, `seaborn`, `Pillow`)
+4. Save all 25–35 PNG charts and `chart_index.txt` directly into `research/companies/<TICKER>/reports/charts/`
 
-**Output**: 25-35 Professional Chart Files (PNG/JPG, 300 DPI) packaged in zip
+**Output**: 25–35 Professional Chart Files (PNG, 300 DPI) + `chart_index.txt` in `research/companies/<TICKER>/reports/charts/`
 
 **4 MANDATORY Charts** (must be present) ⭐:
 - chart_03: Revenue by product (stacked area)
@@ -450,14 +448,14 @@ Required from External Sources:
 
 **IMPORTANT**: Task 5 embeds ALL charts created (25-35) for visual density (1 chart per 200-300 words).
 
-**File naming**: `chart_01_description.png`, `chart_02_description.png`, etc.
+**File naming**: `research/companies/<TICKER>/reports/charts/chart_01_description.png`, `chart_02_description.png`, etc.
 
-**Deliverable**: `[Company]_Charts_[Date].zip` containing all 25-35 chart files + chart_index.txt
+**Deliverable**: `research/companies/<TICKER>/reports/charts/` containing all 25–35 PNG files + `chart_index.txt`
 
-**⚠️ DELIVER ONLY THIS 1 ZIP FILE. NO completion summaries, no separate chart lists, no extra documents.**
+**⚠️ DELIVER ONLY THE CHARTS DIRECTORY (`chart_*.png` + `chart_index.txt`). NO completion summaries, no extra documents.**
 
 **⚠️ DO NOT TAKE SHORTCUTS:**
-- ✅ Create ALL 25 required charts minimum (specific list provided in task4-chart-generation.md)
+- ✅ Create ALL 25 required charts minimum (specific list provided in `references/task4-chart-generation.md`)
 - ✅ Include ALL 4 mandatory charts:
   - chart_03: Revenue by product (stacked area) ⭐
   - chart_04: Revenue by geography (stacked bar) ⭐
@@ -466,7 +464,7 @@ Required from External Sources:
 - ✅ Optional: Add 1-10 more charts to reach 26-35 total for greater visual density
 - ✅ Generate professional-quality charts at 300 DPI (not low-res placeholders)
 - ✅ Create unique, well-formatted charts for each visualization
-- ✅ Package all charts in zip file with chart index
+- ✅ Save all charts directly in `research/companies/<TICKER>/reports/charts/` with `chart_index.txt`
 - ❌ Do not create only 10-15 charts (minimum is 25)
 - ❌ Do not skip any of the 4 mandatory charts
 - ❌ Do not use low-quality/placeholder images
@@ -480,9 +478,9 @@ Required from External Sources:
   - [ ] chart_32: Valuation football field ⭐
 - [ ] All charts open and display correctly
 - [ ] Charts saved at 300 DPI (print quality)
-- [ ] Chart index created listing all files with categories
-- [ ] All charts packaged in zip file
-- [ ] File naming follows convention: chart_##_description.png
+- [ ] `chart_index.txt` created listing all files with categories
+- [ ] All charts saved directly in `research/companies/<TICKER>/reports/charts/`
+- [ ] File naming follows convention: `chart_##_description.png`
 
 ---
 
@@ -504,8 +502,8 @@ Required from External Sources:
   - DCF, comps, precedent transactions
   - All valuation data
 - **Required**: Chart files from Task 4
-  - Zip file containing all 25-35 PNG/JPG files
-  - Chart index included in zip
+  - `research/companies/<TICKER>/reports/charts/` containing all 25–35 PNG files
+  - `chart_index.txt` present in the charts directory
 
 **⚠️ CRITICAL: DO NOT START THIS TASK UNLESS ALL TASKS 1-4 ARE COMPLETE**
 
@@ -515,7 +513,7 @@ This is the final assembly task. It cannot be completed without all previous wor
 - Task 1: Company research document (6-8K words)
 - Task 2: Financial model with all 6 tabs
 - Task 3: Valuation analysis with price target and recommendation
-- Task 4: Charts zip file with 25-35 charts
+- Task 4: Charts directory (`research/companies/<TICKER>/reports/charts/`) with 25–35 charts
 
 Do not attempt to create placeholder content, substitute missing sections, or assemble an incomplete report. The report requires ALL inputs to be publication-ready.
 
@@ -524,25 +522,24 @@ Do not attempt to create placeholder content, substitute missing sections, or as
 BEFORE STARTING - ALL TASKS MUST BE COMPLETE:
 
 Task 1 Verification:
-- [ ] Company research document exists? (6-8K words)
+- [ ] research/companies/<TICKER>/reports/<TICKER>_Research_Document_<Date>.md exists? (6-8K words)
 - [ ] Management bios complete? (300-400 words × 3-4 execs)
 - [ ] Competitive analysis complete? (5-10 competitors)
 - [ ] Risk assessment complete? (8-12 risks)
 
 Task 2 Verification:
-- [ ] Financial model exists and can be opened?
+- [ ] research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx exists and can be opened?
 - [ ] Model has projections (5 years)?
 - [ ] Scenarios exist (Bull/Base/Bear)?
 
 Task 3 Verification:
-- [ ] Valuation analysis complete?
+- [ ] research/companies/<TICKER>/reports/<TICKER>_Valuation_Analysis_<Date>.md exists?
 - [ ] Price target determined?
 - [ ] Recommendation set? (BUY/HOLD/SELL)
-- [ ] DCF and comps complete?
+- [ ] DCF and comps tabs added to <TICKER>_Financial_Model_<Date>.xlsx?
 
 Task 4 Verification:
-- [ ] Chart zip file exists?
-- [ ] Can extract/access all 25-35 chart files from zip?
+- [ ] research/companies/<TICKER>/reports/charts/ exists with 25-35 PNG files + chart_index.txt?
 - [ ] All 4 mandatory charts present?
   - [ ] Revenue by product (stacked area)
   - [ ] Revenue by geography (stacked bar)
@@ -612,7 +609,7 @@ IF ANY VERIFICATION FAILS: Stop and complete missing task first.
 - Pages 31-40: Valuation analysis
 - Pages 41-50: Appendices
 
-**File name**: `[Company]_Initiation_Report_[Date].docx`
+**File path**: `research/companies/<TICKER>/reports/<TICKER>_Initiation_Report_<Date>.docx`
 
 **⚠️ DELIVER ONLY THIS 1 DOCX FILE. NO executive summaries, no "highlights" documents, no extra files.**
 
@@ -741,20 +738,19 @@ All outputs meet institutional standards from leading investment banks (JPMorgan
 
 ### File Organization
 
-Recommended structure during workflow:
-```
-ProjectFolder/
-├── Task1_Research/
-│   └── [Company]_Research_Document.md
-├── Task2_Model/
-│   └── [Company]_Financial_Model.xlsx
-├── Task3_Valuation/
-│   └── [Company]_Valuation_Analysis.pdf
-├── Task4_Charts/
-│   ├── chart_01.png
-│   └── ... (25-35 files)
-└── Task5_Report/
-    └── [Company]_Initiation_Report.docx
+Canonical workspace structure (aligned with `.agents/rules/research-outputs.md`):
+```text
+research/companies/<TICKER>/
+├── models/
+│   ├── <TICKER>_Historical_Financials_<Date>.xlsx   # Task 2 (optional Step 1 extraction)
+│   └── <TICKER>_Financial_Model_<Date>.xlsx         # Task 2 + Task 3 valuation tabs
+└── reports/
+    ├── <TICKER>_Research_Document_<Date>.md         # Task 1
+    ├── <TICKER>_Valuation_Analysis_<Date>.md        # Task 3
+    ├── charts/                                      # Task 4 (25-35 PNGs + chart_index.txt)
+    │   ├── chart_01_stock_price_performance.png
+    │   └── ...
+    └── <TICKER>_Initiation_Report_<Date>.docx       # Task 5
 ```
 
 ### No End-to-End Execution

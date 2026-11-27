@@ -70,15 +70,15 @@ Each week, generate a forward-looking summary:
 
 ### Step 5: Output
 
-- Excel workbook with calendar view and sortable columns
-- Weekly preview email/note (markdown)
-- Optional: integration with Google Calendar
+Stage all outputs as internal drafts for analyst review (never send emails or push external calendar invites automatically):
+- **Master calendar (default)**: `research/catalysts.md` — structured Markdown calendar table and weekly preview
+- **Optional sortable spreadsheet**: `research/catalysts_YYYY-MM-DD.xlsx` via `xlsx-author` when filtering/sorting across a large coverage universe
 
 ## Important Notes
 
-- Earnings dates shift — verify against company IR pages and Bloomberg/FactSet closer to the date
+- Earnings dates shift — verify against company IR pages, SEC filings, or connected financial MCP servers closer to the date
 - Pre-announce risk: track companies with a history of pre-announcing (positive or negative)
 - Conference attendance lists are valuable — which companies are presenting and which are conspicuously absent?
-- Some catalysts are recurring (monthly industry data) — build a template and auto-populate
-- Color-code by impact level: Red = high impact, Yellow = moderate, Green = routine
+- Some catalysts are recurring (monthly industry data) — maintain a consistent template inside `research/catalysts.md`
+- Tag impact levels consistently (`High` / `Medium` / `Low`) and flag binary event risks clearly
 - Archive past catalysts with the actual outcome — builds pattern recognition over time

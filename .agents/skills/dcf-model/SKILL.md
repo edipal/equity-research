@@ -76,10 +76,11 @@ These constraints apply throughout all DCF model building. Review before startin
 
 Fetch data from MCP servers, user provided data, and the web.
 
-**Data Sources Priority:**
-1. **MCP Servers** (if configured) - Structured financial data from providers like Daloopa
-2. **User-Provided Data** - Historical financials from their research
-3. **Web Search/Fetch** - Current prices, beta, debt and cash when needed
+**Data Sources Priority (aligned with `AGENTS.md`):**
+1. **Connected Financial MCP Servers** (if configured in `.agents/mcp_config.json`, e.g., FactSet, S&P Global/Kensho, Daloopa, LSEG)
+2. **SEC EDGAR Primary Filings** (`10-K`, `10-Q`, `8-K`, `DEF 14A`) and official earnings releases
+3. **User-Provided / Workspace Files** — Historical financials, existing models, or notes under `research/companies/<TICKER>/`
+4. **Verified Web Search** — Latest share price, beta, Treasury yield, and consensus context (cross-verified against filings with source + date)
 
 **Validation Checklist:**
 - Verify net debt vs net cash (critical for valuation)
@@ -614,7 +615,7 @@ B105: =B88/(1+(E48-0.07))      // Doesn't recalculate full DCF
 
 **Why it's wrong:**
 - Can't verify where data came from
-- Fails xlsx skill requirements
+- Fails `xlsx-author` / `openpyxl` institutional modeling requirements
 - Not audit-ready
 - Wastes time fixing later
 
@@ -679,7 +680,7 @@ This vertical layout makes it hard to see the progression across years within ea
 **Why it's wrong:**
 - Can't distinguish inputs from formulas
 - Auditing becomes impossible
-- Violates xlsx skill requirements
+- Violates `xlsx-author` / `openpyxl` formatting requirements
 
 **Instead:** Blue text for ALL hardcoded inputs, black text for ALL formulas, green for sheet links
 
@@ -739,13 +740,13 @@ In addition, be aware of these errors:
 
 ## Excel File Creation
 
-**This skill uses the `xlsx` skill for all spreadsheet operations.** The xlsx skill provides:
-- Standardized formula construction rules
+**This skill pairs with `xlsx-author` and `openpyxl` for all spreadsheet operations.** They provide:
+- Standardized live-formula construction rules
 - Number formatting conventions
-- Automated formula recalculation via `scripts/recalc_xlsx.py` script
+- Automated formula recalculation via `scripts/recalc_xlsx.py`
 - Comprehensive error checking and validation
 
-All Excel files created by this skill must follow xlsx skill requirements, including zero formula errors and proper recalculation.
+All Excel files created by this skill must follow `xlsx-author` and `financial-modeling.md` requirements, including zero formula errors and verified recalculation.
 
 ## Quality Rubric
 
@@ -826,11 +827,11 @@ The script will:
 
 ### Formatting Standards
 
-**IMPORTANT**: Follow the xlsx skill for formula construction rules and number formatting conventions. The DCF skill adds specific visual presentation standards.
+**IMPORTANT**: Follow `xlsx-author` and `openpyxl` conventions for formula construction rules and number formatting. The DCF skill adds specific visual presentation standards.
 
 **Color Scheme - Two Layers**:
 
-**Layer 1: Font Colors (MANDATORY from xlsx skill)**
+**Layer 1: Font Colors (MANDATORY per `xlsx-author` / `financial-modeling.md`)**
 - **Blue text (RGB: 0,0,255)**: ALL hardcoded inputs (stock price, shares, historical data, assumptions)
 - **Black text (RGB: 0,0,0)**: ALL formulas and calculations
 - **Green text (RGB: 0,128,0)**: Links to other sheets (WACC sheet references)
@@ -876,7 +877,7 @@ The script will:
 
 **Borders are mandatory** - models without professional borders are not client-ready.
 
-**Number Formats** (follows xlsx skill standards):
+**Number Formats** (follows `xlsx-author` standards):
 - **Years**: Format as text strings (e.g., "2024" not "2,024")
 - **Percentages**: `0.0%` (one decimal place)
 - **Currency**: `$#,##0` for millions; `$#,##0.00` for per-share - ALWAYS specify units in headers ("Revenue ($mm)")
@@ -886,7 +887,7 @@ The script will:
 
 **Cell Comments (MANDATORY for all hardcoded inputs)**:
 
-Per the xlsx skill, ALL hardcoded values must have cell comments documenting the source. Format: "Source: [System/Document], [Date], [Reference], [URL if applicable]"
+Per `xlsx-author`, ALL hardcoded values must have cell comments documenting the source. Format: "Source: [System/Document], [Date], [Reference], [URL if applicable]"
 
 **CRITICAL**: Add comments AS CELLS ARE CREATED. Do not defer to the end.
 
@@ -1190,8 +1191,8 @@ This approach centralizes scenario logic, making the model easier to audit and m
 
 ### During Model Construction
 
-1. **Build Excel model** using openpyxl with formulas (not hardcoded values)
-2. **Follow xlsx skill conventions** for formula construction and formatting
+1. **Build Excel model** using `openpyxl` with live formulas (not hardcoded values)
+2. **Follow `xlsx-author` conventions** for formula construction and formatting
 3. **Apply fill colors only if requested** by user or if specific brand guidelines are provided
 
 ### Before Delivering Model (MANDATORY)
@@ -1221,18 +1222,19 @@ This approach centralizes scenario logic, making the model easier to audit and m
 
 ### Available Data Sources
 
-- **MCP servers**: If configured (Daloopa for historical financials)
-- **Web search/fetch**: For current stock prices, beta, and market data
-- **User-provided data**: Historical financials, consensus estimates
-- **Manual extraction**: SEC EDGAR filings as fallback
+1. **Connected financial MCP servers**: If configured in `.agents/mcp_config.json` (FactSet, S&P Global/Kensho, Daloopa, LSEG)
+2. **SEC EDGAR primary filings**: `10-K`, `10-Q`, `8-K`, `DEF 14A`, and official earnings releases
+3. **User-provided / workspace files**: Historical financials, existing models, and consensus datasets
+4. **Verified web search**: Current stock prices, beta, Treasury yield, and market data (cross-verified against filings)
 
 ## Final Output Checklist
 
 Before delivering DCF model:
 
 **Required:**
-- Run `python3 scripts/recalc_xlsx.py model.xlsx 30` until status is "success" (zero formula errors)
-- Two sheets: DCF (with sensitivity at bottom), WACC
+- Run `python3 scripts/recalc_xlsx.py research/companies/<TICKER>/models/<TICKER>_DCF_YYYY-MM-DD.xlsx 30` until status is `"success"` (zero formula errors, zero uncached formulas)
+- Run `python3 .agents/skills/dcf-model/scripts/validate_dcf.py research/companies/<TICKER>/models/<TICKER>_DCF_YYYY-MM-DD.xlsx` until status is `"PASS"`
+- Two sheets: `DCF` (with sensitivity tables at bottom), `WACC`
 - Font colors: Blue=inputs, Black=formulas, Green=sheet links
 - Cell comments on ALL hardcoded inputs
 - Sensitivity tables fully populated with formulas
@@ -1243,4 +1245,4 @@ Before delivering DCF model:
 - Terminal value 50-70% of EV
 - Terminal growth < WACC
 - Tax rate 21-28%
-- File naming: `[Ticker]_DCF_Model_[Date].xlsx`
+- Default output path: `research/companies/<TICKER>/models/<TICKER>_DCF_YYYY-MM-DD.xlsx`

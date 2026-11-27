@@ -414,7 +414,7 @@ Create charts focusing on QUARTERLY TRENDS and WHAT'S NEW.
 
 ### Step 13: Create DOCX Report
 
-Use DOCX skill to create 8-12 page report.
+Use `python-docx` to create the 8-12 page Word report (saved under `research/companies/<TICKER>/reports/`, or draft as Markdown under `research/companies/<TICKER>/notes/` if requested).
 
 See [report-structure.md](report-structure.md) for complete page-by-page templates and formatting requirements.
 

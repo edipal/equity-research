@@ -202,9 +202,11 @@ Understanding where each chart's data comes from:
 
 ### Step 1: Set Up Environment
 
-**Install required libraries:**
+**Install required libraries (root `requirements.txt`):**
 ```bash
-pip install matplotlib seaborn pandas numpy plotly
+pip install -r requirements.txt
+# Default chart stack: matplotlib, seaborn, Pillow, pandas, numpy
+# Optional (only if interactive HTML charts are explicitly requested): pip install plotly
 ```
 
 **Create Python script header:**
@@ -834,7 +836,7 @@ A successful chart package should:
 9. Cover all key financial metrics and analyses
 10. Tell a visual story complementing the written analysis
 11. Be accurate and auditable to source data (model/valuation)
-12. All charts packaged in zip file with chart index
+12. All charts saved directly in `research/companies/<TICKER>/reports/charts/` alongside `chart_index.txt`
 
 **Remember**: Task 5 will embed ALL charts created (25-35) throughout the report for visual density.
 
@@ -886,12 +888,12 @@ After completing Task 4, deliverables include:
 - PNG format (lossless quality)
 - Ready for immediate Word embedding
 
-**Final Step: Package All Charts**
+**Final Step: Save All Charts to the Coverage Charts Directory**
 
-Create a zip file containing all chart files and the chart index:
+Save all chart PNGs and `chart_index.txt` directly into `research/companies/<TICKER>/reports/charts/` (no zip archive needed):
 
-```
-[Company]_Charts_[Date].zip
+```text
+research/companies/<TICKER>/reports/charts/
 ├── chart_01_stock_price_performance.png
 ├── chart_02_revenue_growth_trajectory.png
 ├── chart_03_revenue_by_product_stacked_area.png ⭐
@@ -904,17 +906,17 @@ Create a zip file containing all chart files and the chart index:
 └── chart_index.txt
 ```
 
-**Example**: `Tesla_Charts_2024-10-28.zip`
+**Example**: `research/companies/TSLA/reports/charts/`
 
-**Why this matters**: Task 5 will embed ALL charts created (25-35) throughout the report. The report requires visual density (1 chart per 200-300 words), so all charts serve a purpose—either for specific analytical sections or for visual storytelling and page density.
-- Verify all 25-35 charts are present
-- Extract charts for Task 5 (Report Assembly)
+**Why this matters**: Task 5 embeds ALL charts created (25–35) directly from `research/companies/<TICKER>/reports/charts/` throughout the report. The report requires visual density (1 chart per 200–300 words), so all charts serve a purpose—either for specific analytical sections or for visual storytelling and page density.
+- Verify all 25–35 charts are present and readable
+- Verify `chart_index.txt` lists every chart filename and section mapping
 
 ---
 
 ## Next Steps
 
-After completing Task 4, the zip file will be used for:
-- **Task 5 (Report Assembly)**: Extract charts and embed all into the final DOCX report at appropriate locations throughout the document
+After completing Task 4, the charts directory will be used directly by:
+- **Task 5 (Report Assembly)**: Embed all PNGs from `research/companies/<TICKER>/reports/charts/` into the final DOCX report at appropriate locations throughout the document
 
 The 4 mandatory charts are critical for the valuation and financial analysis sections of the report.

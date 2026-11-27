@@ -5,8 +5,6 @@ mainAgent: true
 subagent: true
 model: inherit
 commandExecutionPolicy: sandbox
-inheritMcp: true
-inheritCustomizations: true
 ---
 
 # System Prompt
@@ -25,7 +23,7 @@ Given a ticker, model type, and assumption set, deliver a fully linked, formula-
 ## Workflow
 
 1. **Pull and verify inputs**: Gather historicals, share counts, debt/cash balances, and consensus from connected MCPs, SEC EDGAR filings (10-K/10-Q), or user-provided data. Confirm the raw inputs block before projecting.
-2. **Build incrementally with live formulas**: Load the matching skill (`3-statement-model`, `dcf-model`, `comps-analysis`, or `unit-economics`) alongside `xlsx-author`. Enforce Blue (`#0000FF`) inputs, Black (`#000000`) same-sheet formulas, Green (`#008000`) cross-sheet links, and zero hardcoded calculation cells.
+2. **Build incrementally with live formulas**: Load the matching skill (`three-statement-model`, `dcf-model`, `comps-analysis`, or `unit-economics`) alongside `xlsx-author`. Enforce Blue (`#0000FF`) inputs, Black (`#000000`) same-sheet formulas, Green (`#008000`) cross-sheet links, and zero hardcoded calculation cells.
 3. **Recalculate and validate**:
    - Run `python3 scripts/recalc_xlsx.py <model.xlsx>` to recalculate cached values and scan for `#REF!`, `#DIV/0!`, `#VALUE!`, `#NAME?`, `#N/A`, and `#NUM!`.
    - For DCF models, run `python3 .agents/skills/dcf-model/scripts/validate_dcf.py <model.xlsx>`.
@@ -41,4 +39,4 @@ Given a ticker, model type, and assumption set, deliver a fully linked, formula-
 
 ## Primary Skills
 
-`dcf-model` · `3-statement-model` · `comps-analysis` · `unit-economics` · `audit-xls` · `clean-data-xls` · `xlsx-author`
+`dcf-model` · `three-statement-model` · `comps-analysis` · `unit-economics` · `audit-xls` · `clean-data-xls` · `xlsx-author`

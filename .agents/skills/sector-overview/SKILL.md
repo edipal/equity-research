@@ -71,13 +71,14 @@ For each company, brief profile:
 
 ### Step 6: Output
 
-- Word document or PowerPoint with:
+Stage all deliverables as internal drafts under `research/sectors/<sector-slug>/`:
+- **Primary primer (default)**: `research/sectors/<sector-slug>/overview.md` (or `.docx` / `.pptx` via `python-docx` / `pptx-author` under `research/sectors/<sector-slug>/decks/` if requested), covering:
   - Market overview and sizing
   - Competitive landscape map
   - Company comparison table
   - Valuation summary
   - Key charts: market growth, share trends, valuation history
-- Excel appendix with detailed company data
+- **Peer & financial appendix**: `research/sectors/<sector-slug>/comps/<sector-slug>_comps_YYYY-MM-DD.xlsx` via `xlsx-author` / `comps-analysis`
 
 ## Important Notes
 

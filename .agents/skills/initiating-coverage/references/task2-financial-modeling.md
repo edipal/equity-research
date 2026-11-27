@@ -85,8 +85,8 @@ This document provides step-by-step instructions for executing Task 2 (Financial
    - Navigate to Item 8: Financial Statements and Supplementary Data
 
 2. **Create Historical Financials Excel File**
-   - File name: `[Company]_Historical_Financials_[Date].xlsx`
-   - This file will be the foundation for the model
+   - File path: `research/companies/<TICKER>/models/<TICKER>_Historical_Financials_<Date>.xlsx`
+   - This file serves as the structured historical foundation for the model
 
 3. **Extract Income Statement (3-5 years)**
    - Create Sheet 1: "Historical Income Statement"
@@ -610,9 +610,9 @@ Cumulative FCF 2025-2029 ($M)   $XXX        $XXX        $XXX
 ## File Naming Convention
 
 Save the financial model as:
-`[Company]_Financial_Model_[Date].xlsx`
+`research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx`
 
-Example: `Tesla_Financial_Model_2024-10-27.xlsx`
+Example: `research/companies/TSLA/models/TSLA_Financial_Model_2024-10-27.xlsx`
 
 ---
 

@@ -2,23 +2,64 @@
 """Recalculate Excel workbook formulas via LibreOffice and scan for formula errors.
 
 Usage:
-    python3 scripts/recalc_xlsx.py <path-to-workbook.xlsx> [timeout_seconds]
+    python3 scripts/recalc_xlsx.py <path-to-workbook.xlsx> [timeout_seconds] [--allow-unrecalculated]
 
-Outputs a JSON report to stdout and exits 0 if zero formula errors are found,
-or non-zero if formula errors or execution failures occur.
+Outputs a JSON report to stdout and exits:
+    0 - status "success" (zero errors, all formula cells verified or --allow-unrecalculated)
+    1 - status "errors_found" or "error" (formula errors, missing file, LibreOffice failure/timeout)
+    2 - status "unverified" or CLI usage error (uncached formulas without LibreOffice recalculation)
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import shutil
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
 EXCEL_ERRORS = ("#REF!", "#DIV/0!", "#VALUE!", "#NAME?", "#N/A", "#NUM!", "#NULL!")
+
+
+class JsonArgumentParser(argparse.ArgumentParser):
+    """ArgumentParser that emits structured JSON errors instead of raw tracebacks."""
+
+    def error(self, message: str) -> None:  # pragma: no cover - exercised via CLI tests
+        print(json.dumps({"status": "error", "message": message}, indent=2))
+        raise SystemExit(2)
+
+
+def positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"timeout must be an integer, got '{value}'") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError(f"timeout must be > 0, got {parsed}")
+    return parsed
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = JsonArgumentParser(
+        prog="recalc_xlsx.py",
+        description="Recalculate Excel workbook formulas via LibreOffice and scan for formula errors.",
+    )
+    parser.add_argument("path", help="Path to Excel workbook (.xlsx, .xlsm, .xls)")
+    parser.add_argument(
+        "timeout",
+        nargs="?",
+        default=30,
+        type=positive_int,
+        help="LibreOffice recalculation timeout in seconds (default: 30)",
+    )
+    parser.add_argument(
+        "--allow-unrecalculated",
+        action="store_true",
+        help="Allow exit 0 when LibreOffice is unavailable and formulas lack cached values.",
+    )
+    return parser
 
 
 def find_soffice() -> str | None:
@@ -29,14 +70,44 @@ def find_soffice() -> str | None:
     return None
 
 
-def recalculate_with_libreoffice(xlsx_path: Path, timeout: int) -> tuple[bool, str | None]:
+def atomic_copy(src: Path, dst: Path) -> None:
+    """Atomically replace dst with a copy of src via a temp file in dst.parent."""
+    fd, tmp_name = tempfile.mkstemp(prefix=".recalc_", suffix=dst.suffix or ".xlsx", dir=dst.parent)
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        shutil.copy2(src, tmp_path)
+        os.replace(tmp_path, dst)
+    except Exception:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+        raise
+
+
+def recalculate_with_libreoffice(
+    xlsx_path: Path, timeout: int
+) -> tuple[bool, str, Path, str | None]:
+    """Recalculate workbook with LibreOffice in an isolated user profile.
+
+    Returns:
+        (recalculated, lo_status, target_path, message)
+        where lo_status is one of: "ok", "missing", "failed".
+    """
     soffice = find_soffice()
     if not soffice:
-        return False, "LibreOffice (soffice) not found on PATH; scanning existing cached values only."
+        return (
+            False,
+            "missing",
+            xlsx_path,
+            "LibreOffice (soffice) not found on PATH; scanning existing cached values only.",
+        )
 
     with tempfile.TemporaryDirectory(prefix="xlsx_recalc_") as tmpdir:
+        tmp_path = Path(tmpdir)
+        profile_uri = (tmp_path / "lo_profile").as_uri()
         cmd = [
             soffice,
+            f"-env:UserInstallation={profile_uri}",
             "--headless",
             "--norestore",
             "--nolockcheck",
@@ -55,22 +126,57 @@ def recalculate_with_libreoffice(xlsx_path: Path, timeout: int) -> tuple[bool, s
                 check=False,
             )
         except subprocess.TimeoutExpired:
-            return False, f"LibreOffice timed out after {timeout}s."
+            return False, "failed", xlsx_path, f"LibreOffice timed out after {timeout}s."
+        except OSError as exc:
+            return False, "failed", xlsx_path, f"Failed to execute LibreOffice: {exc}"
 
-        recalculated = Path(tmpdir) / xlsx_path.name
+        recalculated = tmp_path / f"{xlsx_path.stem}.xlsx"
         if proc.returncode != 0 or not recalculated.exists():
             stderr = (proc.stderr or proc.stdout or "").strip()
-            return False, f"LibreOffice conversion failed (rc={proc.returncode}): {stderr}"
+            return (
+                False,
+                "failed",
+                xlsx_path,
+                f"LibreOffice conversion failed (rc={proc.returncode}): {stderr}",
+            )
 
-        shutil.copy2(recalculated, xlsx_path)
-        return True, None
+        output_path = (
+            xlsx_path if xlsx_path.suffix.lower() == ".xlsx" else xlsx_path.with_suffix(".xlsx")
+        )
+        atomic_copy(recalculated, output_path)
+        note = None
+        if output_path != xlsx_path:
+            note = (
+                f"Converted non-.xlsx input '{xlsx_path.name}' to '{output_path.name}' "
+                "without overwriting the original file."
+            )
+        return True, "ok", output_path, note
+
+
+def detect_cell_error(cell_v, val_f) -> str | None:
+    """Return Excel error token for a cell without false-positiving on prose text."""
+    val_v = cell_v.value
+
+    # 1. Cached error value (openpyxl error data_type or exact Excel error token)
+    if getattr(cell_v, "data_type", None) == "e":
+        return str(val_v) if val_v is not None else "#ERROR!"
+    if isinstance(val_v, str) and val_v in EXCEL_ERRORS:
+        return val_v
+
+    # 2. Embedded error token inside a formula string (e.g., =SUM(A1,#REF!))
+    if isinstance(val_f, str) and val_f.startswith("="):
+        for err in EXCEL_ERRORS:
+            if err in val_f:
+                return err
+
+    return None
 
 
 def scan_workbook(xlsx_path: Path) -> dict:
     try:
         import openpyxl
     except ImportError as exc:
-        raise SystemExit(
+        print(
             json.dumps(
                 {
                     "status": "error",
@@ -79,71 +185,125 @@ def scan_workbook(xlsx_path: Path) -> dict:
                 indent=2,
             )
         )
+        raise SystemExit(1)
 
     wb_formulas = openpyxl.load_workbook(xlsx_path, data_only=False)
     wb_values = openpyxl.load_workbook(xlsx_path, data_only=True)
 
     total_formulas = 0
+    uncached_formulas = 0
     error_summary: dict[str, dict] = {}
     total_errors = 0
 
-    for sheet_name in wb_formulas.sheetnames:
-        ws_f = wb_formulas[sheet_name]
-        ws_v = wb_values[sheet_name]
+    try:
+        for sheet_name in wb_formulas.sheetnames:
+            ws_f = wb_formulas[sheet_name]
+            ws_v = wb_values[sheet_name]
 
-        for row in ws_f.iter_rows():
-            for cell_f in row:
-                val_f = cell_f.value
-                val_v = ws_v[cell_f.coordinate].value
+            for row in ws_f.iter_rows():
+                for cell_f in row:
+                    val_f = cell_f.value
+                    cell_v = ws_v[cell_f.coordinate]
+                    val_v = cell_v.value
 
-                if isinstance(val_f, str) and val_f.startswith("="):
-                    total_formulas += 1
+                    is_formula = isinstance(val_f, str) and val_f.startswith("=")
+                    if is_formula:
+                        total_formulas += 1
+                        if val_v is None:
+                            uncached_formulas += 1
 
-                for candidate in (val_v, val_f):
-                    if isinstance(candidate, str) and candidate in EXCEL_ERRORS:
+                    err = detect_cell_error(cell_v, val_f)
+                    if err is not None:
                         total_errors += 1
-                        bucket = error_summary.setdefault(
-                            candidate, {"count": 0, "locations": []}
-                        )
+                        bucket = error_summary.setdefault(err, {"count": 0, "locations": []})
                         bucket["count"] += 1
                         bucket["locations"].append(f"{sheet_name}!{cell_f.coordinate}")
-                        break
+    finally:
+        wb_formulas.close()
+        wb_values.close()
 
     return {
         "total_formulas": total_formulas,
+        "uncached_formulas": uncached_formulas,
         "total_errors": total_errors,
         "error_summary": error_summary,
     }
 
 
-def main() -> int:
-    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
-        print(__doc__.strip())
-        return 0 if len(sys.argv) >= 2 else 2
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
 
-    xlsx_path = Path(sys.argv[1]).resolve()
-    timeout = int(sys.argv[2]) if len(sys.argv) >= 3 else 30
-
+    xlsx_path = Path(args.path).resolve()
     if not xlsx_path.exists():
         print(json.dumps({"status": "error", "message": f"File not found: {xlsx_path}"}, indent=2))
         return 1
 
-    recalculated, warning = recalculate_with_libreoffice(xlsx_path, timeout)
-    scan = scan_workbook(xlsx_path)
+    recalculated, lo_status, target_path, note = recalculate_with_libreoffice(
+        xlsx_path, args.timeout
+    )
+
+    if lo_status == "failed":
+        result: dict = {
+            "status": "error",
+            "file": str(target_path),
+            "recalculated_with_libreoffice": False,
+            "message": note,
+        }
+        print(json.dumps(result, indent=2))
+        return 1
+
+    if target_path.suffix.lower() not in (".xlsx", ".xlsm", ".xltx", ".xltm"):
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "file": str(target_path),
+                    "recalculated_with_libreoffice": False,
+                    "message": (
+                        f"Cannot scan '{target_path.suffix}' directly with openpyxl when "
+                        "LibreOffice is unavailable. Convert to .xlsx first."
+                    ),
+                },
+                indent=2,
+            )
+        )
+        return 1
+
+    scan = scan_workbook(target_path)
+
+    if scan["total_errors"] > 0:
+        status = "errors_found"
+        exit_code = 1
+    elif not recalculated and scan["uncached_formulas"] > 0 and not args.allow_unrecalculated:
+        status = "unverified"
+        exit_code = 2
+    else:
+        status = "success"
+        exit_code = 0
 
     result = {
-        "status": "success" if scan["total_errors"] == 0 else "errors_found",
-        "file": str(xlsx_path),
+        "status": status,
+        "file": str(target_path),
         "recalculated_with_libreoffice": recalculated,
         "total_errors": scan["total_errors"],
         "total_formulas": scan["total_formulas"],
+        "uncached_formulas": scan["uncached_formulas"],
         "error_summary": scan["error_summary"],
     }
-    if warning:
-        result["warning"] = warning
+    if target_path != xlsx_path:
+        result["source_file"] = str(xlsx_path)
+    if note:
+        result["warning"] = note
+    if status == "unverified":
+        result["message"] = (
+            f"Found {scan['uncached_formulas']} uncached formula(s) and LibreOffice "
+            "recalculation did not run. Install LibreOffice or pass --allow-unrecalculated "
+            "only if you accept unverified cached values."
+        )
 
     print(json.dumps(result, indent=2))
-    return 0 if scan["total_errors"] == 0 else 1
+    return exit_code
 
 
 if __name__ == "__main__":

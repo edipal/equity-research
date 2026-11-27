@@ -440,9 +440,9 @@ A successful Task 1 completion should deliver:
 
 Save the output as:
 
-`[Company]_Research_Document_[Date].md`
+`research/companies/<TICKER>/reports/<TICKER>_Research_Document_<Date>.md`
 
-Example: `Tesla_Research_Document_2024-10-27.md`
+Example: `research/companies/TSLA/reports/TSLA_Research_Document_2024-10-27.md`
 
 ---
 

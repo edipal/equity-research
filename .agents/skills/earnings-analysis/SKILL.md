@@ -177,9 +177,9 @@ Verify content, formatting, accuracy, and timeliness before delivery.
 
 ## Output Specification
 
-**Primary Deliverable**: DOCX report (8-12 pages)
-**File Name**: `[Company]_Q[Quarter]_[Year]_Earnings_Update.docx`
-**Example**: `Nike_Q2_FY24_Earnings_Update.docx`
+**Primary Deliverable**: DOCX report (8-12 pages) or Markdown earnings note
+**Default Workspace Path**: `research/companies/<TICKER>/notes/<TICKER>_Q[Quarter]FY[Year]_Earnings_YYYY-MM-DD.md` (or `research/companies/<TICKER>/reports/<TICKER>_Q[Quarter]FY[Year]_Earnings_YYYY-MM-DD.docx` for full Word reports)
+**Example**: `research/companies/NKE/reports/NKE_Q2FY24_Earnings_2024-01-05.docx`
 
 **Contents:**
 - Page 1: Summary with rating, price target, key takeaways
@@ -222,8 +222,8 @@ Examples of good/bad headlines, tips for success, common mistakes to avoid, and 
 ## Dependencies
 
 **Required:**
-- Python (matplotlib, pandas, seaborn) for chart generation
-- DOCX skill for report creation
+- Python (`matplotlib`, `pandas`, `seaborn`) for chart generation
+- `python-docx` for `.docx` report creation
 
 **Optional:**
-- XLS skill for model updates (not required for earnings updates)
+- `xlsx-author` / `openpyxl` for model updates saved under `research/companies/<TICKER>/models/` (not required for earnings updates)

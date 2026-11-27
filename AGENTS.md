@@ -34,7 +34,7 @@ Use the matching skill (or invoke directly with `/<skill-name>`):
 ### Valuation, Modeling & Unit Economics
 - `/comps-analysis` — Comparable company analysis (operating benchmarks, trading multiples, quartile statistics)
 - `/dcf-model` — Institutional DCF model (WACC build, FCF projections, terminal value cross-checked vs. comps, 5×5 sensitivities)
-- `/3-statement-model` — Integrated 3-statement financial model (IS, BS, CF, working capital, debt schedule)
+- `/three-statement-model` — Integrated 3-statement financial model (IS, BS, CF, working capital, debt schedule)
 - `/unit-economics` — SaaS/subscription & recurring-revenue unit economics (ARR bridge, cohorts, NDR/GRR, LTV/CAC, Rule of 40)
 
 ### Quality Assurance & Deliverable Authoring
@@ -49,7 +49,7 @@ For multi-skill workflows, select a primary agent (`/agents` or `agy --agent <na
 - `equity-analyst` — Lead analyst for full-lifecycle single-name coverage and subagent coordination
 - `earnings-reviewer` — End-to-end post-earnings update (`earnings-analysis` → `model-update` → `audit-xls` → `morning-note`)
 - `market-researcher` — Sector & thematic primer (`sector-overview` → `competitive-analysis` → `comps-analysis` → `idea-generation`)
-- `model-builder` — Scratch financial model build (`3-statement-model` / `dcf-model` / `comps-analysis` / `unit-economics` → `audit-xls`)
+- `model-builder` — Scratch financial model build (`three-statement-model` / `dcf-model` / `comps-analysis` / `unit-economics` → `audit-xls`)
 
 ## Data Source Hierarchy
 

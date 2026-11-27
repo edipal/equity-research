@@ -99,10 +99,9 @@ For each idea that passes the screen, present:
 
 ### Step 5: Output
 
-- Shortlist of 5-10 ideas with one-page summaries
-- Screening criteria and methodology documented
-- Comparison table across all ideas
-- Prioritized list: which ideas to research first
+Save as an internal draft under `research/screens/`:
+- **Primary screen memo**: `research/screens/YYYY-MM-DD_<screen-name>.md` — shortlist of 5–10 ideas with one-page summaries, screening criteria/methodology, cross-idea comparison table, and prioritized research queue
+- **Optional quantitative screen export**: `research/screens/YYYY-MM-DD_<screen-name>.xlsx` via `xlsx-author` with live screening formulas and citations
 
 ## Important Notes
 

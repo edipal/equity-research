@@ -12,7 +12,7 @@ Build clean, institutional-grade PowerPoint (`.pptx`) presentations programmatic
 - Default output location:
   - Single-company pitch / coverage decks: `research/companies/<TICKER>/reports/<name>.pptx`
   - Sector / competitive landscape decks: `research/sectors/<sector-slug>/decks/<name>.pptx`
-  - Ad-hoc outputs: `./out/<name>.pptx` (create parent directories if needed)
+  - Thematic / cross-sector pitch decks: `research/screens/<name>.pptx` (create parent directories if needed)
 - Return the workspace file path and a slide-by-slide summary in your final response.
 
 ## How to Build the Deck

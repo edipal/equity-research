@@ -1,19 +1,24 @@
 ---
 name: audit-xls
-description: Audit a spreadsheet for formula accuracy, errors, and common mistakes. Scopes to a selected range, a single sheet, or the entire model (including financial-model integrity checks like BS balance, cash tie-out, and logic sanity). Triggers on "audit this sheet", "check my formulas", "find formula errors", "QA this spreadsheet", "sanity check this", "debug model", "model check", "model won't balance", "something's off in my model", "model review".
+description: Audit a spreadsheet workbook for formula accuracy, errors, and common mistakes. Scopes to a specified cell range, a single named sheet, or the entire model (including financial-model integrity checks like BS balance, cash tie-out, and logic sanity). Triggers on "audit this sheet", "check my formulas", "find formula errors", "QA this spreadsheet", "sanity check this", "debug model", "model check", "model won't balance", "something's off in my model", "model review".
 ---
 
 # Audit Spreadsheet
 
-Audit formulas and data for accuracy and mistakes. Scope determines depth — from quick formula checks on a selection up to full financial-model integrity audits.
+Audit formulas and data in `.xlsx` workbooks (or exported Google Sheets) for accuracy and mistakes. Scope determines depth — from quick formula checks on a target range up to full financial-model integrity audits.
+
+## Execution in Antigravity
+
+1. Run `python3 scripts/recalc_xlsx.py <path-to-workbook.xlsx>` first to recalculate cached values via LibreOffice (when installed) and flag formula errors or uncached formula cells.
+2. Inspect formulas (`data_only=False`) and cached values (`data_only=True`) programmatically with Python (`openpyxl`) across the requested file, sheet(s), and cell range(s).
 
 ## Step 1: Determine scope
 
-If the user already gave a scope, use it. Otherwise **ask them**:
+If the user already gave a workbook path and scope, use it. Otherwise **ask them**:
 
-> What scope do you want me to audit?
-> - **selection** — just the currently selected range
-> - **sheet** — the current active sheet only
+> Which workbook and scope do you want me to audit?
+> - **range** — a specified cell range on a named sheet (e.g., `DCF!A1:M60`)
+> - **sheet** — a single named sheet in the `.xlsx` workbook
 > - **model** — the whole workbook, including financial-model integrity checks (BS balance, cash tie-out, roll-forwards, logic sanity)
 
 The **model** scope is the deepest — use it for DCF, LBO, 3-statement, merger, comps, or any integrated financial model before sending to a client or IC.
@@ -26,7 +31,7 @@ Run these regardless of scope:
 
 | Check | What to look for |
 |---|---|
-| Formula errors | `#REF!`, `#VALUE!`, `#N/A`, `#DIV/0!`, `#NAME?` |
+| Formula errors | `#REF!`, `#VALUE!`, `#N/A`, `#DIV/0!`, `#NAME?`, `#NUM!`, `#NULL!` |
 | Hardcodes inside formulas | `=A1*1.05` — the `1.05` should be a cell reference |
 | Inconsistent formulas | A formula that breaks the pattern of its neighbors in a row/column |
 | Off-by-one ranges | `SUM`/`AVERAGE` that misses the first or last row |

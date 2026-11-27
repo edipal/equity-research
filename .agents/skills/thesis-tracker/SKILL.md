@@ -51,17 +51,15 @@ Track upcoming catalysts:
 
 ### Step 5: Output
 
-Thesis summary suitable for:
-- Morning meeting discussion
-- Portfolio review
-- Risk committee presentation
+Save and maintain the living thesis as a draft in:
+- **Default path**: `research/companies/<TICKER>/thesis.md` (with optional `.docx` export under `research/companies/<TICKER>/reports/` if requested)
 
-Format: Concise markdown or Word doc with the scorecard, recent updates, and current conviction level.
+Format: Concise structured Markdown suitable for morning meeting discussion, portfolio review, or risk committee prep — containing the core thesis, scorecard, chronological update log, catalyst table, and current conviction level.
 
 ## Important Notes
 
 - A thesis should be falsifiable — if nothing could disprove it, it's not a thesis
 - Track disconfirming evidence as rigorously as confirming evidence
 - Review theses at least quarterly, even when nothing dramatic has happened
-- If the user manages multiple positions, offer to do a full portfolio thesis review
-- Store thesis data in a structured format so it can be referenced across sessions
+- If the user manages multiple positions, offer to do a full portfolio thesis review across `research/companies/*/thesis.md`
+- Stage updates as internal drafts in `research/` for human analyst review

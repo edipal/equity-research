@@ -5,7 +5,7 @@ description: Clean up messy spreadsheet data — trim whitespace, fix inconsiste
 
 # Clean Data
 
-Clean messy data in the active sheet or a specified range.
+Clean messy data in a target `.xlsx`/`.csv` file and sheet (or a specified Google Sheet range when `gsheets` is connected).
 
 ## Environment
 
@@ -16,8 +16,8 @@ Clean messy data in the active sheet or a specified range.
 
 ### Step 1: Scope
 
-- If a range is given (e.g. `A1:F200`), use it
-- Otherwise use the full used range of the active sheet
+- Confirm the target `.xlsx`/`.csv` file path and sheet name (or Google Sheet ID and tab name when `gsheets` is connected)
+- If a cell range is given (e.g., `Sheet1!A1:F200`), scope to that range; otherwise use the full used range of the specified sheet
 - Profile each column: detect its dominant type (text / number / date) and identify outliers
 
 ### Step 2: Detect issues
@@ -32,7 +32,7 @@ Clean messy data in the active sheet or a specified range.
 | Blanks | empty cells in otherwise-populated columns |
 | Mixed types | a column that's 98% numbers but has 3 text entries |
 | Encoding | mojibake (`Ã©`, `â€™`), non-printing characters |
-| Errors | `#REF!`, `#N/A`, `#VALUE!`, `#DIV/0!` |
+| Errors | `#REF!`, `#N/A`, `#VALUE!`, `#DIV/0!`, `#NAME?`, `#NUM!`, `#NULL!` |
 
 ### Step 3: Propose fixes
 

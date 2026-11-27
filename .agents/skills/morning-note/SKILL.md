@@ -75,8 +75,9 @@ If a coverage company reported, provide a quick reaction:
 
 ### Step 4: Output
 
-- Markdown text for email/Slack distribution
-- Word document if formal distribution is needed
+Stage as an internal draft for human analyst review (never email, post to Slack, or distribute externally):
+- **Default path**: `research/morning-notes/YYYY-MM-DD.md` (concise Markdown draft ready for human review/copy-paste)
+- **Optional Word export**: `research/morning-notes/YYYY-MM-DD.docx` via `python-docx` only if requested
 - Keep to 1 page max — PMs and traders won't read more
 
 ## Important Notes
@@ -85,5 +86,5 @@ If a coverage company reported, provide a quick reaction:
 - Lead with the most important thing — don't bury the headline
 - "No news" is a valid morning note — say "nothing material overnight, maintaining positioning"
 - Distinguish between actionable events (earnings, M&A) and noise (minor analyst notes, non-events)
-- Time-stamp your takes — if you're writing at 6am, note that pre-market may change by open
+- Time-stamp your takes and cite sources/dates — if you're writing pre-market, note that pricing may move by open
 - If you're wrong, own it in the next morning note — credibility matters more than being right every time

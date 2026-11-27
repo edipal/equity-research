@@ -58,8 +58,8 @@ class DCFModelValidator:
         return results
     
     def check_sheet_structure(self):
-        """Verify required sheets exist"""
-        required_sheets = ['DCF', 'WACC', 'Sensitivity']
+        """Verify required sheets exist (2-sheet DCF + WACC spec with inline or separate sensitivity)."""
+        required_sheets = ['DCF', 'WACC']
         sheet_names = self.workbook_values.sheetnames
 
         for sheet in required_sheets:
@@ -68,44 +68,86 @@ class DCFModelValidator:
             else:
                 self.info.append(f"Found sheet: {sheet}")
 
+        has_sensitivity_sheet = any('sensitivity' in name.lower() for name in sheet_names)
+        has_inline_sensitivity = False
+        if not has_sensitivity_sheet and 'DCF' in sheet_names:
+            dcf_ws = self.workbook_formulas['DCF']
+            for row in dcf_ws.iter_rows(max_row=250, max_col=25):
+                for cell in row:
+                    if isinstance(cell.value, str) and 'sensitivity' in cell.value.lower():
+                        has_inline_sensitivity = True
+                        break
+                if has_inline_sensitivity:
+                    break
+
+        if has_sensitivity_sheet:
+            self.info.append("Found dedicated Sensitivity sheet")
+        elif has_inline_sensitivity:
+            self.info.append("Found inline sensitivity analysis on DCF sheet")
+        else:
+            self.warnings.append(
+                "Sensitivity analysis not found (expected inline on DCF sheet or on a Sensitivity sheet)"
+            )
+
     def check_formula_errors(self):
-        """Check for Excel formula errors in all sheets"""
-        excel_errors = ['#VALUE!', '#DIV/0!', '#REF!', '#NAME?', '#NULL!', '#NUM!', '#N/A']
+        """Check for Excel formula errors and uncached formulas in all sheets."""
+        excel_errors = ('#VALUE!', '#DIV/0!', '#REF!', '#NAME?', '#NULL!', '#NUM!', '#N/A')
         error_details = {err: [] for err in excel_errors}
         total_errors = 0
         total_formulas = 0
+        uncached_formulas = 0
 
         for sheet_name in self.workbook_values.sheetnames:
             ws_values = self.workbook_values[sheet_name]
             ws_formulas = self.workbook_formulas[sheet_name]
 
-            for row in ws_values.iter_rows():
-                for cell in row:
-                    formula_cell = ws_formulas[cell.coordinate]
+            for row in ws_formulas.iter_rows():
+                for formula_cell in row:
+                    coord = formula_cell.coordinate
+                    value_cell = ws_values[coord]
+                    val_f = formula_cell.value
+                    val_v = value_cell.value
 
-                    # Count formulas
-                    if formula_cell.value and isinstance(formula_cell.value, str) and formula_cell.value.startswith('='):
+                    is_formula = isinstance(val_f, str) and val_f.startswith('=')
+                    if is_formula:
                         total_formulas += 1
+                        if val_v is None:
+                            uncached_formulas += 1
 
-                    # Check for errors
-                    if cell.value is not None and isinstance(cell.value, str):
+                    # Detect Excel error without false-positiving on prose notes containing error text
+                    detected_err = None
+                    if getattr(value_cell, 'data_type', None) == 'e':
+                        detected_err = str(val_v) if val_v is not None else '#VALUE!'
+                    elif isinstance(val_v, str) and val_v in excel_errors:
+                        detected_err = val_v
+                    elif is_formula:
                         for err in excel_errors:
-                            if err in cell.value:
-                                location = f"{sheet_name}!{cell.coordinate}"
-                                error_details[err].append(location)
-                                total_errors += 1
-                                self.errors.append(f"{err} at {location}")
+                            if err in val_f:
+                                detected_err = err
                                 break
 
-        # Add summary info
+                    if detected_err is not None:
+                        location = f"{sheet_name}!{coord}"
+                        error_details.setdefault(detected_err, []).append(location)
+                        total_errors += 1
+                        self.errors.append(f"{detected_err} at {location}")
+
+        if uncached_formulas > 0:
+            self.errors.append(
+                f"Uncached formula values detected ({uncached_formulas} of {total_formulas} formula "
+                "cell(s) have no cached value). Recalculate workbook via scripts/recalc_xlsx.py first."
+            )
+
+        # Record summary metrics in self.info so self.errors holds only distinct errors
         self.info.append(f"Total formulas: {total_formulas}")
+        self.info.append(f"Uncached formulas: {uncached_formulas}")
         if total_errors == 0:
             self.info.append("✓ No formula errors found")
         else:
-            self.errors.append(f"Total formula errors: {total_errors}")
+            self.info.append(f"Total formula errors: {total_errors}")
 
         return error_details, total_errors
-    
+
     def check_dcf_logic(self):
         """Validate DCF-specific logic and calculations"""
         self._check_terminal_growth_vs_wacc()
@@ -160,7 +202,11 @@ class DCFModelValidator:
     def _check_wacc_range(self):
         """Check if WACC is in reasonable range"""
         try:
-            wacc_sheet = self.workbook_values.get('WACC') or self.workbook_values['DCF']
+            wacc_sheet = (
+                self.workbook_values['WACC']
+                if 'WACC' in self.workbook_values.sheetnames
+                else self.workbook_values['DCF']
+            )
             wacc = None
 
             for row in wacc_sheet.iter_rows(max_row=100, max_col=20):
@@ -183,6 +229,8 @@ class DCFModelValidator:
             else:
                 self.warnings.append("Could not locate WACC value")
 
+        except KeyError:
+            self.warnings.append("WACC and DCF sheets not found")
         except Exception as e:
             self.warnings.append(f"Could not validate WACC range: {str(e)}")
 

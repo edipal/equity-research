@@ -647,7 +647,7 @@ Upside Risks:
 Create the following deliverables:
 
 ### 1. Valuation Analysis Document
-**File**: `[Company]_Valuation_Analysis_[Date].md` (written analysis)
+**File**: `research/companies/<TICKER>/reports/<TICKER>_Valuation_Analysis_<Date>.md` (written analysis)
 
 **Contents** (4-6 pages):
 - Executive summary with price target
@@ -659,7 +659,7 @@ Create the following deliverables:
 - Key catalysts and risks (1 page)
 
 ### 2. Excel Valuation Tabs
-**Add to Task 2's financial model file:** `[Company]_Financial_Model_[Date].xlsx`
+**Add to Task 2's financial model file:** `research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx`
 
 **IMPORTANT**: Do NOT create a separate Excel file. Add these tabs to the existing financial model from Task 2. This keeps all quantitative data in one place.
 

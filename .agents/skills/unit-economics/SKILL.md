@@ -81,15 +81,19 @@ Synthesize into a revenue quality assessment:
 
 ### Step 5: Output
 
-- Excel workbook with ARR bridge, cohort matrix, unit economics dashboard
-- Summary slide with key metrics and benchmarks
-- Red flags and areas for further diligence
+Stage all outputs under `research/companies/<TICKER>/`:
+- **Model workbook**: `research/companies/<TICKER>/models/<TICKER>_UnitEconomics_YYYY-MM-DD.xlsx` via `xlsx-author` (ARR/billings bridge, cohort matrix or public-filing proxy panel, unit economics dashboard)
+- **Analytical note / summary**: `research/companies/<TICKER>/notes/<TICKER>_UnitEconomics_YYYY-MM-DD.md` (with optional slide via `pptx-author` under `research/companies/<TICKER>/reports/`) highlighting key benchmarks, red flags, and diligence questions
 
-## Important Notes
+## Public-Filing Proxies & Important Notes
 
-- Always ask for raw customer-level data if available — aggregate metrics can hide problems
-- NDR above 100% can mask high gross churn if expansion is strong enough — always show both
-- Cohort analysis is the single most important view for revenue quality — push for this data
-- Differentiate between contracted ARR and actual recognized revenue
-- For usage-based models, focus on consumption trends and expansion patterns rather than traditional ARR metrics
-- Professional services revenue should be evaluated separately — it's not recurring and margins are typically lower
+- **Public-equity data reality**: Unlike private equity data rooms, public companies rarely disclose raw customer-level tables. When granular cohorts are unavailable, build transparent proxies from SEC filings (`10-K`, `10-Q`), earnings releases, and investor day decks — explicitly labeling derived figures `[ASSUMPTION]`:
+  - **RPO & cRPO** (Remaining Performance Obligations / current RPO) to track contracted backlog and forward revenue visibility
+  - **Calculated billings** (`Revenue + ΔDeferred Revenue`) and **deferred revenue** trends to cross-check demand vs. GAAP revenue recognition
+  - **Disclosed NRR / DBNRR, customer-count tiers** (e.g., `$100K+` / `$1M+` ARR logos), and **implied ACV** (`Subscription Revenue / Ending Customers`)
+  - **Public-filing S&M efficiency**: Implied Magic Number (`ΔSubscription Revenue × 4 / Prior-Quarter S&M` or `Net New ARR / Prior-Year S&M`), implied gross-margin-adjusted CAC payback, and S&M % of revenue
+- If the user uploads customer-level exports or investor-day cohort disclosures, prioritize those primary datasets and document exact source dates
+- NDR above 100% can mask elevated gross churn if expansion is strong enough — flag when GRR is undisclosed
+- Differentiate clearly between contracted ARR, billings, and GAAP recognized revenue
+- For usage-based models, focus on consumption trends, RPO drawdowns, and expansion patterns rather than traditional seat-based ARR metrics
+- Evaluate professional services revenue separately — it is non-recurring and carries structurally lower gross margins

@@ -7,20 +7,18 @@ description: Framework for building competitive landscape decks — market posit
 
 Build a complete competitive analysis deck. This is a two-phase process: gather requirements and get outline approval first, then build.
 
-## Environment check
+## Output & Environment (Antigravity)
 
-This skill works in both the PowerPoint add-in and chat. Identify which you're in before starting — the mechanics differ, the workflow doesn't:
+This skill produces file-based research deliverables under `research/sectors/<sector-slug>/`:
 
-- **Add-in** — the deck is open live; build slides directly into it.
-- **Chat** — generate a `.pptx` file (or build into one the user uploaded).
-
-Everything below applies in both.
+- **Default Markdown report**: `research/sectors/<sector-slug>/competitive-landscape.md` (with structured tables, positioning frameworks, and citations).
+- **Optional presentation deck**: When slides are requested, build a `.pptx` deck via the `pptx-author` skill (`python-pptx` + 300 DPI `matplotlib` charts) saved to `research/sectors/<sector-slug>/decks/<sector-slug>_competitive_landscape_YYYY-MM-DD.pptx` (or update a user-supplied `.pptx` template).
 
 ## Phase 1 — Scope the analysis
 
-Competitive analysis means different things to different people. Before any research or slide-building, use `ask_user_question` to pin down what they actually want. Don't guess — a 20-slide peer benchmarking deck and a 5-slide market map are both "competitive analysis" and take completely different shapes.
+Competitive analysis means different things to different people. Before any research or slide-building, ask the user directly to pin down what they actually want. Don't guess — a 20-slide peer benchmarking deck and a 5-slide market map are both "competitive analysis" and take completely different shapes.
 
-Gather in one round if you can (the tool takes up to 4 questions):
+Gather in one concise round of clarifying questions:
 
 - **Scope** — Single target company with competitors around it? Or multi-company side-by-side with no protagonist?
 - **Competitor set** — Which companies are in scope? If the user names them, use exactly those. If they say "the usual suspects," propose a set and confirm.
@@ -31,9 +29,9 @@ If they've uploaded an Excel/CSV with competitor data, confirm which columns map
 
 ## Phase 2 — Outline, approve, then build
 
-**Do not create slides until the outline is approved.** Propose slide titles and one-line content notes, present them to the user, get a yes. A competitive deck is 10-20 slides of interlocking content — rebuilding because slide 4 was wrong is expensive. The outline is the cheap iteration point.
+**Do not build the final deck or full report until the outline is approved.** Propose section/slide titles and one-line content notes, present them to the user, and get explicit confirmation. A competitive deck is 10-20 slides of interlocking content — rebuilding because slide 4 was wrong is expensive. The outline is the cheap iteration point.
 
-When proposing the outline, `ask_user_question` works well for the structural decisions: which positioning visualization (2×2 matrix / radar / tier diagram — Step 5 below), how to group competitors (by business model / segment / posture — Step 4). These are taste calls the user likely has an opinion on.
+When proposing the outline, ask the user to confirm key structural choices: which positioning visualization (2×2 matrix / radar / tier diagram — Step 5 below) and how to group competitors (by business model / segment / posture — Step 4). These are taste calls the user likely has an opinion on.
 
 ---
 
@@ -162,7 +160,7 @@ Multi-segment companies add a breakdown:
 
 ### Step 4 — Competitor mapping
 
-Group by whichever lens fits (this is a good `ask_user_question` decision if the user hasn't specified):
+Group by whichever lens fits (ask the user to confirm if they haven't specified):
 - By business model — platform / vertical / horizontal
 - By segment — enterprise / SMB / consumer
 - By posture — direct / adjacent / emerging

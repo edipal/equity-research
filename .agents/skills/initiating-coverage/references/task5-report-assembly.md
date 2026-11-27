@@ -20,7 +20,7 @@ This is the final assembly task. It cannot be completed without all previous wor
 - Task 1: Company research document (6-8K words)
 - Task 2: Financial model with all 6 tabs
 - Task 3: Valuation analysis with price target and recommendation
-- Task 4: Charts zip file with 25-35 charts
+- Task 4: Charts directory (`research/companies/<TICKER>/reports/charts/`) with 25-35 charts + `chart_index.txt`
 
 Do not attempt to create placeholder content, substitute missing sections, or assemble an incomplete report. The report requires ALL inputs to be publication-ready.
 
@@ -504,50 +504,43 @@ Valuation Implications:
 
 **Verify all input files exist:**
 
-Verify using workspace file inspection tools:
-- `[Company]_Research_Document_[Date].md` (Task 1)
-- `[Company]_Historical_Financials_[Date].xlsx` (Task 1)
-- `[Company]_Financial_Model_[Date].xlsx` (Task 2 with Task 3 tabs)
-- `[Company]_Valuation_Analysis_[Date].md` (Task 3)
-- `[Company]_Charts_[Date].zip` (Task 4) - **Extract this first**
+Verify using Antigravity file inspection (`view_file` or Python `pathlib`):
+- `research/companies/<TICKER>/reports/<TICKER>_Research_Document_<Date>.md` (Task 1)
+- `research/companies/<TICKER>/models/<TICKER>_Historical_Financials_<Date>.xlsx` (Task 2, optional Step 1 extraction)
+- `research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx` (Task 2 with Task 3 valuation tabs)
+- `research/companies/<TICKER>/reports/<TICKER>_Valuation_Analysis_<Date>.md` (Task 3)
+- `research/companies/<TICKER>/reports/charts/` (Task 4 — 25–35 PNG files + `chart_index.txt`)
 
-**Step 1a: Extract Charts from Zip File**
-
-Before proceeding, extract all chart files from the Task 4 zip:
-- Locate `[Company]_Charts_[Date].zip`
-- Extract all contents to a working directory (e.g., `task4_charts/`)
-- Verify 25-35 PNG files were extracted
-- Verify chart_index.txt is present
-
-**Expected folder structure after extraction:**
-```
-[Company]_Report_Working/
-├── [Company]_Research_Document_[Date].md
-├── [Company]_Historical_Financials_[Date].xlsx
-├── [Company]_Financial_Model_[Date].xlsx (includes Task 3 valuation tabs)
-│   ├── [Task 2 tabs: Revenue Model, Income Statement, Scenarios, etc.]
-│   └── [Task 3 tabs: DCF, Sensitivity, Comps, Valuation Summary]
-├── [Company]_Valuation_Analysis_[Date].md
-├── [Company]_Charts_[Date].zip
-├── task4_charts/ (extracted from zip)
-│   ├── chart_01_stock_price.png
-│   ├── chart_02_revenue_growth.png
-│   ├── chart_03_revenue_by_product.png ⭐
-│   ├── chart_04_revenue_by_geography.png ⭐
-│   ├── ... (21-31 more charts)
-│   ├── chart_28_dcf_sensitivity.png ⭐
-│   ├── chart_32_valuation_football_field.png ⭐
-│   └── chart_index.txt
-└── sources_and_urls.txt
+**Expected workspace folder structure:**
+```text
+research/companies/<TICKER>/
+├── models/
+│   ├── <TICKER>_Historical_Financials_<Date>.xlsx  (optional Task 2 Step 1)
+│   └── <TICKER>_Financial_Model_<Date>.xlsx        (Task 2 + Task 3 valuation tabs)
+│       ├── [Task 2 tabs: Revenue Model, Income Statement, Scenarios, etc.]
+│       └── [Task 3 tabs: DCF, Sensitivity, Comps, Valuation Summary]
+└── reports/
+    ├── <TICKER>_Research_Document_<Date>.md        (Task 1)
+    ├── <TICKER>_Valuation_Analysis_<Date>.md       (Task 3)
+    ├── charts/                                     (Task 4)
+    │   ├── chart_01_stock_price_performance.png
+    │   ├── chart_02_revenue_growth_trajectory.png
+    │   ├── chart_03_revenue_by_product_stacked_area.png ⭐
+    │   ├── chart_04_revenue_by_geography_stacked_bar.png ⭐
+    │   ├── ... (21-31 more charts)
+    │   ├── chart_28_dcf_sensitivity_heatmap.png ⭐
+    │   ├── chart_32_valuation_football_field.png ⭐
+    │   └── chart_index.txt
+    └── <TICKER>_Initiation_Report_<Date>.docx      (Task 5 output)
 ```
 
 **Open and inspect input files:**
 
-1. **Read Task 1 markdown file** - Use Read tool to view content
-2. **Open Task 2/3 Excel file** - Use `openpyxl` to inspect tabs:
+1. **Read Task 1 markdown file** — Use `view_file` (or Python `Path.read_text()`) to load `<TICKER>_Research_Document_<Date>.md`
+2. **Open Task 2/3 Excel file** — Use `openpyxl` (`data_only=True` after `scripts/recalc_xlsx.py`) to inspect tabs:
    - Verify required tabs exist: Revenue Model, Income Statement, Scenarios, DCF, Sensitivity Analysis, Comparable Companies
-3. **Read Task 3 markdown file** - Use Read tool to view valuation analysis
-4. **Check chart files** - Verify all 25-35 PNG files present
+3. **Read Task 3 markdown file** — Use `view_file` (or Python `Path.read_text()`) to load `<TICKER>_Valuation_Analysis_<Date>.md`
+4. **Check chart files** — Verify all 25–35 PNG files and `chart_index.txt` are present in `research/companies/<TICKER>/reports/charts/`
 
 **Note**: Task 2's financial model file now contains both the original modeling tabs (from Task 2) AND the valuation tabs (added by Task 3). This single Excel file contains all quantitative data needed for report assembly.
 
@@ -616,7 +609,7 @@ Company      Ticker  Mkt Cap  EV/Rev  EV/Rev  EV/EBITDA  EV/EBITDA  P/E   Rev   
 #### Additional Tables (7-15 more)
 **Extract from Task 2 financial model (with Task 3 tabs):**
 
-Use XLSX skill to extract these tables:
+Use `openpyxl` (following `xlsx-author` conventions) to extract these tables:
 
 **DCF Assumptions Table** (Task 3 `DCF` tab)
 - Open `[Company]_Financial_Model_[Date].xlsx`
@@ -763,78 +756,77 @@ Use `python-docx` to:
    - Set professional styling (fonts, margins)
 
 2. **Read Task 1 markdown file**
-   - Use Read tool: `[Company]_Research_Document_[Date].md`
-   - Identify sections by markdown headers (## Section Title)
+   - Read `research/companies/<TICKER>/reports/<TICKER>_Research_Document_<Date>.md` directly via `view_file` or Python `Path.read_text()`
+   - Identify sections by markdown headers (`## Section Title`)
 
 3. **Extract and convert each section from Task 1 to Word format:**
 
 **SECTION 1: Investment Thesis & Risks**
 - Add heading: 'Investment Thesis & Risks' (level 1)
 - Extract 'Risk Assessment' section from Task 1 markdown
-- Convert markdown formatting to Word formatting (remove ##, **, etc.)
+- Convert markdown formatting to Word formatting (remove `##`, `**`, etc.)
 - Add paragraphs to Word document (split by blank lines)
 - Add new 'Investment Thesis' heading (level 2)
 - Write new investment thesis content (800-1,200 words based on all analysis)
 
 **SECTION 2: Company 101 (Pages 6-17)**
-Copy each section from Task 1 verbatim with formatting conversion:
+Copy each section from Task 1 verbatim with formatting conversion (inserting PNGs from `research/companies/<TICKER>/reports/charts/`):
 
 - **Company Overview**
   - Add heading: 'Company Overview' (level 1)
   - Extract 'Company Overview' section from Task 1
   - Convert to Word paragraphs
-  - Insert chart: `task4_charts/chart_05_company_overview.png` (6 inches wide)
+  - Insert chart: `charts/chart_05_company_overview.png` (6 inches wide)
 
 - **Company History**
   - Add heading: 'Company History' (level 1)
   - Extract 'Company History' section from Task 1
   - Convert to Word paragraphs
-  - Insert chart: `task4_charts/chart_06_company_timeline.png` (6 inches wide)
+  - Insert chart: `charts/chart_06_key_milestones_timeline.png` (6 inches wide)
 
 - **Management Team**
   - Add heading: 'Management Team' (level 1)
   - Extract 'Management Team' section from Task 1
   - Convert to Word paragraphs
-  - Insert chart: `task4_charts/chart_07_org_structure.png` (5 inches wide)
+  - Insert chart: `charts/chart_07_organizational_structure.png` (5 inches wide)
 
 - **Products & Services**
   - Add heading: 'Products & Services' (level 1)
   - Extract 'Products & Services' section from Task 1
   - Add first paragraph
-  - Insert chart: `task4_charts/chart_08_product_portfolio.png` (6 inches wide)
+  - Insert chart: `charts/chart_08_product_portfolio.png` (6 inches wide)
   - Add remaining paragraphs
 
 - **Customers & Go-to-Market**
   - Add heading: 'Customers & Go-to-Market' (level 1)
   - Extract section from Task 1
   - Convert to Word paragraphs
-  - Insert chart: `task4_charts/chart_09_customer_segments.png` (6 inches wide)
+  - Insert chart: `charts/chart_09_customer_segmentation.png` (6 inches wide)
 
 - **Industry Overview**
   - Add heading: 'Industry Overview' (level 1)
   - Extract section from Task 1
   - Add first paragraph
-  - Insert chart: `task4_charts/chart_10_market_size_evolution.png` (6 inches wide)
+  - Insert chart: `charts/chart_15_market_size_evolution.png` (6 inches wide)
   - Add remaining paragraphs
-  - Insert chart: `task4_charts/chart_11_industry_trends.png` (6 inches wide)
 
 - **Competitive Landscape**
   - Add heading: 'Competitive Landscape' (level 1)
   - Extract section from Task 1
   - Add first paragraph
-  - Insert chart: `task4_charts/chart_16_competitive_positioning.png` (6 inches wide)
+  - Insert chart: `charts/chart_16_competitive_positioning.png` (6 inches wide)
   - Add remaining paragraphs
-  - Insert chart: `task4_charts/chart_17_market_share.png` (5 inches wide)
+  - Insert chart: `charts/chart_17_market_share.png` (5 inches wide)
 
 - **Market Opportunity**
   - Add heading: 'Market Opportunity' (level 1)
   - Extract 'Market Opportunity' section from Task 1
   - Convert to Word paragraphs
-  - Insert chart: `task4_charts/chart_15_TAM_sizing.png` (6 inches wide)
+  - Insert chart: `charts/chart_18_competitive_benchmarking.png` (6 inches wide)
 
 **Result after Phase B**: Pages 6-17 complete (~12 pages, 6-8K words, 8-12 charts embedded)
 
-**Key Point**: Use DOCX skill to READ from Task 1's .md file and INSERT actual image files. No manual copy/paste required.
+**Key Point**: Use Python (`python-docx`) to READ from Task 1's `.md` file and INSERT actual PNG image files. No manual copy/paste required.
 
 #### Phase C: Add Financial Analysis with Data from Task 2
 **This requires NEW WRITING interpreting quantitative data**
@@ -847,41 +839,41 @@ Use `python-docx` and `openpyxl` to:
 
 2. **Historical Financial Analysis (1,200-1,800 words) - NEW WRITING**
    - Add heading: 'Historical Performance' (level 2)
-   - Use `openpyxl` to open `[Company]_Financial_Model_[Date].xlsx`
+   - Use `openpyxl` to open `research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx`
    - Read `Income Statement` tab to extract historical data
    - Read `Revenue Model` tab to extract revenue trends
    - Calculate key metrics (e.g., Revenue CAGR from 2020-2024)
    - Write analytical paragraphs interpreting the trends (1,200-1,800 words)
    - Lead with specific numbers: "Revenue grew from $XXM in 2020 to $XXM in 2024, representing a XX% CAGR. This growth was driven by..."
-   - Insert chart: `task4_charts/chart_02_revenue_growth_trajectory.png` (6 inches wide)
+   - Insert chart: `charts/chart_02_revenue_growth_trajectory.png` (6 inches wide)
 
 3. **Create Table: Full Income Statement**
    - Add heading: 'Historical Income Statement' (level 3)
-   - Use XLSX skill to extract entire Income Statement tab (40-50 rows)
+   - Use `openpyxl` to extract entire Income Statement tab (40-50 rows)
    - Create Word table with all columns (historical years 2020A-2024A + projected 2025E-2029E)
    - Include all line items: Revenue, COGS, Gross Profit, Operating Expenses, EBITDA, Net Income, etc.
 
 4. **Add mandatory charts and tables for Revenue breakdown:**
-   - Insert chart: `task4_charts/chart_03_revenue_by_product.png` (6.5 inches wide) ⭐ MANDATORY
+   - Insert chart: `charts/chart_03_revenue_by_product_stacked_area.png` (6.5 inches wide) ⭐ MANDATORY
    - **Create Table: Revenue by Product (20-30 rows)**
-     - Use XLSX skill to extract from Revenue Model tab (product section, typically rows 5-35)
+     - Use `openpyxl` to extract from Revenue Model tab (product section, typically rows 5-35)
      - Create Word table showing each product category with historical and projected years
      - Include columns: Product name, historical years, projected years, % of Total, YoY Growth
 
-   - Insert chart: `task4_charts/chart_04_revenue_by_geography.png` (6.5 inches wide) ⭐ MANDATORY
+   - Insert chart: `charts/chart_04_revenue_by_geography_stacked_bar.png` (6.5 inches wide) ⭐ MANDATORY
    - **Create Table: Revenue by Geography (15-20 rows)**
-     - Use XLSX skill to extract from Revenue Model tab (geography section, typically rows 40-60)
+     - Use `openpyxl` to extract from Revenue Model tab (geography section, typically rows 40-60)
      - Create Word table showing each geographic region with historical and projected years
 
 5. **Add additional financial charts:**
-   - Insert chart: `task4_charts/chart_10_gross_margin_evolution.png` (6 inches wide)
-   - Insert chart: `task4_charts/chart_11_ebitda_margin_progression.png` (6 inches wide)
-   - Insert chart: `task4_charts/chart_12_free_cash_flow_trend.png` (6 inches wide)
+   - Insert chart: `charts/chart_10_gross_margin_evolution.png` (6 inches wide)
+   - Insert chart: `charts/chart_11_ebitda_margin_progression.png` (6 inches wide)
+   - Insert chart: `charts/chart_12_free_cash_flow_trend.png` (6 inches wide)
 
 6. **Projection Assumptions (2,000-3,000 words) ⭐ CRITICAL - NEW WRITING**
    - Add heading: 'Projection Assumptions' (level 2)
-   - Use XLSX skill to read Scenarios tab to inform assumptions
-   - Use XLSX skill to read Revenue Model tab for specific product/geography projections
+   - Use `openpyxl` to read Scenarios tab to inform assumptions
+   - Use `openpyxl` to read Revenue Model tab for specific product/geography projections
    - Add heading: 'Revenue Assumptions by Product' (level 3)
    - Write detailed product-by-product assumptions (8-12 points per major product)
    - Write detailed region-by-region assumptions (6-8 points per major region)
@@ -890,15 +882,15 @@ Use `python-docx` and `openpyxl` to:
 
 7. **Scenario Analysis (1,500-2,000 words) ⭐ CRITICAL - NEW WRITING**
    - Add heading: 'Scenario Analysis' (level 2)
-   - Use XLSX skill to extract scenario data from Scenarios tab
+   - Use `openpyxl` to extract scenario data from Scenarios tab
    - Extract Bull/Base/Bear parameters for key metrics (2029E Revenue, EBITDA Margin, etc.)
    - Write Bull Case (500-700 words): specific parameters, catalysts, probability, valuation
    - Write Base Case (300-500 words): most likely scenario with rationale
    - Write Bear Case (500-700 words): downside triggers, parameters, probability, valuation
    - Write Scenario Comparison (200-300 words)
-   - Insert chart: `task4_charts/chart_14_scenario_comparison.png` (6 inches wide)
+   - Insert chart: `charts/chart_14_scenario_comparison.png` (6 inches wide)
    - **Create Table: Scenario Comparison**
-     - Use XLSX skill to extract from Scenarios tab
+     - Use `openpyxl` to extract from Scenarios tab
      - Create Word table with Bull/Base/Bear columns and key metrics as rows
 
 8. **Growth Drivers (800-1,200 words) - NEW WRITING**
@@ -921,27 +913,27 @@ Use `python-docx` and `openpyxl` to:
 1. **Add section heading: 'Valuation Analysis' (level 1)**
 
 2. **Read Task 3 markdown file**
-   - Use Read tool: `[Company]_Valuation_Analysis_[Date].md`
+   - Read `research/companies/<TICKER>/reports/<TICKER>_Valuation_Analysis_<Date>.md` via `view_file` or Python `Path.read_text()`
    - Identify sections by markdown headers: DCF Analysis, Comparable Companies, Price Target
 
 3. **DCF Analysis section**
    - Add heading: 'DCF Analysis' (level 2)
    - Extract 'DCF Analysis' section from Task 3 markdown
    - Convert markdown to Word paragraphs
-   - Insert chart: `task4_charts/chart_28_dcf_sensitivity_heatmap.png` (6 inches wide) ⭐ MANDATORY
+   - Insert chart: `charts/chart_28_dcf_sensitivity_heatmap.png` (6 inches wide) ⭐ MANDATORY
 
    - **Create Table: DCF Key Assumptions**
      - Add heading: 'DCF Key Assumptions' (level 3)
-     - Use `openpyxl` to open `[Company]_Financial_Model_[Date].xlsx`
+     - Use `openpyxl` to open `research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx`
      - Read DCF tab (columns A-C, first 20 rows: Assumption, Value, Source)
      - Create Word table from extracted data
 
    - **Create Table: DCF Sensitivity Matrix**
-     - Use XLSX skill to read Sensitivity Analysis tab
+     - Use `openpyxl` to read Sensitivity Analysis tab
      - Extract full sensitivity matrix (WACC values as rows, terminal growth as columns)
      - Create Word table showing valuation at different parameter combinations
 
-   - Insert chart: `task4_charts/chart_29_dcf_waterfall.png` (6 inches wide)
+   - Insert chart: `charts/chart_29_dcf_waterfall.png` (6 inches wide)
 
 4. **Comparable Companies section**
    - Add heading: 'Comparable Companies Analysis' (level 2)
@@ -950,20 +942,20 @@ Use `python-docx` and `openpyxl` to:
 
    - **Create Table: Comparable Companies ⭐ CRITICAL**
      - Add heading: 'Comparable Companies' (level 3)
-     - Use XLSX skill to read Comparable Companies tab
+     - Use `openpyxl` to read Comparable Companies tab
      - Extract full table including:
        - 5-10 peer companies plus target company
        - Statistical summary rows (Maximum, 75th Percentile, Median, 25th Percentile, Minimum)
      - Create Word table with all columns: Ticker, Market Cap, EV/Revenue (LTM & NTM), EV/EBITDA (LTM & NTM), P/E (NTM), Revenue Growth, EBITDA Margin
      - **Verify statistical summary is included in table**
 
-   - Insert chart: `task4_charts/chart_31_peer_multiples_comparison.png` (6 inches wide)
+   - Insert chart: `charts/chart_31_peer_multiples_comparison.png` (6 inches wide)
 
 5. **Valuation Summary**
-   - Insert chart: `task4_charts/chart_32_valuation_football_field.png` (6.5 inches wide) ⭐ MANDATORY
+   - Insert chart: `charts/chart_32_valuation_football_field.png` (6.5 inches wide) ⭐ MANDATORY
 
    - **Create Table: Valuation Summary**
-     - Use XLSX skill to read Valuation Summary tab
+     - Use `openpyxl` to read Valuation Summary tab
      - Extract valuation methods (DCF, Comps, Precedent Transactions if applicable)
      - Create Word table showing: Method, Low Case, Base Case, High Case, Weight, Weighted Value
 
@@ -1014,7 +1006,7 @@ Use `python-docx` to:
 - Add page numbers to all pages
 
 **Key formatting requirements:**
-- Professional fonts (Calibri, Arial, or similar)
+- Consistent font throughout (Calibri, unless user specifies otherwise)
 - Proper headers and footers with page numbers
 - Section breaks between major sections
 - Embed all 25-35 charts inline throughout text
@@ -1050,17 +1042,17 @@ BAD - Avoid:
 **Throughout the entire assembly process, use Python (`python-docx`, `openpyxl`) with actual file operations:**
 
 **Reading Input Files:**
-- ✓ Use Read tool: `[Company]_Research_Document_[Date].md` - Read Task 1 research
-- ✓ Use `openpyxl`: Open `[Company]_Financial_Model_[Date].xlsx` and read tabs - Extract tables from Task 2/3
-- ✓ Use Read tool: `[Company]_Valuation_Analysis_[Date].md` - Read Task 3 analysis
-- ✓ Use `python-docx`: Insert images from `task4_charts/chart_XX.png` files
+- ✓ Use `view_file` / Python `Path.read_text()`: `research/companies/<TICKER>/reports/<TICKER>_Research_Document_<Date>.md` — Read Task 1 research
+- ✓ Use `openpyxl` (`data_only=True`): Open `research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx` and read tabs — Extract tables from Task 2/3
+- ✓ Use `view_file` / Python `Path.read_text()`: `research/companies/<TICKER>/reports/<TICKER>_Valuation_Analysis_<Date>.md` — Read Task 3 analysis
+- ✓ Use `python-docx`: Insert images directly from `research/companies/<TICKER>/reports/charts/chart_*.png`
 
 **Writing Output File:**
-- ✓ Use `python-docx`: Create new Word document
-- ✓ Use `python-docx`: Add paragraphs (text from input .md files)
+- ✓ Use `python-docx`: Create new Word document (Calibri default styling)
+- ✓ Use `python-docx`: Add paragraphs (text from input `.md` files)
 - ✓ Use `python-docx`: Create tables (data from Excel files read via `openpyxl`)
-- ✓ Use `python-docx`: Insert images (chart .png files)
-- ✓ Use `python-docx`: Save final file as `[Company]_Initiation_Report_[Date].docx`
+- ✓ Use `python-docx`: Insert images (chart `.png` files)
+- ✓ Use `python-docx`: Save final file as `research/companies/<TICKER>/reports/<TICKER>_Initiation_Report_<Date>.docx`
 
 **Do NOT manually copy/paste. Use reproducible Python scripts and file tools to:**
 1. Read from `.md` files (Task 1, Task 3)
@@ -1296,14 +1288,12 @@ A successful equity research report should:
 ## Output Files
 
 **Primary Deliverable:**
-`[Company]_Initiation_Report_[Date].docx`
+`research/companies/<TICKER>/reports/<TICKER>_Initiation_Report_<Date>.docx`
 
-**Example**: `Tesla_Initiation_Report_2024-10-27.docx`
+**Example**: `research/companies/TSLA/reports/TSLA_Initiation_Report_2024-10-27.docx`
 
 **Supporting Deliverable:**
-`[Company]_Financial_Model_[Date].xlsx` (from Task 2)
-
-**Both files should be packaged together for final delivery.**
+`research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx` (from Task 2 + Task 3)
 
 ---
 

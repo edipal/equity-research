@@ -5,8 +5,6 @@ mainAgent: true
 subagent: true
 model: inherit
 commandExecutionPolicy: sandbox
-inheritMcp: true
-inheritCustomizations: true
 ---
 
 # System Prompt

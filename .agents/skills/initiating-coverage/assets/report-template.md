@@ -2,18 +2,18 @@
 
 This template provides the structure for creating a comprehensive equity research initiation report. Use this as a guide when constructing the final report document.
 
-**NOTE:** The actual report MUST be created using the DOCX skill. DO NOT generate markdown content.
+**NOTE:** The actual report MUST be created programmatically as a `.docx` file using Python (`python-docx`). DO NOT deliver raw markdown in place of the Word document.
 
 **CRITICAL REQUIREMENTS:**
-1. **Generate 20-30+ chart images** using Python (matplotlib/plotly) BEFORE creating the Word document
-2. **Use DOCX skill**: Create professional report with proper styles, headers/footers, and formatting
-3. **Embed actual chart images**: Insert the generated PNG/JPG chart files into the Word document at appropriate locations
-4. **NO MARKDOWN**: Do not generate markdown content. Use DOCX skill to create a .docx file.
+1. **Generate 20-30+ chart images** using Python (`matplotlib` / `seaborn` / `Pillow`, with `plotly` optional for interactive HTML) BEFORE creating the Word document
+2. **Use `python-docx`**: Create a professional `.docx` report with proper styles, headers/footers, and formatting
+3. **Embed actual chart images**: Insert the generated PNG chart files from `research/companies/<TICKER>/reports/charts/` into the Word document at appropriate locations
+4. **NO RAW MARKDOWN OUTPUT**: Assemble the final deliverable as a formatted `.docx` file using `python-docx`.
 
 **CRITICAL FORMATTING GUIDANCE:**
 - **MAXIMUM DENSITY**: Every page should be packed with information. Intersperse text, charts, and tables throughout.
 - **NO ORPHANED SECTIONS**: Never have a section header alone or a single chart on its own page.
-- **20-30+ ACTUAL CHART IMAGES**: Generate charts as image files, then embed within text sections using DOCX skill.
+- **20-30+ ACTUAL CHART IMAGES**: Generate charts as 300 DPI PNG files, then embed within text sections using `python-docx`.
 
 ---
 
@@ -803,7 +803,7 @@ Catalysts:
 
 **Chart Style Guidelines:**
 - **Consistent color scheme** throughout (pick 3-5 brand colors)
-- **Professional fonts** (Arial, Calibri, or similar)
+- **Consistent font** (Calibri, unless user specifies otherwise)
 - **Clear labels and legends** on every chart
 - **Source citations** at bottom of each chart
 - **High information density** - use chart space efficiently
@@ -828,7 +828,7 @@ Catalysts:
    - **Financial performance trends** (multiple charts)
    - Charts should be embedded within text, not grouped separately
 
-5. **Use DOC Skill:** This outline should be converted to a professional Word document using the DOC skill, with proper formatting, styles, headers/footers, and page numbers
+5. **Use `python-docx`:** This outline should be converted to a professional Word document (`.docx`) using `python-docx`, with proper formatting, Calibri styles, headers/footers, and page numbers
 
 6. **Intersplice Content:** Text paragraphs should have charts embedded inline. Each page should have 2-4 distinct elements (tables, charts, text blocks).
 

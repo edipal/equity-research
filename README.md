@@ -67,7 +67,7 @@ Every folder in `.agents/skills/` is both **semantically discovered** by Antigra
 | `/competitive-analysis` | Competitive landscape decks, positioning matrices, competitor deep-dives, and moat synthesis |
 | `/comps-analysis` | Comparable company trading multiples (`EV/Rev`, `EV/EBITDA`, `P/E`) with Max/75th/Median/25th/Min statistics |
 | `/dcf-model` | Institutional DCF model (WACC build, Bear/Base/Bull FCF, comps-checked terminal value, 5×5 sensitivities) + `validate_dcf.py` |
-| `/3-statement-model` | Integrated Income Statement, Balance Sheet, and Cash Flow model with SEC filing references |
+| `/three-statement-model` | Integrated Income Statement, Balance Sheet, and Cash Flow model with SEC filing references |
 | `/unit-economics` | SaaS/subscription & recurring-revenue unit economics (ARR bridge, cohort retention, NDR/GRR, LTV/CAC, Rule of 40) |
 | `/audit-xls` | Comprehensive formula and accounting integrity audit (balance checks, cash tie-out, hardcode detection) |
 
@@ -87,7 +87,7 @@ Select any agent as your primary session agent (`/agents` in CLI, `agy --agent <
 - **`equity-analyst`** — Lead equity analyst for initiating coverage, thesis tracking, catalyst monitoring, and coordinating subagents.
 - **`earnings-reviewer`** — End-to-end earnings cycle processor (`earnings-analysis` → `model-update` → `audit-xls` → `morning-note` → `thesis-tracker`).
 - **`market-researcher`** — Sector & thematic researcher (`sector-overview` → `competitive-analysis` → `comps-analysis` → `idea-generation` → optional `pptx-author`).
-- **`model-builder`** — Institutional modeler (`3-statement-model`, `dcf-model`, `comps-analysis`, `unit-economics`, `xlsx-author` → `audit-xls`).
+- **`model-builder`** — Institutional modeler (`three-statement-model`, `dcf-model`, `comps-analysis`, `unit-economics`, `xlsx-author` → `audit-xls`).
 
 ---
 

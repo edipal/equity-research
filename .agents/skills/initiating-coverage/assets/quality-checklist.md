@@ -16,7 +16,7 @@ Before delivering an initiation report, verify all items below are complete.
 
 - [ ] DOCX report file created
 - [ ] XLS financial model file created
-- [ ] Both files named properly: `[Company]_Initiation_Report_[Date].docx` and `[Company]_Financial_Model_[Date].xlsx`
+- [ ] Both files named and located properly: `research/companies/<TICKER>/reports/<TICKER>_Initiation_Report_<Date>.docx` and `research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx`
 
 ## DOCX Report - Length & Content
 
@@ -88,7 +88,7 @@ Before delivering an initiation report, verify all items below are complete.
 - [ ] All years use "A" for actual, "E" for estimate notation
 
 **Professional Formatting:**
-- [ ] Consistent fonts throughout (Calibri, Arial, or similar)
+- [ ] Consistent font throughout (Calibri, unless user specifies otherwise)
 - [ ] Headers and footers with page numbers
 - [ ] Dense layout: 60-80% page coverage, minimal white space
 - [ ] Every page has both text AND visuals (charts or tables)

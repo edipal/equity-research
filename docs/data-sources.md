@@ -19,9 +19,23 @@ This harness works **out of the box with zero paid subscriptions** using public 
 
 If you subscribe to institutional data vendors (FactSet, S&P Global / Kensho, Daloopa, LSEG, Morningstar, Moody's, Aiera, MT Newswires, PitchBook):
 
-1. Copy [`config/mcp_config.example.json`](../config/mcp_config.example.json) to `.agents/mcp_config.json` (or configure via Antigravity Settings → MCP Servers).
+1. Copy [`config/mcp_config.example.json`](../config/mcp_config.example.json) to your workspace `.agents/mcp_config.json` (project-scoped) or global `~/.gemini/config/mcp_config.json` (user-scoped across workspaces), or configure via Antigravity Settings → MCP Servers.
 2. Remove any servers you do not have credentials/subscriptions for so Antigravity does not attempt unauthenticated connections.
-3. Authenticate via OAuth or your vendor token when prompted by Antigravity.
+3. Each remote HTTP MCP entry uses `"serverUrl"` and supports optional `"headers"` (for API-key / bearer auth) and `"timeoutSeconds"` fields:
+   ```json
+   {
+     "mcpServers": {
+       "factset": {
+         "serverUrl": "https://mcp.factset.com/mcp",
+         "headers": {
+           "Authorization": "Bearer ${FACTSET_MCP_TOKEN}"
+         },
+         "timeoutSeconds": 60
+       }
+     }
+   }
+   ```
+4. Authenticate via OAuth or your vendor token when prompted by Antigravity.
 
 > **Security note:** `.agents/mcp_config.json` is listed in `.gitignore` so personal endpoints, headers, or local credentials are never accidentally committed.
 
