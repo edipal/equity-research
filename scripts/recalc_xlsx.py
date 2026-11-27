@@ -468,25 +468,29 @@ def main(argv: list[str] | None = None) -> int:
 
     is_in_place = dest_path is not None and _is_same_file(dest_path, xlsx_path)
 
-    # Protect Excel What-If data tables (<f t="dataTable">) from in-place LibreOffice corruption;
-    # fail closed on corrupt OOXML zip/XML rather than assuming no data tables exist.
+    # Protect Excel What-If data tables (<f t="dataTable">) from in-place LibreOffice corruption.
+    # Fail closed on corrupt OOXML zip/XML when an in-place overwrite is requested; in non-destructive
+    # read-only (--check-only / default) or separate --output modes, warn and let the audit proceed.
+    warnings: list[str] = []
+    data_table_locs: list[str] = []
     try:
         data_table_locs = workbook_has_data_tables(xlsx_path)
     except WorkbookLoadError as exc:
-        print(
-            json.dumps(
-                {
-                    "status": "error",
-                    "file": str(xlsx_path),
-                    "recalculated_with_libreoffice": False,
-                    "message": str(exc),
-                },
-                indent=2,
+        if is_in_place:
+            print(
+                json.dumps(
+                    {
+                        "status": "error",
+                        "file": str(xlsx_path),
+                        "recalculated_with_libreoffice": False,
+                        "message": str(exc),
+                    },
+                    indent=2,
+                )
             )
-        )
-        return 1
+            return 1
+        warnings.append(f"Could not inspect input XML for Excel What-If data tables: {exc}")
 
-    warnings: list[str] = []
     if data_table_locs:
         locs_preview = ", ".join(data_table_locs[:5])
         if len(data_table_locs) > 5:

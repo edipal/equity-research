@@ -52,13 +52,13 @@ Pull live cross-sheet links from Task 2's workbook (`Income Statement`, `Cash Fl
 **Worked Illustrative Example (Every figure mathematically reconciled):**
 Assume illustrative current share price `$42.00`, fully diluted shares `100.0M`, Total Gross Debt `$500.0M`, Cash & Marketable Securities `$50.0M` (`Net Debt = $450.0M`), Preferred `$0`, NCI `$0`, Equity Investments `$0`:
 
-1. **WACC (Gross-Debt Basis on `WACC` tab):**
+1. **WACC (3-Tranche Gross Capitalization `E + D + P` on `WACC` tab):**
    - `Market Cap (E) = $42.00 × 100.0M = $4,200.0M ($4.2B)`
-   - `Total Gross Debt (D) = $500.0M` → `Total Capitalization (E + D) = $4,700.0M`
-   - `Equity Weight = $4,200.0 / $4,700.0 = 89.36%` | `Debt Weight = $500.0 / $4,700.0 = 10.64%` (sum `= 100.00%`)
+   - `Total Gross Debt (D) = $500.0M` | `Preferred Stock (P) = $0.0M` → `Total Capitalization (E + D + P) = $4,700.0M`
+   - `Equity Weight = $4,200.0 / $4,700.0 = 89.36%` | `Debt Weight = $500.0 / $4,700.0 = 10.64%` | `Preferred Weight = 0.00%` (sum `= 100.00%`)
    - `Cost of Equity (Ke) = 4.20% Rf + 1.30 Beta × 5.50% ERP = 11.35%`
    - `After-Tax Cost of Debt = 6.50% Pre-Tax Kd × (1 - 25.0% Tax Rate) = 4.875%`
-   - `WACC = (89.36% × 11.35%) + (10.64% × 4.875%) = 10.14% + 0.52% = 10.66%`
+   - `WACC = (89.36% × 11.35%) + (10.64% × 4.875%) + (0.00% × Kp) = 10.14% + 0.52% + 0.00% = 10.66%`
 
 2. **5-Year Mid-Year UFCF & Mid-Year Perpetuity Terminal Value (`DCF` tab):**
    - Illustrative 5-year UFCFs (`[FY+1]E–[FY+5]E`): `$250M`, `$320M`, `$390M`, `$450M`, `$500M`

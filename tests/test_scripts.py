@@ -1481,6 +1481,30 @@ class TestRecalcXlsx(unittest.TestCase):
             self.assertIn("What-If data tables", payload["message"])
             self.assertEqual(path.read_bytes(), corrupt_bytes)
 
+            # 3. Default read-only mode writes nothing: data-table pre-check error should warn, not block audit
+            valid_path = Path(tmp) / "valid_readonly.xlsx"
+            wb_ok = openpyxl.Workbook()
+            ws_ok = wb_ok.active
+            ws_ok["A1"] = 42
+            wb_ok.save(valid_path)
+            wb_ok.close()
+
+            with (
+                mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value=None),
+                mock.patch.object(
+                    recalc_xlsx_mod,
+                    "workbook_has_data_tables",
+                    side_effect=recalc_xlsx_mod.WorkbookLoadError("unparseable custom sheet XML"),
+                ),
+            ):
+                rc_ro, payload_ro = self._run_main([str(valid_path)])
+
+            self.assertEqual(rc_ro, 0, payload_ro)
+            self.assertEqual(payload_ro["status"], "success")
+            self.assertEqual(payload_ro["mode"], "check_only")
+            self.assertFalse(payload_ro["modified_file"])
+            self.assertIn("What-If data tables", payload_ro.get("warning", ""))
+
     def test_literal_na_in_formula_valid_cached_passes_while_cached_na_and_static_ref_fail(self) -> None:
         import xml.etree.ElementTree as ET
 
