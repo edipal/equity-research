@@ -864,6 +864,33 @@ class TestRecalcXlsx(unittest.TestCase):
                 if os.name != "nt":
                     self.assertEqual(src_path.stat().st_mode & 0o777, 0o640)
 
+    def test_output_flag_without_libreoffice_emits_error_and_never_succeeds_silently(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src_path = Path(tmp) / "input.xlsx"
+            out_path = Path(tmp) / "recalced.xlsx"
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws["A1"] = 42
+            wb.save(src_path)
+
+            with mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value=None):
+                for extra_args in ([], ["--allow-unrecalculated"]):
+                    with self.subTest(extra_args=extra_args):
+                        rc, payload = self._run_main(
+                            [str(src_path), "--output", str(out_path), *extra_args]
+                        )
+                        self.assertEqual(rc, 1, payload)
+                        self.assertEqual(payload["status"], "error")
+                        self.assertEqual(Path(payload["file"]), out_path.resolve())
+                        self.assertEqual(Path(payload["source_file"]), src_path.resolve())
+                        self.assertFalse(payload["recalculated_with_libreoffice"])
+                        self.assertEqual(
+                            payload["message"],
+                            "Cannot write recalculated --output workbook because "
+                            "LibreOffice (soffice) is not installed on PATH.",
+                        )
+                        self.assertFalse(out_path.exists())
+
     def test_real_process_group_timeout_kills_spawned_child(self) -> None:
         if os.name == "nt":
             self.skipTest("POSIX process-group kill test")

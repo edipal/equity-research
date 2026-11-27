@@ -306,7 +306,7 @@ Source: [Firm Name] estimates
 ## FORMATTING REQUIREMENTS
 
 ### 1. Page 1 Requirements
-- Clear rating (MAINTAIN OUTPERFORM, RAISE TO BUY, etc.)
+- Clear rating (MAINTAIN BUY, RAISE TO BUY, LOWER TO HOLD, etc.)
 - Updated price target prominently displayed
 - Summary table with old/new estimates
 - 3-4 paragraph-length bullets with ■ character

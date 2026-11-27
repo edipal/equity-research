@@ -439,6 +439,25 @@ def main(argv: list[str] | None = None) -> int:
         dest_path = sibling
 
     soffice = find_soffice()
+    if soffice is None and args.output:
+        assert dest_path is not None
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "file": str(dest_path),
+                    "source_file": str(xlsx_path),
+                    "recalculated_with_libreoffice": False,
+                    "message": (
+                        "Cannot write recalculated --output workbook because "
+                        "LibreOffice (soffice) is not installed on PATH."
+                    ),
+                },
+                indent=2,
+            )
+        )
+        return 1
+
     recalculated = False
     note: str | None = None
 

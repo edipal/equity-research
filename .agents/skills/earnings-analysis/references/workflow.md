@@ -98,7 +98,7 @@ Many companies state their fiscal year in the earnings release header. Search `[
 
 **RED FLAGS (for "latest quarter" requests):** Release date > 90 days old without user requesting a historical period, mismatched release vs. transcript quarter, or relying on memory instead of primary filings.
 
-**Step 1c: Handle Naming Variations**
+**Step 1d: Handle Naming Variations**
 
 Companies use different terminology - recognize these patterns:
 
@@ -395,7 +395,7 @@ If creating XLS, include:
 
 ### Step 15: Quality Checklist
 
-Before publishing, verify:
+Before staging the draft, verify:
 
 **Content:**
 - [ ] Beat/miss clearly stated and quantified
