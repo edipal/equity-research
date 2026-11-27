@@ -1,0 +1,31 @@
+{
+  "mcpServers": {
+    "factset": {
+      "url": "https://mcp.factset.com/mcp"
+    },
+    "sp-global": {
+      "url": "https://kfinance.kensho.com/integrations/mcp"
+    },
+    "daloopa": {
+      "url": "https://mcp.daloopa.com/server/mcp"
+    },
+    "lseg": {
+      "url": "https://api.analytics.lseg.com/lfa/mcp"
+    },
+    "morningstar": {
+      "url": "https://mcp.morningstar.com/mcp"
+    },
+    "moodys": {
+      "url": "https://api.moodys.com/genai-ready-data/m1/mcp"
+    },
+    "aiera": {
+      "url": "https://mcp-pub.aiera.com"
+    },
+    "mtnewswire": {
+      "url": "https://vast-mcp.blueskyapi.com/mtnewswires"
+    },
+    "pitchbook": {
+      "url": "https://premium.mcp.pitchbook.com/mcp"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+Equity Research AI Harness (Google Antigravity)
+
+This repository includes skills, workflows, and agent patterns extracted and
+adapted from Anthropic's `financial-services` repository:
+  https://github.com/anthropics/financial-services
+  Licensed under the Apache License, Version 2.0.
+
+Summary of modifications for Google Antigravity:
+- Reorganized skills into Google Antigravity's native `.agents/skills/<name>/SKILL.md`
+  layout (auto-discovered and invocable as `/<name>` slash commands).
+- Added Antigravity workspace root guidance (`AGENTS.md`), modular rules
+  (`.agents/rules/*.md` with `always_on`, `model_decision`, and `glob` triggers),
+  and custom agents (`.agents/agents/*.md`).
+- Adapted tool and authoring instructions from Claude/Office JS/Cowork conventions
+  to Antigravity's native Python (`openpyxl`, `python-docx`, `python-pptx`,
+  `matplotlib`) workflow and added `scripts/recalc_xlsx.py` and
+  `scripts/validate_harness.py`.
+- Added opt-in institutional MCP template (`config/mcp_config.example.json`) and
+  open-access data guidance (`docs/data-sources.md`).
