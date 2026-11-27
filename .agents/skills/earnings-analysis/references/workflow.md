@@ -498,7 +498,7 @@ Before publishing, verify:
 
 Provide user with:
 
-1. **DOCX file**: `[Company]_Q[X]_[Year]_Earnings_Update.docx`
+1. **DOCX file**: `research/companies/<TICKER>/reports/<TICKER>_Q[Quarter]FY[Year]_Earnings_YYYY-MM-DD.docx`
 2. **Chart files**: All PNG/JPG charts (for reference)
 3. **Optional XLS**: Updated financial model if maintained
 

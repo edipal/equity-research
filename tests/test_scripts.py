@@ -162,6 +162,27 @@ class TestValidateHarness(unittest.TestCase):
             errors, _, _ = validate_harness_mod.validate_harness(base)
             self.assertTrue(any("broken relative link" in e for e in errors), errors)
 
+    def test_validates_backticked_markdown_links_while_ignoring_code_spans(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            create_minimal_valid_harness(base)
+            # Valid backticked link and links completely inside inline code spans should pass
+            (base / "README.md").write_text(
+                "Valid: [`docs/guide.md`](docs/guide.md) and [see `guide.md`](docs/guide.md).\n"
+                "Ignored code snippets: `[missing](docs/missing.md)` and ``[`missing`](docs/missing.md)``.\n",
+                encoding="utf-8",
+            )
+            errors, _, _ = validate_harness_mod.validate_harness(base)
+            self.assertEqual(errors, [], f"Unexpected errors for valid/code-span links: {errors}")
+
+            # Broken link with backticked display text MUST be caught
+            (base / "README.md").write_text("Broken: [`missing`](docs/missing.md).\n", encoding="utf-8")
+            errors, _, _ = validate_harness_mod.validate_harness(base)
+            self.assertTrue(
+                any("broken relative link 'docs/missing.md'" in e for e in errors),
+                f"Expected broken backticked link error, got: {errors}",
+            )
+
     def test_rejects_mcp_server_missing_endpoint(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -344,6 +365,89 @@ class TestRecalcXlsx(unittest.TestCase):
             self.assertEqual(Path(payload["file"]), converted_target.resolve())
             self.assertTrue(converted_target.exists())
 
+    def test_checks_tab_quoted_error_literals_do_not_false_positive(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "checks_tab.xlsx"
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Checks"
+            ws["A2"] = 10
+            ws["B1"] = '=COUNTIF(A2:A10, "#REF!")'
+            ws["B2"] = '=IFERROR(A2/2, "#DIV/0!")'
+            ws["B3"] = '=IF(A2="say ""#NAME?""", 0, 1)'
+            wb.save(path)
+
+            with mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value=None):
+                rc, payload = self._run_main([str(path), "--allow-unrecalculated"])
+
+            self.assertEqual(rc, 0, payload)
+            self.assertEqual(payload["status"], "success")
+            self.assertEqual(payload["total_errors"], 0)
+            self.assertEqual(payload["error_summary"], {})
+            self.assertEqual(payload["total_formulas"], 3)
+
+    def test_array_formula_counted_and_scanned_accurately(self) -> None:
+        from openpyxl.worksheet.formula import ArrayFormula
+
+        with tempfile.TemporaryDirectory() as tmp:
+            clean_path = Path(tmp) / "array_clean.xlsx"
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Model"
+            ws["A1"] = 5
+            ws["B1"] = ArrayFormula("B1:B1", "=A1*2")
+            ws["B2"] = ArrayFormula("B2:B2", '=COUNTIF(A1:A5, "#REF!")')
+            wb.save(clean_path)
+
+            with mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value=None):
+                rc_strict, payload_strict = self._run_main([str(clean_path)])
+
+            self.assertEqual(rc_strict, 2, payload_strict)
+            self.assertEqual(payload_strict["status"], "unverified")
+            self.assertEqual(payload_strict["total_formulas"], 2)
+            self.assertEqual(payload_strict["uncached_formulas"], 2)
+            self.assertEqual(payload_strict["total_errors"], 0)
+
+            broken_path = Path(tmp) / "array_broken.xlsx"
+            wb2 = openpyxl.Workbook()
+            ws2 = wb2.active
+            ws2.title = "Model"
+            ws2["B1"] = ArrayFormula("B1:B1", "=SUM(A1,#REF!)")
+            wb2.save(broken_path)
+
+            with mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value=None):
+                rc_broken, payload_broken = self._run_main([str(broken_path)])
+
+            self.assertEqual(rc_broken, 1, payload_broken)
+            self.assertEqual(payload_broken["status"], "errors_found")
+            self.assertEqual(payload_broken["total_formulas"], 1)
+            self.assertEqual(payload_broken["total_errors"], 1)
+            self.assertEqual(payload_broken["error_summary"]["#REF!"]["locations"], ["Model!B1"])
+
+    def test_corrupt_xlsx_and_directory_return_structured_json_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            corrupt = Path(tmp) / "corrupt.xlsx"
+            corrupt.write_bytes(b"definitely not a zip archive")
+
+            with mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value=None):
+                rc_corrupt, payload_corrupt = self._run_main([str(corrupt)])
+            self.assertEqual(rc_corrupt, 1)
+            self.assertEqual(payload_corrupt["status"], "error")
+            self.assertIn("Failed to open workbook", payload_corrupt["message"])
+
+            # Verify CLI execution never dumps a raw Python traceback
+            proc = subprocess.run(
+                [sys.executable, str(RECALC_XLSX_PATH), str(tmp)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(proc.returncode, 1)
+            self.assertNotIn("Traceback", proc.stdout + proc.stderr)
+            dir_payload = json.loads(proc.stdout)
+            self.assertEqual(dir_payload["status"], "error")
+            self.assertIn("Not a file", dir_payload["message"])
+
 
 @unittest.skipIf(openpyxl is None, "openpyxl is required for DCF validation tests")
 class TestValidateDcf(unittest.TestCase):
@@ -440,6 +544,127 @@ class TestValidateDcf(unittest.TestCase):
             self.assertTrue(any("#REF! at DCF!C6" in e for e in results["errors"]))
             self.assertTrue(any("Total formula errors: 2" in i for i in results["info"]))
             self.assertFalse(any("Total formula errors:" in e for e in results["errors"]))
+
+    def test_multi_scenario_invalid_base_case_with_sensitivity_table_and_full_wacc_label(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "multi_scenario_invalid_base.xlsx"
+            wb = openpyxl.Workbook()
+            ws_dcf = wb.active
+            ws_dcf.title = "DCF"
+
+            # Bear Case (valid: g=2% < WACC=11%)
+            ws_dcf["A5"] = "BEAR CASE ASSUMPTIONS"
+            ws_dcf["A6"] = "WACC"
+            ws_dcf["B6"] = 0.11
+            ws_dcf["A7"] = "Terminal Growth Rate"
+            ws_dcf["B7"] = 0.02
+
+            # Base Case (INVALID: g=10% > WACC=9%)
+            ws_dcf["A12"] = "BASE CASE ASSUMPTIONS"
+            ws_dcf["A13"] = "WACC"
+            ws_dcf["B13"] = 0.09
+            ws_dcf["A14"] = "Terminal Growth Rate"
+            ws_dcf["B14"] = 0.10
+
+            # Bull Case (valid: g=3% < WACC=8%)
+            ws_dcf["A19"] = "BULL CASE ASSUMPTIONS"
+            ws_dcf["A20"] = "WACC"
+            ws_dcf["B20"] = 0.08
+            ws_dcf["A21"] = "Terminal Growth Rate"
+            ws_dcf["B21"] = 0.03
+
+            ws_dcf["A50"] = "PV of Terminal Value"
+            ws_dcf["B50"] = 600.0
+            ws_dcf["A51"] = "Enterprise Value"
+            ws_dcf["B51"] = 1000.0
+
+            # Inline sensitivity table at row 87 per dcf-model/SKILL.md spec
+            ws_dcf["A86"] = "SENSITIVITY ANALYSIS"
+            ws_dcf["A87"] = "WACC vs Terminal Growth"
+            ws_dcf["B87"] = 0.02
+            ws_dcf["C87"] = 0.025
+            ws_dcf["D87"] = 0.03
+
+            # Spec-compliant WACC tab using "WEIGHTED AVERAGE COST OF CAPITAL" output label
+            ws_wacc = wb.create_sheet("WACC")
+            ws_wacc["A1"] = "COST OF EQUITY CALCULATION"
+            ws_wacc["A20"] = "WEIGHTED AVERAGE COST OF CAPITAL"
+            ws_wacc["B20"] = 0.09
+            wb.save(path)
+
+            results = validate_dcf_mod.validate_dcf_model(str(path))
+            self.assertEqual(results["status"], "FAIL", results)
+            self.assertEqual(results["error_count"], 1, results["errors"])
+            self.assertTrue(
+                any("Terminal growth (10.00% at DCF!B14) >= WACC (9.00% at DCF!B13)" in e for e in results["errors"]),
+                results["errors"],
+            )
+            # WACC tab label "WEIGHTED AVERAGE COST OF CAPITAL" must be located with zero warnings
+            self.assertEqual(results["warning_count"], 0, results["warnings"])
+            self.assertTrue(any("WACC (9.00%) in reasonable range" in i for i in results["info"]), results["info"])
+
+    def test_horizontal_scenarios_and_boolean_exclusion_in_validate_dcf(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "horizontal_scenarios.xlsx"
+            wb = openpyxl.Workbook()
+            ws_dcf = wb.active
+            ws_dcf.title = "DCF"
+            ws_dcf["A4"] = "Scenario"
+            ws_dcf["B4"] = "Bear"
+            ws_dcf["C4"] = "Base"
+            ws_dcf["D4"] = "Bull"
+            ws_dcf["A5"] = "WACC"
+            ws_dcf["B5"] = 0.11
+            ws_dcf["C5"] = 0.09
+            ws_dcf["D5"] = 0.08
+            ws_dcf["A6"] = "Terminal Growth Rate"
+            ws_dcf["B6"] = 0.02
+            ws_dcf["C6"] = 0.095  # INVALID Base Case (g > WACC)
+            ws_dcf["D6"] = 0.03
+
+            # Put a Python bool next to PV of Terminal Value to ensure bool != 1
+            ws_dcf["A10"] = "PV of Terminal Value"
+            ws_dcf["B10"] = True
+            ws_dcf["C10"] = 600.0
+            ws_dcf["A11"] = "Enterprise Value"
+            ws_dcf["B11"] = 1000.0
+            ws_dcf["A20"] = "Sensitivity Analysis"
+
+            ws_wacc = wb.create_sheet("WACC")
+            ws_wacc["A5"] = "WEIGHTED AVERAGE COST OF CAPITAL"
+            ws_wacc["B5"] = 0.09
+            wb.save(path)
+
+            results = validate_dcf_mod.validate_dcf_model(str(path))
+            self.assertEqual(results["status"], "FAIL", results)
+            self.assertTrue(
+                any("9.50%" in e and "9.00%" in e for e in results["errors"]),
+                results["errors"],
+            )
+            self.assertTrue(
+                any("Terminal value is 60.0% of EV" in i for i in results["info"]),
+                results["info"],
+            )
+
+    def test_validate_dcf_handles_checks_countif_and_array_formula(self) -> None:
+        from openpyxl.worksheet.formula import ArrayFormula
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "dcf_with_checks_and_array.xlsx"
+            self._build_compliant_two_sheet_dcf(path, with_formula=False)
+            wb = openpyxl.load_workbook(path)
+            ws_checks = wb.create_sheet("Checks")
+            ws_checks["A1"] = "Ref Errors"
+            ws_checks["B1"] = '=COUNTIF(DCF!A1:Z50, "#REF!")'
+            ws_dcf = wb["DCF"]
+            ws_dcf["C10"] = ArrayFormula("C10:C10", "=B6+B7")
+            wb.save(path)
+
+            results = validate_dcf_mod.validate_dcf_model(str(path))
+            # Neither Checks!B1 nor DCF!C10 has a formula error; both should be counted as uncached formulas
+            self.assertFalse(any("#REF!" in e for e in results["errors"]), results["errors"])
+            self.assertTrue(any("Total formulas: 2" in i for i in results["info"]), results["info"])
+            self.assertTrue(any("Uncached formulas: 2" in i for i in results["info"]), results["info"])
 
 
 if __name__ == "__main__":

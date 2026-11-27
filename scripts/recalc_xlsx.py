@@ -15,12 +15,20 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
+import zipfile
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 EXCEL_ERRORS = ("#REF!", "#DIV/0!", "#VALUE!", "#NAME?", "#N/A", "#NUM!", "#NULL!")
+STRING_LITERAL_RE = re.compile(r'"(?:""|[^"])*"')
+
+
+class WorkbookLoadError(RuntimeError):
+    """Raised when an Excel workbook cannot be opened or parsed by openpyxl."""
 
 
 class JsonArgumentParser(argparse.ArgumentParser):
@@ -153,8 +161,19 @@ def recalculate_with_libreoffice(
         return True, "ok", output_path, note
 
 
+def extract_formula_text(val_f) -> str | None:
+    """Extract formula text from standard string formulas and openpyxl ArrayFormula objects."""
+    if isinstance(val_f, str):
+        return val_f if val_f.startswith("=") else None
+    if type(val_f).__name__ == "ArrayFormula":
+        text = getattr(val_f, "text", None)
+        if isinstance(text, str) and text:
+            return text if text.startswith("=") else f"={text}"
+    return None
+
+
 def detect_cell_error(cell_v, val_f) -> str | None:
-    """Return Excel error token for a cell without false-positiving on prose text."""
+    """Return Excel error token for a cell without false-positiving on prose or quoted string literals."""
     val_v = cell_v.value
 
     # 1. Cached error value (openpyxl error data_type or exact Excel error token)
@@ -163,10 +182,12 @@ def detect_cell_error(cell_v, val_f) -> str | None:
     if isinstance(val_v, str) and val_v in EXCEL_ERRORS:
         return val_v
 
-    # 2. Embedded error token inside a formula string (e.g., =SUM(A1,#REF!))
-    if isinstance(val_f, str) and val_f.startswith("="):
+    # 2. Embedded error token inside a formula string (ignoring double-quoted string literals)
+    formula_text = extract_formula_text(val_f)
+    if formula_text is not None:
+        stripped_formula = STRING_LITERAL_RE.sub("", formula_text)
         for err in EXCEL_ERRORS:
-            if err in val_f:
+            if err in stripped_formula:
                 return err
 
     return None
@@ -175,6 +196,7 @@ def detect_cell_error(cell_v, val_f) -> str | None:
 def scan_workbook(xlsx_path: Path) -> dict:
     try:
         import openpyxl
+        from openpyxl.utils.exceptions import InvalidFileException
     except ImportError as exc:
         print(
             json.dumps(
@@ -187,8 +209,17 @@ def scan_workbook(xlsx_path: Path) -> dict:
         )
         raise SystemExit(1)
 
-    wb_formulas = openpyxl.load_workbook(xlsx_path, data_only=False)
-    wb_values = openpyxl.load_workbook(xlsx_path, data_only=True)
+    wb_formulas = None
+    wb_values = None
+    try:
+        wb_formulas = openpyxl.load_workbook(xlsx_path, data_only=False)
+        wb_values = openpyxl.load_workbook(xlsx_path, data_only=True)
+    except (zipfile.BadZipFile, InvalidFileException, ET.ParseError, KeyError, OSError, ValueError) as exc:
+        if wb_formulas is not None:
+            wb_formulas.close()
+        if wb_values is not None:
+            wb_values.close()
+        raise WorkbookLoadError(f"Failed to open workbook '{xlsx_path}': {exc}") from exc
 
     total_formulas = 0
     uncached_formulas = 0
@@ -206,7 +237,7 @@ def scan_workbook(xlsx_path: Path) -> dict:
                     cell_v = ws_v[cell_f.coordinate]
                     val_v = cell_v.value
 
-                    is_formula = isinstance(val_f, str) and val_f.startswith("=")
+                    is_formula = extract_formula_text(val_f) is not None
                     if is_formula:
                         total_formulas += 1
                         if val_v is None:
@@ -237,6 +268,9 @@ def main(argv: list[str] | None = None) -> int:
     xlsx_path = Path(args.path).resolve()
     if not xlsx_path.exists():
         print(json.dumps({"status": "error", "message": f"File not found: {xlsx_path}"}, indent=2))
+        return 1
+    if not xlsx_path.is_file():
+        print(json.dumps({"status": "error", "message": f"Not a file: {xlsx_path}"}, indent=2))
         return 1
 
     recalculated, lo_status, target_path, note = recalculate_with_libreoffice(
@@ -270,7 +304,21 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    scan = scan_workbook(target_path)
+    try:
+        scan = scan_workbook(target_path)
+    except WorkbookLoadError as exc:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "file": str(target_path),
+                    "recalculated_with_libreoffice": recalculated,
+                    "message": str(exc),
+                },
+                indent=2,
+            )
+        )
+        return 1
 
     if scan["total_errors"] > 0:
         status = "errors_found"

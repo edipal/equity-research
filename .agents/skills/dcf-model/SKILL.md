@@ -67,8 +67,8 @@ These constraints apply throughout all DCF model building. Review before startin
 **Scenario Blocks:**
 - Create separate blocks for Bear/Base/Bull cases
 - Show assumptions horizontally across projection years within each block
-- Use IF formulas: `=IF($B$6=1,[Bear cell],IF($B$6=2,[Base cell],[Bull cell]))`
-- Verify formulas reference correct scenario block cells
+- Create a consolidation column with `INDEX` formulas (e.g., `=INDEX(B10:D10, 1, $B$6)`) and reference that consolidation column from projections (avoid scattered nested `IF` formulas)
+- Verify consolidation column formulas reference the correct Bear/Base/Bull scenario block cells
 
 ## DCF Process Workflow
 
@@ -695,14 +695,14 @@ This vertical layout makes it hard to see the progression across years within ea
 - Not how businesses actually operate
 
 **Instead:**
-`S&M: =E29*0.15    // E29 = Revenue (CORRECT)`
+`S&M: =E29*$E$15    // E29 = Revenue, $E$15 = S&M % of Revenue assumption cell (CORRECT — never hardcode percentages in formulas)`
 
 ### TOP 5 ERRORS SUMMARY
 
 1. **Formula row references off** → Define ALL row positions BEFORE writing formulas
 2. **Missing cell comments** → Add comments AS cells are created, not at end
 3. **Simplified sensitivity tables** → Populate all cells with full DCF recalc formulas, not approximations
-4. **Scenario block references wrong** → Ensure IF formulas pull from correct Bear/Base/Bull blocks
+4. **Scenario block references wrong** → Ensure consolidation column `INDEX` formulas pull from the correct Bear/Base/Bull blocks
 5. **No borders** → Add professional section borders for client-ready appearance
 
 In addition, be aware of these errors:
@@ -900,7 +900,7 @@ Row,Content
 2,Ticker: [XXX] | Date: [Date] | Year End: [FYE]
 3,Blank
 4,Case Selector Cell (1=Bear 2=Base 3=Bull)
-5,Case Name Display (formula: =IF([Selector]=1"Bear"IF([Selector]=2"Base""Bull")))
+5,Case Name Display (formula: =CHOOSE($B$6,"Bear","Base","Bull"))
 ```
 
 **Section 2: Market Data (NOT case dependent)**
@@ -929,9 +929,9 @@ Gross Profit,XXX,XXX,XXX,XXX,[=E29*E33],[=F29*F33],[=G29*G33]
   % margin,XX%,XX%,XX%,XX%,[=E33/E29],[=F33/F29],[=G33/G29]
 ,,,,,,
 Operating Expenses:,,,,,,,
-  S&M,XXX,XXX,XXX,XXX,[=E29*0.15],[=F29*0.14],[=G29*0.13]
-  R&D,XXX,XXX,XXX,XXX,[=E29*0.12],[=F29*0.11],[=G29*0.10]
-  G&A,XXX,XXX,XXX,XXX,[=E29*0.08],[=F29*0.07],[=G29*0.07]
+  S&M,XXX,XXX,XXX,XXX,[=E29*E$15],[=F29*F$15],[=G29*G$15]
+  R&D,XXX,XXX,XXX,XXX,[=E29*E$16],[=F29*F$16],[=G29*G$16]
+  G&A,XXX,XXX,XXX,XXX,[=E29*E$17],[=F29*F$17],[=G29*G$17]
   Total OpEx,XXX,XXX,XXX,XXX,[=E36+E37+E38],[=F36+F37+F38],[=G36+G37+G38]
 ,,,,,,
 EBIT,XXX,XXX,XXX,XXX,[=E33-E39],[=F33-F39],[=G33-G39]
@@ -1004,33 +1004,33 @@ Implied Upside/(Downside),XX%,,,,,
 
 ```csv
 COST OF EQUITY CALCULATION,,
-Risk-Free Rate (10Y Treasury),X.XX%,[Yellow input]
-Beta (5Y monthly),X.XX,[Yellow input]
-Equity Risk Premium,X.XX%,[Yellow input]
-Cost of Equity,X.XX%,[Calculated blue]
+Risk-Free Rate (10Y Treasury),X.XX%,[Input: blue font, light grey fill (#F2F2F2)]
+Beta (5Y monthly),X.XX,[Input: blue font, light grey fill (#F2F2F2)]
+Equity Risk Premium,X.XX%,[Input: blue font, light grey fill (#F2F2F2)]
+Cost of Equity,X.XX%,[Formula: black font]
 ,,
 COST OF DEBT CALCULATION,,
-Credit Rating,AA-,[Yellow input]
-Pre-Tax Cost of Debt,X.XX%,[Yellow input]
-Tax Rate,XX.X%,[Link to DCF sheet]
-After-Tax Cost of Debt,X.XX%,[Calculated blue]
+Credit Rating,AA-,[Input: blue font, light grey fill (#F2F2F2)]
+Pre-Tax Cost of Debt,X.XX%,[Input: blue font, light grey fill (#F2F2F2)]
+Tax Rate,XX.X%,[Link to DCF: green font]
+After-Tax Cost of Debt,X.XX%,[Formula: black font]
 ,,
 CAPITAL STRUCTURE,,
-Current Stock Price,$XX.XX,[Link to DCF]
-Shares Outstanding (M),XX.X,[Link to DCF]
-Market Capitalization ($M),"X,XXX",[Calculated]
+Current Stock Price,$XX.XX,[Link to DCF: green font]
+Shares Outstanding (M),XX.X,[Link to DCF: green font]
+Market Capitalization ($M),"X,XXX",[Formula: black font]
 ,,
-Total Debt ($M),XXX,[Yellow input]
-Cash & Equivalents ($M),XXX,[Yellow input]
-Net Debt ($M),XXX,[Calculated]
+Total Debt ($M),XXX,[Input: blue font, light grey fill (#F2F2F2)]
+Cash & Equivalents ($M),XXX,[Input: blue font, light grey fill (#F2F2F2)]
+Net Debt ($M),XXX,[Formula: black font]
 ,,
-Enterprise Value ($M),"X,XXX",[Calculated]
+Enterprise Value ($M),"X,XXX",[Formula: black font]
 ,,
 WACC CALCULATION,Weight,Cost,Contribution
 Equity,XX.X%,X.X%,X.XX%
 Debt,XX.X%,X.X%,X.XX%
 ,,
-WEIGHTED AVERAGE COST OF CAPITAL,X.XX%,[Green output]
+WEIGHTED AVERAGE COST OF CAPITAL,X.XX%,[Output: black bold font, medium blue fill (#BDD7EE)]
 ```
 
 **Key WACC Formulas:**
@@ -1067,8 +1067,8 @@ WACC = (Cost of Equity × Equity Weight) + (After-tax Cost of Debt × Debt Weigh
    - Recalculates the full DCF with those specific assumptions
    - Returns the implied share price for that scenario
 3. All cells must contain working formulas when delivered
-4. Format cells with conditional formatting: Green scale for higher values, red scale for lower values
-5. Bold the base case cell
+4. Keep styling aligned with the Blue/Grey palette (white data cells with black formula font; apply conditional formatting color scales only if explicitly requested by the user)
+5. Highlight the center base-case cell with medium blue fill (`#BDD7EE`) and bold font
 6. Leave 1-2 blank rows between tables
 
 **No manual intervention required** - the sensitivity tables must be fully functional when the user opens the file.
@@ -1112,7 +1112,7 @@ This approach centralizes scenario logic, making the model easier to audit and m
 
 ## Deliverables Structure
 
-**File naming**: `[Ticker]_DCF_Model_[Date].xlsx`
+**File naming**: `research/companies/<TICKER>/models/<TICKER>_DCF_YYYY-MM-DD.xlsx`
 
 **Two sheets**:
 1. **DCF** - Complete model with Bear/Base/Bull cases + three sensitivity tables at bottom (WACC vs Terminal Growth, Revenue Growth vs EBIT Margin, Beta vs Risk-Free Rate)
@@ -1193,7 +1193,7 @@ This approach centralizes scenario logic, making the model easier to audit and m
 
 1. **Build Excel model** using `openpyxl` with live formulas (not hardcoded values)
 2. **Follow `xlsx-author` conventions** for formula construction and formatting
-3. **Apply fill colors only if requested** by user or if specific brand guidelines are provided
+3. **Apply the default Blue/Grey fill palette** (dark blue section headers, light blue column headers, optional light grey input fills, medium blue summary outputs), overridden only if the user supplies a template or explicit brand color guidelines
 
 ### Before Delivering Model (MANDATORY)
 

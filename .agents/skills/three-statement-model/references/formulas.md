@@ -13,7 +13,7 @@ Cash Flow:            ΔCash = CFO + CFI + CFF
 Cash Tie-Out:         Ending Cash (CF) = Cash (BS Asset)
 Cash Monthly/Annual:  Closing Cash (Monthly) = Closing Cash (Annual)
 Retained Earnings:    Prior RE + Net Income - Dividends = Ending RE
-Equity Raise:         ΔCommon Stock/APIC (BS) = Equity Issuance (CFF)
+Common Stock / APIC:  Prior Common Stock/APIC + Equity Issuance (CFF) + SBC (IS) = Ending Common Stock/APIC
 Year 0 Equity:        Equity Raised (Year 0) = Beginning Equity (Year 1)
 ```
 
@@ -123,14 +123,20 @@ Interest Expense = Avg Debt Balance × Interest Rate
   (Use beginning balance to avoid circularity, or iterate if circular refs enabled)
 ```
 
-## Retained Earnings Formula
+## Retained Earnings & Common Stock / APIC Formulas
 
 ```
-Beginning Retained Earnings
-+ Net Income (from IS)
-+ Stock-Based Compensation (SBC) (from IS)
-- Dividends
-= Ending Retained Earnings
+Retained Earnings:
+  Beginning Retained Earnings
+  + Net Income (from IS)
+  - Dividends
+  = Ending Retained Earnings
+
+Common Stock / Additional Paid-In Capital (APIC):
+  Beginning Common Stock / APIC
+  + Equity Issuance (from CFF)
+  + Stock-Based Compensation (SBC) (from IS)
+  = Ending Common Stock / APIC
 ```
 
 ## NOL (Net Operating Loss) Schedule Formulas
@@ -199,8 +205,8 @@ LIABILITIES
   Total Liabilities
 
 EQUITY
-  Common Stock
-  Retained Earnings (from RE schedule)
+  Common Stock / APIC (Prior + Equity Issuance + SBC)
+  Retained Earnings (from RE schedule: Prior RE + NI - Dividends)
   Total Equity
 
 CHECK: Assets - Liabilities - Equity = 0
@@ -280,9 +286,9 @@ Net Income
 ```
 BS Balance Check:       = Assets - Liabilities - Equity  (must = 0)
 Cash Tie-Out:           = BS Cash - CF Ending Cash       (must = 0)
-RE Roll-Forward:        = Prior RE + NI + SBC - Div - BS RE  (must = 0)
+RE Roll-Forward:        = Prior RE + NI - Div - BS RE    (must = 0)
 DTA Tie-Out:            = NOL Schedule DTA - BS DTA      (must = 0)
-Equity Raise Tie-Out:   = ΔCommon Stock/APIC (BS) - Equity Issuance (CFF)  (must = 0)
+Common Stock/APIC:      = ΔCommon Stock/APIC (BS) - Equity Issuance (CFF) - SBC (IS)  (must = 0)
 Year 0 Equity Tie-Out:  = Equity Raised (Year 0) - Beginning Equity (Year 1)  (must = 0)
 Cash Monthly vs Annual: = Closing Cash (Monthly) - Closing Cash (Annual)  (must = 0)
 NOL Utilization Cap:    = NOL Utilized ≤ EBT × 80%       (must be TRUE for post-2017)

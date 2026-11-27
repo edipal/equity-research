@@ -6,8 +6,57 @@ Validates Excel DCF models for formula errors and common DCF mistakes
 
 import sys
 import json
+import re
 from pathlib import Path
 from typing import Optional
+
+EXCEL_ERRORS = ('#VALUE!', '#DIV/0!', '#REF!', '#NAME?', '#NULL!', '#NUM!', '#N/A')
+STRING_LITERAL_RE = re.compile(r'"(?:""|[^"])*"')
+SENSITIVITY_VS_RE = re.compile(r'\bvs\.?\b')
+
+
+def _is_number(value) -> bool:
+    """Return True for numeric values while excluding Python booleans."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _extract_formula_text(value) -> Optional[str]:
+    """Extract formula string from standard string formulas and openpyxl ArrayFormula objects."""
+    if isinstance(value, str):
+        return value if value.startswith('=') else None
+    if type(value).__name__ == 'ArrayFormula':
+        text = getattr(value, 'text', None)
+        if isinstance(text, str) and text:
+            return text if text.startswith('=') else f'={text}'
+    return None
+
+
+def _is_sensitivity_header(text: str) -> bool:
+    """Return True if a label belongs to a sensitivity table header rather than a model assumption."""
+    low = text.lower()
+    if 'sensitivity' in low:
+        return True
+    if 'wacc' in low and 'growth' in low:
+        return True
+    if SENSITIVITY_VS_RE.search(low) and any(
+        kw in low for kw in ('wacc', 'growth', 'margin', 'beta', 'multiple', 'discount')
+    ):
+        return True
+    return False
+
+
+def _is_wacc_label(text: str) -> bool:
+    low = text.lower()
+    if _is_sensitivity_header(low):
+        return False
+    return 'wacc' in low or 'weighted average cost of capital' in low
+
+
+def _is_terminal_growth_label(text: str) -> bool:
+    low = text.lower()
+    if _is_sensitivity_header(low):
+        return False
+    return 'terminal' in low and 'growth' in low
 
 
 class DCFModelValidator:
@@ -22,15 +71,35 @@ class DCFModelValidator:
         self.excel_path = excel_path
         self.openpyxl = openpyxl
 
-        if not Path(excel_path).exists():
+        path_obj = Path(excel_path)
+        if not path_obj.exists():
             raise FileNotFoundError(f"File not found: {excel_path}")
+        if not path_obj.is_file():
+            raise IsADirectoryError(f"Not a file: {excel_path}")
 
         self.workbook_formulas = openpyxl.load_workbook(excel_path, data_only=False)
-        self.workbook_values = openpyxl.load_workbook(excel_path, data_only=True)
+        try:
+            self.workbook_values = openpyxl.load_workbook(excel_path, data_only=True)
+        except Exception:
+            self.workbook_formulas.close()
+            raise
         self.errors = []
         self.warnings = []
         self.info = []
-        
+
+    def close(self) -> None:
+        """Close underlying openpyxl workbooks."""
+        if getattr(self, 'workbook_formulas', None) is not None:
+            self.workbook_formulas.close()
+        if getattr(self, 'workbook_values', None) is not None:
+            self.workbook_values.close()
+
+    def __enter__(self) -> "DCFModelValidator":
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.close()
+
     def validate_all(self) -> dict:
         """
         Run all validation checks
@@ -56,7 +125,7 @@ class DCFModelValidator:
         }
 
         return results
-    
+
     def check_sheet_structure(self):
         """Verify required sheets exist (2-sheet DCF + WACC spec with inline or separate sensitivity)."""
         required_sheets = ['DCF', 'WACC']
@@ -91,8 +160,7 @@ class DCFModelValidator:
 
     def check_formula_errors(self):
         """Check for Excel formula errors and uncached formulas in all sheets."""
-        excel_errors = ('#VALUE!', '#DIV/0!', '#REF!', '#NAME?', '#NULL!', '#NUM!', '#N/A')
-        error_details = {err: [] for err in excel_errors}
+        error_details = {err: [] for err in EXCEL_ERRORS}
         total_errors = 0
         total_formulas = 0
         uncached_formulas = 0
@@ -108,21 +176,23 @@ class DCFModelValidator:
                     val_f = formula_cell.value
                     val_v = value_cell.value
 
-                    is_formula = isinstance(val_f, str) and val_f.startswith('=')
+                    formula_text = _extract_formula_text(val_f)
+                    is_formula = formula_text is not None
                     if is_formula:
                         total_formulas += 1
                         if val_v is None:
                             uncached_formulas += 1
 
-                    # Detect Excel error without false-positiving on prose notes containing error text
+                    # Detect Excel error without false-positiving on prose notes or string literals
                     detected_err = None
                     if getattr(value_cell, 'data_type', None) == 'e':
                         detected_err = str(val_v) if val_v is not None else '#VALUE!'
-                    elif isinstance(val_v, str) and val_v in excel_errors:
+                    elif isinstance(val_v, str) and val_v in EXCEL_ERRORS:
                         detected_err = val_v
                     elif is_formula:
-                        for err in excel_errors:
-                            if err in val_f:
+                        stripped_formula = STRING_LITERAL_RE.sub('', formula_text)
+                        for err in EXCEL_ERRORS:
+                            if err in stripped_formula:
                                 detected_err = err
                                 break
 
@@ -154,45 +224,94 @@ class DCFModelValidator:
         self._check_wacc_range()
         self._check_terminal_value_proportion()
 
+    def _collect_adjacent_rates(self, sheet, label_cell, allow_zero: bool = False):
+        """Collect all rate values (0 < v < 1, or 0 <= v < 1) adjacent to a label cell."""
+        entries = []
+        for offset in range(1, 6):
+            adj_cell = sheet.cell(label_cell.row, label_cell.column + offset)
+            val = adj_cell.value
+            if _is_number(val):
+                in_range = (0 <= val < 1) if allow_zero else (0 < val < 1)
+                if in_range:
+                    entries.append((adj_cell.column, float(val), f"{sheet.title}!{adj_cell.coordinate}"))
+        return entries
+
+    def _extract_rate_rows(self, sheet, max_row: int = 150, max_col: int = 20):
+        """Extract terminal-growth and WACC rows from a sheet, stopping before sensitivity tables."""
+        tg_rows = []
+        wacc_rows = []
+
+        for row in sheet.iter_rows(max_row=max_row, max_col=max_col):
+            # Stop scanning if we hit a sensitivity section header after collecting assumptions
+            row_texts = [c.value.lower() for c in row if isinstance(c.value, str) and c.value.strip()]
+            if any(_is_sensitivity_header(t) for t in row_texts):
+                if tg_rows or wacc_rows:
+                    break
+                continue
+
+            for cell in row:
+                if not (cell.value and isinstance(cell.value, str)):
+                    continue
+                if _is_terminal_growth_label(cell.value):
+                    entries = self._collect_adjacent_rates(sheet, cell, allow_zero=True)
+                    if entries:
+                        tg_rows.append((cell.row, entries))
+                elif _is_wacc_label(cell.value):
+                    entries = self._collect_adjacent_rates(sheet, cell, allow_zero=False)
+                    if entries:
+                        wacc_rows.append((cell.row, entries))
+
+        return tg_rows, wacc_rows
+
     def _check_terminal_growth_vs_wacc(self):
-        """Critical check: Terminal growth must be less than WACC"""
+        """Critical check: Terminal growth must be less than WACC across all scenarios."""
         try:
             dcf_sheet = self.workbook_values['DCF']
+            tg_rows, wacc_rows = self._extract_rate_rows(dcf_sheet)
 
-            terminal_growth = None
-            wacc = None
+            # Fallback to WACC sheet if WACC is not explicitly displayed on DCF sheet
+            if not wacc_rows and 'WACC' in self.workbook_values.sheetnames:
+                _, wacc_rows = self._extract_rate_rows(self.workbook_values['WACC'])
 
-            # Search for terminal growth and WACC values
-            for row in dcf_sheet.iter_rows(max_row=100, max_col=20):
-                for cell in row:
-                    if cell.value and isinstance(cell.value, str):
-                        cell_str = cell.value.lower()
-                        if 'terminal' in cell_str and 'growth' in cell_str:
-                            # Look for value in adjacent cells
-                            for offset in range(1, 5):
-                                adjacent = dcf_sheet.cell(cell.row, cell.column + offset).value
-                                if isinstance(adjacent, (int, float)) and 0 < adjacent < 1:
-                                    terminal_growth = adjacent
-                                    break
-                        if 'wacc' in cell_str and wacc is None:
-                            for offset in range(1, 5):
-                                adjacent = dcf_sheet.cell(cell.row, cell.column + offset).value
-                                if isinstance(adjacent, (int, float)) and 0 < adjacent < 1:
-                                    wacc = adjacent
-                                    break
+            if not tg_rows or not wacc_rows:
+                self.warnings.append("Could not locate terminal growth and WACC values")
+                return
 
-            if terminal_growth is not None and wacc is not None:
-                if terminal_growth >= wacc:
+            pairs = []
+            if len(tg_rows) == len(wacc_rows):
+                paired_rows = list(zip(tg_rows, wacc_rows))
+            else:
+                paired_rows = [
+                    (tg_row, min(wacc_rows, key=lambda wr: abs(tg_row[0] - wr[0])))
+                    for tg_row in tg_rows
+                ]
+
+            for (_, tg_entries), (_, wacc_entries) in paired_rows:
+                wacc_by_col = {col: (val, coord) for col, val, coord in wacc_entries}
+                matched_any = False
+                for col, tg_val, tg_coord in tg_entries:
+                    if col in wacc_by_col:
+                        w_val, w_coord = wacc_by_col[col]
+                        pairs.append((tg_val, tg_coord, w_val, w_coord))
+                        matched_any = True
+                if not matched_any:
+                    w_val, w_coord = wacc_entries[0][1], wacc_entries[0][2]
+                    for _, tg_val, tg_coord in tg_entries:
+                        pairs.append((tg_val, tg_coord, w_val, w_coord))
+
+            for tg_val, tg_coord, w_val, w_coord in pairs:
+                if tg_val >= w_val:
                     self.errors.append(
-                        f"CRITICAL: Terminal growth ({terminal_growth:.2%}) >= WACC ({wacc:.2%}). "
+                        f"CRITICAL: Terminal growth ({tg_val:.2%} at {tg_coord}) >= "
+                        f"WACC ({w_val:.2%} at {w_coord}). "
                         "This creates infinite value and is mathematically invalid."
                     )
+                elif len(pairs) == 1:
+                    self.info.append(f"✓ Terminal growth ({tg_val:.2%}) < WACC ({w_val:.2%})")
                 else:
                     self.info.append(
-                        f"✓ Terminal growth ({terminal_growth:.2%}) < WACC ({wacc:.2%})"
+                        f"✓ Terminal growth ({tg_val:.2%} at {tg_coord}) < WACC ({w_val:.2%} at {w_coord})"
                     )
-            else:
-                self.warnings.append("Could not locate terminal growth and WACC values")
 
         except KeyError:
             self.warnings.append("DCF sheet not found")
@@ -207,25 +326,21 @@ class DCFModelValidator:
                 if 'WACC' in self.workbook_values.sheetnames
                 else self.workbook_values['DCF']
             )
-            wacc = None
+            _, wacc_rows = self._extract_rate_rows(wacc_sheet, max_row=100, max_col=20)
+            wacc_values = []
+            for _, entries in wacc_rows:
+                for _, val, _ in entries:
+                    if val not in wacc_values:
+                        wacc_values.append(val)
 
-            for row in wacc_sheet.iter_rows(max_row=100, max_col=20):
-                for cell in row:
-                    if cell.value and isinstance(cell.value, str):
-                        if 'wacc' in cell.value.lower():
-                            for offset in range(1, 5):
-                                adjacent = wacc_sheet.cell(cell.row, cell.column + offset).value
-                                if isinstance(adjacent, (int, float)) and 0 < adjacent < 1:
-                                    wacc = adjacent
-                                    break
-
-            if wacc is not None:
-                if wacc < 0.05 or wacc > 0.20:
-                    self.warnings.append(
-                        f"WACC ({wacc:.2%}) is outside typical range (5%-20%). Verify calculation."
-                    )
-                else:
-                    self.info.append(f"✓ WACC ({wacc:.2%}) in reasonable range")
+            if wacc_values:
+                for wacc in wacc_values:
+                    if wacc < 0.05 or wacc > 0.20:
+                        self.warnings.append(
+                            f"WACC ({wacc:.2%}) is outside typical range (5%-20%). Verify calculation."
+                        )
+                    else:
+                        self.info.append(f"✓ WACC ({wacc:.2%}) in reasonable range")
             else:
                 self.warnings.append("Could not locate WACC value")
 
@@ -246,17 +361,19 @@ class DCFModelValidator:
                 for cell in row:
                     if cell.value and isinstance(cell.value, str):
                         cell_str = cell.value.lower()
+                        if _is_sensitivity_header(cell_str):
+                            continue
                         if 'terminal' in cell_str and 'value' in cell_str and 'pv' in cell_str:
                             for offset in range(1, 5):
                                 adjacent = dcf_sheet.cell(cell.row, cell.column + offset).value
-                                if isinstance(adjacent, (int, float)) and adjacent > 0:
-                                    terminal_value = adjacent
+                                if _is_number(adjacent) and adjacent > 0:
+                                    terminal_value = float(adjacent)
                                     break
                         if 'enterprise' in cell_str and 'value' in cell_str:
                             for offset in range(1, 5):
                                 adjacent = dcf_sheet.cell(cell.row, cell.column + offset).value
-                                if isinstance(adjacent, (int, float)) and adjacent > 0:
-                                    enterprise_value = adjacent
+                                if _is_number(adjacent) and adjacent > 0:
+                                    enterprise_value = float(adjacent)
                                     break
 
             if terminal_value is not None and enterprise_value is not None and enterprise_value > 0:
@@ -278,7 +395,6 @@ class DCFModelValidator:
 
         except Exception as e:
             self.warnings.append(f"Could not validate terminal value proportion: {str(e)}")
-    
 
 
 def validate_dcf_model(excel_path: str) -> dict:
@@ -291,8 +407,8 @@ def validate_dcf_model(excel_path: str) -> dict:
     Returns:
         Dict with validation results
     """
-    validator = DCFModelValidator(excel_path)
-    return validator.validate_all()
+    with DCFModelValidator(excel_path) as validator:
+        return validator.validate_all()
 
 
 def main():

@@ -61,6 +61,7 @@ STALE_PATTERNS = re.compile(
 )
 
 MD_LINK_RE = re.compile(r"(?<!!)\[[^\]]+\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
+CODE_SPAN_RE = re.compile(r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)")
 
 
 def _strip_matching_quotes(raw_val: str, rel_path: str, line_no: int, errors: list[str]) -> str:
@@ -190,10 +191,15 @@ def _iter_markdown_links(text: str) -> list[tuple[int, str]]:
             continue
         if in_fence:
             continue
-        # Remove inline code spans so code snippets are ignored
-        cleaned = re.sub(r"`[^`]*`", "", line)
+        # Replace inline code spans with a non-empty sentinel so code-formatted link labels
+        # like [`guide`](docs/guide.md) are still validated while links wholly inside code spans
+        # like `[a](b)` or ``[`a`](b)`` are ignored.
+        cleaned = CODE_SPAN_RE.sub("\x00", line)
         for match in MD_LINK_RE.finditer(cleaned):
-            links.append((line_no, match.group(1)))
+            target = match.group(1)
+            if "\x00" in target:
+                continue
+            links.append((line_no, target))
     return links
 
 

@@ -477,10 +477,10 @@ Valuation Implications:
   - Read Task 3 valuation tabs
   - Pull historical financials from Task 1
 - **Direct file operations** - Work with actual files
-  - Read: `[Company]_Research_Document_[Date].md`
-  - Read: `[Company]_Financial_Model_[Date].xlsx`
-  - Read: `chart_01.png`, `chart_02.png`, etc.
-  - Write: `[Company]_Initiation_Report_[Date].docx`
+  - Read: `research/companies/<TICKER>/reports/<TICKER>_Research_Document_<Date>.md`
+  - Read: `research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx`
+  - Read: `research/companies/<TICKER>/reports/charts/chart_01.png`, `chart_02.png`, etc.
+  - Write: `research/companies/<TICKER>/reports/<TICKER>_Initiation_Report_<Date>.docx`
 
 **DO NOT**: Manually copy/paste or describe what should be done
 **DO**: Use Python (`python-docx` and `openpyxl`) and Antigravity file tools to open files, extract data, and assemble the DOCX report
@@ -551,7 +551,7 @@ research/companies/<TICKER>/
 #### Table 1: Page 1 Summary Financials
 
 Use `openpyxl` to:
-1. Open `[Company]_Financial_Model_[Date].xlsx`
+1. Open `research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx`
 2. Read from `Income Statement` tab
 3. Extract key rows: Revenue, Gross Profit, EBITDA, Net Income, EPS, FCF
 4. Extract years: 2022A, 2023A, 2024A, 2025E, 2026E, 2027E
@@ -560,7 +560,7 @@ Use `openpyxl` to:
 #### Table 2: Full Income Statement (40-50 line items)
 
 Use `openpyxl` to:
-1. Open `[Company]_Financial_Model_[Date].xlsx`
+1. Open `research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx`
 2. Read entire `Income Statement` tab
 3. Extract all line items (40-50 rows)
 4. Extract columns for historical (2020A-2024A) + projected years (2025E-2029E)
@@ -569,7 +569,7 @@ Use `openpyxl` to:
 #### Table 3: Revenue by Product (20-30 rows)
 
 Use `openpyxl` to:
-1. Open `[Company]_Financial_Model_[Date].xlsx`
+1. Open `research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx`
 2. Read from `Revenue Model` tab
 3. Navigate to product section (typically starts ~row 5)
 4. Extract 20-30 rows showing each product category
@@ -578,7 +578,7 @@ Use `openpyxl` to:
 #### Table 4: Revenue by Geography (15-20 rows)
 
 Use `openpyxl` to:
-1. Open `[Company]_Financial_Model_[Date].xlsx`
+1. Open `research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx`
 2. Read from `Revenue Model` tab
 3. Navigate to geography section (typically starts ~row 40)
 4. Extract 15-20 rows showing each geographic region
@@ -588,7 +588,7 @@ Use `openpyxl` to:
 **Extract from:** Task 3 valuation tabs in Task 2's financial model (`Comparable Companies` tab)
 
 Use `openpyxl` to:
-1. Open `[Company]_Financial_Model_[Date].xlsx`
+1. Open `research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx`
 2. Read from `Comparable Companies` tab (added by Task 3)
 3. Extract full table with company names as row headers
 4. **CRITICAL**: Verify statistical summary rows are present at bottom:
@@ -612,7 +612,7 @@ Company      Ticker  Mkt Cap  EV/Rev  EV/Rev  EV/EBITDA  EV/EBITDA  P/E   Rev   
 Use `openpyxl` (following `xlsx-author` conventions) to extract these tables:
 
 **DCF Assumptions Table** (Task 3 `DCF` tab)
-- Open `[Company]_Financial_Model_[Date].xlsx`
+- Open `research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx`
 - Read from DCF tab
 - Extract columns A-C (Assumption, Value, Source)
 - Extract first 20 rows

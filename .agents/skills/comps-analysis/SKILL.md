@@ -246,7 +246,7 @@ Same structure as operating section: Max, 75th, Median, 25th, Min for every metr
 - Note: Prioritize MCP data sources (S&P Kensho, FactSet, Daloopa) if available for better accuracy and traceability
 
 **Key Definitions:**
-- EBITDA calculation method (Gross Profit + D&A, or Operating Income + D&A)
+- EBITDA calculation method (Operating Income (EBIT) + D&A, or Net Income + Interest + Taxes + D&A)
 - Free Cash Flow formula (Operating CF - CapEx)
 - Special metrics explained (Rule of 40, FCF Conversion)
 - Time period definitions (LTM, CAGR calculation periods)
@@ -325,13 +325,13 @@ If you have more than 15 metrics, you're probably including noise. Edit ruthless
 
 ### As You Build
 1. **Input all raw data first** - Complete the blue text before writing formulas
-2. **Add cell comments to ALL hard-coded inputs** - Right-click cell → Insert Comment → Document source OR assumption
+2. **Add cell comments to ALL hard-coded inputs** - Attach `openpyxl.comments.Comment(text, author)` to `cell.comment` documenting the source OR assumption
 
    **For sourced data, cite exactly where it came from:**
    - Example: "Bloomberg Terminal - MSFT Equity DES, accessed 2024-10-02"
    - Example: "Q4 2024 10-K filing, page 42, line item 'Total Revenue'"
    - Example: "FactSet consensus estimate as of 2024-10-02"
-   - **Include hyperlinks when possible**: Right-click cell → Link → paste URL to SEC filing, data source, or report
+   - **Include hyperlinks when possible**: Set `cell.hyperlink = "<url>"` (with standard hyperlink styling) pointing to the SEC filing, data source, or report
 
    **For assumptions, explain the reasoning:**
    - Example: "Assumed 15% EBITDA margin based on peer median, company does not disclose"
@@ -366,7 +366,7 @@ If you have more than 15 metrics, you're probably including noise. Edit ruthless
 
 ---
 
-## Section 6: Advanced Features
+## Section 7: Advanced Features
 
 ### Dynamic Headers
 For columns showing calculations, use clear unit labels:
@@ -402,7 +402,7 @@ This helps answer: "Is our target company trading rich or cheap vs. peers?"
 
 ---
 
-## Section 7: Workflow & Practical Tips
+## Section 8: Workflow & Practical Tips
 
 ### Step-by-Step Process
 1. **Set up structure** (30 minutes)
@@ -461,7 +461,7 @@ This helps answer: "Is our target company trading rich or cheap vs. peers?"
 
 ---
 
-## Section 8: Example Template Layout
+## Section 9: Example Template Layout
 
 **Simple Version (Start here):**
 ```
@@ -505,7 +505,7 @@ This helps answer: "Is our target company trading rich or cheap vs. peers?"
 
 ---
 
-## Section 9: Industry-Specific Additions (Optional)
+## Section 10: Industry-Specific Additions (Optional)
 
 Only add these if they're critical to your analysis. Most comps work fine with just core metrics.
 
@@ -526,7 +526,7 @@ Add if relevant: Asset Turnover, Inventory Turns, Backlog
 
 ---
 
-## Section 10: Red Flags & Warning Signs
+## Section 11: Red Flags & Warning Signs
 
 ### Data Quality Issues
 🚩 Inconsistent time periods (mixing quarterly and annual)  
@@ -540,14 +540,14 @@ Add if relevant: Asset Turnover, Inventory Turns, Backlog
 
 ### Comparability Issues
 🚩 Different fiscal year ends (causes timing problems)  
-🚩ixing pure-play and conglomerates  
+🚩 Mixing pure-play and conglomerates  
 🚩 Materially different business models labeled as "comps"
 
 **When in doubt, exclude the company.** Better to have 3 perfect comps than 6 questionable ones.
 
 ---
 
-## Section 11: Formulas Reference Guide
+## Section 12: Formulas Reference Guide
 
 ### Essential Excel Formulas
 ```excel

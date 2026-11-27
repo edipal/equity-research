@@ -586,8 +586,12 @@ These optional charts provide additional visual storytelling and help achieve th
 Create a text file documenting all charts:
 
 ```python
-def create_chart_index():
-    """Create index of all charts"""
+from pathlib import Path
+
+def create_chart_index(output_dir: str | Path) -> Path:
+    """Create index of all charts inside research/companies/<TICKER>/reports/charts/."""
+    charts_dir = Path(output_dir)
+    charts_dir.mkdir(parents=True, exist_ok=True)
 
     # 25 REQUIRED CHARTS
     required_charts = [
@@ -632,8 +636,9 @@ def create_chart_index():
         "chart_35_analyst_price_targets.png - Analyst Price Target Distribution [OPTIONAL]",
     ]
 
-    with open('chart_index.txt', 'w') as f:
-        f.write("CHART INDEX FOR [COMPANY] EQUITY RESEARCH REPORT\n")
+    index_path = charts_dir / "chart_index.txt"
+    with open(index_path, "w", encoding="utf-8") as f:
+        f.write("CHART INDEX FOR <TICKER> EQUITY RESEARCH REPORT\n")
         f.write("=" * 60 + "\n\n")
 
         f.write("4 MANDATORY CHARTS (Must be present):\n")
@@ -654,9 +659,10 @@ def create_chart_index():
         f.write("NOTE: Task 5 will embed ALL charts created (25-35) throughout\n")
         f.write("the report for visual density (1 chart every 200-300 words).\n")
 
-    print("✓ Created: chart_index.txt")
+    print(f"✓ Created: {index_path}")
+    return index_path
 
-create_chart_index()
+create_chart_index("research/companies/<TICKER>/reports/charts")
 ```
 
 ### Step 6: Quality Check
@@ -664,10 +670,11 @@ create_chart_index()
 **Run verification checks:**
 
 ```python
-import os
+from pathlib import Path
 
-def verify_charts():
-    """Verify all charts were created successfully"""
+def verify_charts(output_dir: str | Path) -> None:
+    """Verify all charts were created successfully inside research/companies/<TICKER>/reports/charts/."""
+    charts_dir = Path(output_dir)
 
     mandatory_charts = [
         'chart_03_revenue_by_product_stacked_area.png',
@@ -684,15 +691,16 @@ def verify_charts():
     print("\n1. MANDATORY CHARTS:")
     all_mandatory_present = True
     for chart in mandatory_charts:
-        if os.path.exists(chart):
-            size = os.path.getsize(chart) / 1024  # KB
+        chart_path = charts_dir / chart
+        if chart_path.exists():
+            size = chart_path.stat().st_size / 1024  # KB
             print(f"   ✓ {chart} ({size:.1f} KB)")
         else:
-            print(f"   ✗ MISSING: {chart}")
+            print(f"   ✗ MISSING: {chart_path}")
             all_mandatory_present = False
 
     # Count total charts
-    chart_files = [f for f in os.listdir('.') if f.startswith('chart_') and f.endswith('.png')]
+    chart_files = sorted(charts_dir.glob('chart_*.png'))
     print(f"\n2. TOTAL CHARTS: {len(chart_files)}")
     print(f"   Target: 25-35 charts")
     print(f"   Status: {'✓ PASS' if 25 <= len(chart_files) <= 35 else '⚠ WARNING'}")
@@ -700,11 +708,11 @@ def verify_charts():
     # Check file sizes (should be > 50KB for 300 DPI)
     print("\n3. FILE SIZE CHECK:")
     small_files = []
-    for chart in chart_files[:5]:  # Sample first 5
-        size = os.path.getsize(chart) / 1024
+    for chart_path in chart_files[:5]:  # Sample first 5
+        size = chart_path.stat().st_size / 1024
         if size < 50:
-            small_files.append(chart)
-        print(f"   {chart}: {size:.1f} KB")
+            small_files.append(chart_path.name)
+        print(f"   {chart_path.name}: {size:.1f} KB")
 
     if small_files:
         print(f"   ⚠ WARNING: {len(small_files)} files may be low resolution")
@@ -719,7 +727,7 @@ def verify_charts():
         print("✗ VERIFICATION FAILED - Review missing charts")
     print("="*60 + "\n")
 
-verify_charts()
+verify_charts("research/companies/<TICKER>/reports/charts")
 ```
 
 ---

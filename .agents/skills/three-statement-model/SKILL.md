@@ -254,7 +254,8 @@ Perform these validation checks on each sheet after populating the template:
 - Assets = Liabilities + Equity for every period (primary check)
 - Cash balance matches Cash Flow Statement ending cash
 - Working capital accounts tie to supporting schedules (if applicable)
-- Retained Earnings rolls forward correctly: Prior RE + Net Income - Dividends +/- Adjustments = Ending RE
+- Retained Earnings rolls forward correctly: Prior RE + Net Income - Dividends = Ending RE
+- Common Stock / APIC rolls forward correctly: Prior Common Stock/APIC + Equity Issuance + SBC = Ending Common Stock/APIC
 - Debt balances tie to debt schedule (if applicable)
 - All balance sheet items have appropriate signs (assets positive, most liabilities positive)
 
@@ -282,7 +283,8 @@ After validating individual sheets, confirm the three statements are properly in
 | Balance Sheet Balance | Assets - Liabilities - Equity | = 0 |
 | Cash Tie-Out | CF Ending Cash - BS Cash | = 0 |
 | Net Income Link | IS Net Income - CF Starting Net Income | = 0 |
-| Retained Earnings | Prior RE + NI - Dividends - BS Ending RE | = 0 (adjust for SBC/other items as needed) |
+| Retained Earnings | Prior RE + NI - Dividends - BS Ending RE | = 0 |
+| Common Stock / APIC | Prior Common Stock/APIC + Equity Issuance + SBC - BS Ending Common Stock/APIC | = 0 |
 
 ### Step 6: Final Review
 
@@ -307,8 +309,8 @@ See [references/formulas.md](references/formulas.md) for all formula details.
 | Cash Tie-Out | CF Ending Cash - BS Cash | = 0 |
 | Cash Monthly vs Annual | Closing Cash (Monthly) - Closing Cash (Annual) | = 0 |
 | Net Income Link | IS Net Income - CF Starting Net Income | = 0 |
-| Retained Earnings | Prior RE + NI + SBC - Dividends - BS Ending RE | = 0 |
-| Equity Financing | ΔCommon Stock/APIC (BS) - Equity Issuance (CFF) | = 0 |
+| Retained Earnings | Prior RE + NI - Dividends - BS Ending RE | = 0 |
+| Common Stock / APIC | ΔCommon Stock/APIC (BS) - Equity Issuance (CFF) - SBC (IS) | = 0 |
 | Year 0 Equity | Equity Raised (Year 0) - Beginning Equity Capital (Year 1) | = 0 |
 
 ### Sign Convention Reference
@@ -350,7 +352,7 @@ Enable iterative calculation in Excel: File → Options → Formulas → Enable 
 - CapEx ties to DA schedule
 
 **Section 4: Retained Earnings**
-- RE roll-forward check: Prior RE + NI + SBC - Dividends = Ending RE
+- RE roll-forward check: Prior RE + NI - Dividends = Ending RE
 - Show component breakdown for debugging
 
 **Section 5: Working Capital**
@@ -361,10 +363,10 @@ Enable iterative calculation in Excel: File → Options → Formulas → Enable 
 - Total Debt ties to BS (Current + LT Debt)
 - Interest calculation ties to IS
 
-**Section 6b: Equity Financing**
-- Equity issuance proceeds tie to BS Common Stock/APIC increase
-- Cash increase from equity = Equity account increase (must balance)
-- Equity Raise Tie-Out: ΔCommon Stock/APIC (BS) = Equity Issuance (CFF) (must = 0)
+**Section 6b: Equity Financing & Common Stock / APIC**
+- Common Stock / APIC roll-forward: Prior Common Stock/APIC + Equity Issuance (CFF) + SBC (IS) = Ending Common Stock/APIC
+- Cash increase from equity issuance plus non-cash SBC credit ties to BS Common Stock/APIC increase (must balance)
+- Common Stock / APIC Tie-Out: ΔCommon Stock/APIC (BS) - Equity Issuance (CFF) - SBC (IS) = 0
 - Year 0 Equity Tie-Out: Equity Raised (Year 0) = Beginning Equity Capital (Year 1)
 
 **Section 6c: NOL Schedule**

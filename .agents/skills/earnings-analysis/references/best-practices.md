@@ -244,5 +244,5 @@ Deliverables:
 ✓ Complete sources section with clickable hyperlinks
 ✓ [Optional: Updated XLS financial model]
 
-File: [Company]_Q[X]_[Year]_Earnings_Update.docx
+File: research/companies/<TICKER>/reports/<TICKER>_Q[Quarter]FY[Year]_Earnings_YYYY-MM-DD.docx
 ```
