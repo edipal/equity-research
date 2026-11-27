@@ -891,8 +891,10 @@ class DCFModelValidator:
                 else:
                     self.info.append(f"✓ Terminal value is {proportion:.1%} of EV")
             else:
-                self.errors.append(
-                    "Could not locate PV of Terminal Value and Enterprise Value on DCF sheet"
+                self.warnings.append(
+                    "Could not locate PV of Terminal Value and Enterprise Value on DCF sheet; "
+                    "define PV_TerminalValue and EnterpriseValue named ranges or use standard labels "
+                    "to verify TV % of EV."
                 )
 
         except Exception as e:

@@ -2268,6 +2268,36 @@ class TestValidateDcf(unittest.TestCase):
             self.assertEqual(res2["status"], "FAIL", res2)
             self.assertGreaterEqual(res2["error_count"], 3, res2["errors"])
 
+    def test_unrecognized_tv_ev_labels_warn_instead_of_hard_fail(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "custom_tv_ev_labels.xlsx"
+            wb = openpyxl.Workbook()
+            ws_dcf = wb.active
+            ws_dcf.title = "DCF"
+            ws_dcf["A2"] = "WACC"
+            ws_dcf["B2"] = 0.095
+            ws_dcf["A3"] = "Terminal Growth Rate"
+            ws_dcf["B3"] = 0.025
+            # Custom non-standard valuation summary labels without named ranges
+            ws_dcf["A6"] = "Custom Perpetuity Tail"
+            ws_dcf["B6"] = 600.0
+            ws_dcf["A7"] = "Custom Total Firm Value"
+            ws_dcf["B7"] = 1000.0
+            ws_dcf["A12"] = "Sensitivity Analysis"
+
+            ws_wacc = wb.create_sheet("WACC")
+            ws_wacc["A2"] = "WEIGHTED AVERAGE COST OF CAPITAL"
+            ws_wacc["B2"] = 0.095
+            wb.save(path)
+
+            res = validate_dcf_mod.validate_dcf_model(str(path))
+            self.assertEqual(res["status"], "PASS", res)
+            self.assertEqual(res["error_count"], 0, res["errors"])
+            self.assertTrue(
+                any("Could not locate PV of Terminal Value and Enterprise Value" in w for w in res["warnings"]),
+                res["warnings"],
+            )
+
     def test_wacc_weight_labels_excluded_and_out_of_range_dcf_wacc_caught(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "wacc_weights.xlsx"

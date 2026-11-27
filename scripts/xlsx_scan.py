@@ -136,9 +136,12 @@ def inspect_workbook_xml(xlsx_path: Path) -> dict[str, Any]:
 
     Returns a dictionary with:
         - ``"data_tables"``: list of Excel What-If data table locations (``Sheet!ref``).
-        - ``"uncached_formulas"``: exact count of formula ``<c>`` cells lacking a cached
-          value (matching openpyxl / ``is_uncached_formula()`` semantics), or ``None`` for
-          non-OOXML legacy formats such as ``.xls``.
+        - ``"uncached_formulas"``: count of formula ``<c>`` cells lacking a cached
+          ``<v>`` value (treating ``<c t="str|s"><f>...</f><v/></c>`` as a cached empty
+          string; matches ``is_uncached_formula()`` for standard Excel/LibreOffice/openpyxl
+          OOXML output, while conservatively counting malformed ``t="str"``/``t="e"``
+          formula cells with no ``<v>`` element as uncached), or ``None`` for non-OOXML
+          legacy formats such as ``.xls``.
 
     Fails closed by raising ``WorkbookLoadError`` on corrupt OOXML archives or malformed XML.
     """
