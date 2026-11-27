@@ -403,7 +403,7 @@ def main(argv: list[str] | None = None) -> int:
         locs_preview = ", ".join(data_table_locs[:5])
         if len(data_table_locs) > 5:
             locs_preview += f" (+{len(data_table_locs) - 5} more)"
-        if soffice is not None and not args.check_only and not args.output and dest_path == xlsx_path:
+        if soffice is not None and not args.check_only and dest_path == xlsx_path:
             print(
                 json.dumps(
                     {

@@ -155,7 +155,7 @@ Incorporate Task 1 prose verbatim (reformatted to DOCX styles) with inline chart
 ## PAGES 31–40: VALUATION ANALYSIS
 
 Aligned strictly with `dcf-model` and `references/task3-valuation.md`:
-- **DCF Analysis:** Gross-debt WACC table (`WACC` tab), 5Y mid-year UFCF projection, end-of-year `(1 + WACC)^N` terminal value discounting (perpetuity `g <= 3.5%` cross-checked vs. exit multiple), complete equity bridge (`EV - Gross Debt - Preferred - NCI + Cash + Equity Investments`), TSM diluted shares, SBC kept as real expense, centered odd 5×5 live sensitivity heatmap (`chart_28`), and TV `%` of EV check (`50%–70%` target).
+- **DCF Analysis:** Gross-debt WACC table (`WACC` tab), 5Y mid-year explicit UFCF (`t - 0.5`) and mid-year perpetuity TV (`(1 + WACC)^(N - 0.5)`, `g <= 3.5%`), cross-checked against strict end-of-year `(1 + WACC)^N` exit-multiple TV discounting, complete equity bridge (`EV - Gross Debt - Preferred - NCI + Cash + Equity Investments`), TSM diluted shares, SBC kept as real expense, centered odd 5×5 live sensitivity heatmap (`chart_28`), and TV `%` of EV check (`50%–70%` target).
 - **Comparable Companies (`Comparable Companies` tab):** Two-part table (5–10 peers + target, followed by mandatory Max / 75th / Median / 25th / Min statistical summary) with NTM/LTM multiples and premium/discount justification.
 - **Precedent Transactions (Optional Cross-Check):** Include only where relevant M&A exists; keep at `0%` target weight (cross-check only) unless an active M&A catalyst is part of the thesis.
 - **Valuation Summary & Football Field (`Valuation Summary` tab + `chart_32`):** Weighted valuation summary, football field chart, 12-month Price Target, standardized `Buy / Hold / Sell` rating, 3–5 catalysts, and key risks to target.

@@ -103,7 +103,7 @@ If BS doesn't balance, **quantify the gap per period and trace where it breaks**
 |---|---|
 | Growth rates | >100% revenue growth without explanation |
 | Margins | Outside industry norms |
-| Terminal value dominance | TV > ~75% of DCF EV (yellow flag) |
+| Terminal value dominance | TV outside 50%–70% of DCF EV (yellow flag; matches validate_dcf.py) |
 | Hockey-stick | Projections ramp unrealistically in out-years |
 | Compounding | EBITDA compounds to absurd $ by Year 10 |
 | Edge cases | Model breaks at 0% or negative growth, negative EBITDA, leverage goes negative |
@@ -111,7 +111,7 @@ If BS doesn't balance, **quantify the gap per period and trace where it breaks**
 ### 3g. Model-type-specific bugs
 
 **DCF:**
-- Discount rate applied to wrong period (mid-year `t - 0.5` for explicit FCFs; strictly end-of-year `(1 + WACC)^N` for exit-multiple TV — NOT `N - 0.5`)
+- Discount rate applied to wrong period (mid-year `t - 0.5` for explicit FCFs, mid-year `N - 0.5` for perpetuity-growth TV, and strictly end-of-year `(1 + WACC)^N` for exit-multiple TV — NOT `N - 0.5`)
 - Terminal value not discounted back, or terminal growth `g >= WACC` / `g > 3.5%`
 - WACC uses `Net Debt / EV` (producing negative debt weight) or book equity instead of gross-debt market weights `E/(E+D)` and `D/(E+D)`
 - ASC 842 operating lease liabilities deducted from EV when UFCF already expenses lease rent (double-counting)

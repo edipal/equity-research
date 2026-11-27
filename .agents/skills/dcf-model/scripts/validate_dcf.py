@@ -491,6 +491,8 @@ class DCFModelValidator:
                             and 'enterprise' in cell_str
                             and 'value' in cell_str
                             and 'terminal' not in cell_str
+                            and 'current' not in cell_str
+                            and 'market' not in cell_str
                         ):
                             for offset in range(1, 6):
                                 adj = row_map.get(col_idx + offset)

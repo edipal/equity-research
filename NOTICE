@@ -25,6 +25,7 @@ modification notices referencing their upstream path at commit 3e32c22.
      `.agents/rules/research-outputs.md`
    - Automation, validation, skeleton generator & regression test suite:
      * `scripts/recalc_xlsx.py`
+     * `scripts/xlsx_scan.py`
      * `scripts/validate_harness.py`
      * `.agents/skills/dcf-model/scripts/build_dcf_skeleton.py`
      * `tests/test_scripts.py`
@@ -42,7 +43,8 @@ modification notices referencing their upstream path at commit 3e32c22.
      2-sheet `DCF` + `WACC` layout (`Case` at `DCF!B4`, vertically stacked
      Bear/Base/Bull blocks + `INDEX` consolidation, live centered 5x5 sensitivity
      formulas matching `build_dcf_skeleton.py`), enforced mid-year explicit UFCF
-     and end-of-year `(1 + WACC)^N` exit-multiple/perpetuity TV discounting,
+     (`t - 0.5`) and mid-year perpetuity TV (`(1 + WACC)^(N - 0.5)`) discounting
+     with strict end-of-year `(1 + WACC)^N` exit-multiple TV discounting,
      capped terminal growth to `<= 3.5%` / long-term nominal GDP, completed the
      EV-to-equity bridge with ASC 842 operating lease double-counting warnings,
      required TSM/if-converted diluted shares and SBC expense treatment, and

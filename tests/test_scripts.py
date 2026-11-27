@@ -1118,6 +1118,40 @@ class TestRecalcXlsx(unittest.TestCase):
                 self.assertIn("TABLE(...)", payload_out.get("warning", ""))
                 self.assertEqual(path.read_bytes(), orig_bytes)
 
+    def test_what_if_data_table_refuses_same_path_output_flag(self) -> None:
+        from openpyxl.worksheet.formula import DataTableFormula
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "what_if_same_output.xlsx"
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Sensitivity"
+            ws["A1"] = 10
+            ws["A2"] = 2
+            ws["B2"] = "=A1*A2"
+            ws["C3"] = DataTableFormula(ref="C3:D4", dt2D=True, r1="A1", r2="A2")
+            wb.save(path)
+            wb.close()
+
+            orig_bytes = path.read_bytes()
+            same_via_dot = str(path.parent / "." / path.name)
+
+            for out_arg in (str(path), same_via_dot):
+                with self.subTest(out_arg=out_arg):
+                    with (
+                        mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value="/usr/bin/soffice"),
+                        mock.patch.object(recalc_xlsx_mod.subprocess, "Popen") as mock_popen,
+                    ):
+                        rc, payload = self._run_main([str(path), "--output", out_arg])
+
+                    mock_popen.assert_not_called()
+                    self.assertEqual(rc, 1, payload)
+                    self.assertEqual(payload["status"], "error")
+                    self.assertFalse(payload["recalculated_with_libreoffice"])
+                    self.assertEqual(payload["data_tables"], ["Sensitivity!C3:D4"])
+                    self.assertIn("What-If data table", payload["message"])
+                    self.assertEqual(path.read_bytes(), orig_bytes)
+
     def test_output_rejects_non_xlsx_extension_before_libreoffice(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             src_path = Path(tmp) / "input.xlsx"
@@ -1681,6 +1715,44 @@ class TestValidateDcf(unittest.TestCase):
             self.assertEqual(results["status"], "FAIL", results)
             self.assertTrue(any("Total formulas: 1" in i for i in results["info"]), results["info"])
             self.assertTrue(any("Uncached formulas: 1" in i for i in results["info"]), results["info"])
+
+    def test_current_and_market_enterprise_value_rows_do_not_mask_dcf_ev(self) -> None:
+        for ev_label in ("Enterprise Value", "Implied Enterprise Value"):
+            with self.subTest(ev_label=ev_label), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "dcf_with_current_market_ev.xlsx"
+                wb = openpyxl.Workbook()
+                ws_dcf = wb.active
+                ws_dcf.title = "DCF"
+                # Section 1 market reference rows placed ABOVE Section 5 DCF summary
+                ws_dcf["A2"] = "Current Enterprise Value"
+                ws_dcf["B2"] = 2500.0
+                ws_dcf["A3"] = "Market Enterprise Value"
+                ws_dcf["B3"] = 2600.0
+                ws_dcf["A5"] = "WACC"
+                ws_dcf["B5"] = 0.09
+                ws_dcf["A6"] = "Terminal Growth Rate"
+                ws_dcf["B6"] = 0.025
+                # Section 5 DCF valuation summary
+                ws_dcf["A10"] = "PV of Terminal Value"
+                ws_dcf["B10"] = 600.0
+                ws_dcf["A11"] = ev_label
+                ws_dcf["B11"] = 1000.0
+                ws_dcf["A15"] = "Sensitivity Analysis (WACC vs Terminal Growth)"
+
+                ws_wacc = wb.create_sheet("WACC")
+                ws_wacc["A3"] = "WEIGHTED AVERAGE COST OF CAPITAL"
+                ws_wacc["B3"] = 0.09
+                wb.save(path)
+                wb.close()
+
+                results = validate_dcf_mod.validate_dcf_model(str(path))
+                self.assertEqual(results["status"], "PASS", results)
+                self.assertEqual(results["error_count"], 0, results["errors"])
+                self.assertEqual(results["warning_count"], 0, results["warnings"])
+                self.assertTrue(
+                    any("Terminal value is 60.0% of EV" in i for i in results["info"]),
+                    results["info"],
+                )
 
 
 @unittest.skipIf(openpyxl is None, "openpyxl is required for DCF skeleton tests")

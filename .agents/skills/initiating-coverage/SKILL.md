@@ -63,7 +63,7 @@ When a user says *"Create a coverage initiation report for [Company]"* or *"Run 
 - **Full workflow:** [references/task2-financial-modeling.md](references/task2-financial-modeling.md).
 
 ### Task 3: Valuation Analysis
-- **Scope:** Delegate DCF mechanics to `dcf-model` (gross-debt WACC, mid-year explicit UFCF, end-of-year `(1 + WACC)^N` terminal value discounting, complete equity bridge, TSM diluted shares, SBC as real expense, centered 5×5 live sensitivity grid, TV `%` of EV target `50%–70%`). Add **4 canonical tabs** to Task 2's existing `.xlsx`:
+- **Scope:** Delegate DCF mechanics to `dcf-model` (gross-debt WACC, mid-year explicit UFCF (`t - 0.5`) and mid-year perpetuity TV (`(1 + WACC)^(N - 0.5)`), strict end-of-year `(1 + WACC)^N` exit-multiple TV discounting, complete equity bridge, TSM diluted shares, SBC as real expense, centered 5×5 live sensitivity grid, TV `%` of EV target `50%–70%`). Add **4 canonical tabs** to Task 2's existing `.xlsx`:
   1. `WACC`
   2. `DCF` *(with inline 5×5 sensitivity table per `dcf-model`, or optional dedicated `Sensitivity` tab)*
   3. `Comparable Companies` *(5–10 peers + Max / 75th / Median / 25th / Min summary)*
