@@ -57,6 +57,8 @@ Identify the 3-5 things that will determine the stock's reaction:
 
 ### Step 5: Output
 
+- Default output path: `research/companies/<TICKER>/notes/<TICKER>_Q[X]_Earnings_Preview_YYYY-MM-DD.md`
+
 One-page earnings preview with:
 - Company, quarter, earnings date
 - Consensus estimates table

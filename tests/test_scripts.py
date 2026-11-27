@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
@@ -79,6 +80,37 @@ def create_minimal_valid_harness(base: Path) -> None:
         json.dumps({"mcpServers": {"vendor": {"serverUrl": "https://mcp.example.com"}}}),
         encoding="utf-8",
     )
+
+
+def _rewrite_formula_cell_as_cached_empty_string(
+    xlsx_path: Path, cell_ref: str, sheet_xml: str = "xl/worksheets/sheet1.xml"
+) -> None:
+    """Rewrite an openpyxl-saved formula cell to Excel/LibreOffice cached empty-string XML (<c t="str"><f>...</f><v></v></c>)."""
+    import xml.etree.ElementTree as ET
+
+    ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    ET.register_namespace("", ns)
+
+    with zipfile.ZipFile(xlsx_path, "r") as zin:
+        entries = {name: zin.read(name) for name in zin.namelist()}
+
+    root = ET.fromstring(entries[sheet_xml])
+    updated = False
+    for cell in root.iter(f"{{{ns}}}c"):
+        if cell.attrib.get("r") == cell_ref:
+            cell.attrib["t"] = "str"
+            v_el = cell.find(f"{{{ns}}}v")
+            if v_el is None:
+                v_el = ET.SubElement(cell, f"{{{ns}}}v")
+            v_el.text = ""
+            updated = True
+            break
+    assert updated, f"Cell {cell_ref} not found in {sheet_xml}"
+    entries[sheet_xml] = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+    with zipfile.ZipFile(xlsx_path, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+        for name, data in entries.items():
+            zout.writestr(name, data)
 
 
 class TestValidateHarness(unittest.TestCase):
@@ -205,6 +237,21 @@ class TestValidateHarness(unittest.TestCase):
             )
             errors, _, _ = validate_harness_mod.validate_harness(base)
             self.assertTrue(len(errors) > 0, "Expected YAML parse error for unquoted colon")
+
+    def test_validates_markdown_links_in_research_readme(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            create_minimal_valid_harness(base)
+            research_dir = base / "research"
+            research_dir.mkdir(parents=True, exist_ok=True)
+            (research_dir / "README.md").write_text(
+                "# Research\n\nSee [broken](missing-file.md).\n", encoding="utf-8"
+            )
+            errors, _, _ = validate_harness_mod.validate_harness(base)
+            self.assertTrue(
+                any("research/README.md" in e and "broken relative link" in e for e in errors),
+                f"Expected broken link error in research/README.md, got: {errors}",
+            )
 
 
 @unittest.skipIf(openpyxl is None, "openpyxl is required for Excel script tests")
@@ -448,6 +495,63 @@ class TestRecalcXlsx(unittest.TestCase):
             self.assertEqual(dir_payload["status"], "error")
             self.assertIn("Not a file", dir_payload["message"])
 
+    def test_cached_empty_string_formula_is_not_flagged_uncached(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cached_empty_string.xlsx"
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Model"
+            ws["A1"] = 10
+            ws["B1"] = '=IF(A1>0,"","Alert")'
+            wb.save(path)
+            _rewrite_formula_cell_as_cached_empty_string(path, "B1")
+
+            # Confirm openpyxl genuinely loads cached "" formulas as value=None, data_type='str'
+            wb_check = openpyxl.load_workbook(path, data_only=True)
+            try:
+                cell_v = wb_check["Model"]["B1"]
+                self.assertIsNone(cell_v.value)
+                self.assertEqual(cell_v.data_type, "str")
+            finally:
+                wb_check.close()
+
+            with mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value=None):
+                rc, payload = self._run_main([str(path)])
+
+            self.assertEqual(rc, 0, payload)
+            self.assertEqual(payload["status"], "success")
+            self.assertEqual(payload["total_formulas"], 1)
+            self.assertEqual(payload["uncached_formulas"], 0)
+            self.assertEqual(payload["total_errors"], 0)
+
+    def test_atomic_copy_oserror_returns_structured_json_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "readonly_target.xlsx"
+            wb = openpyxl.Workbook()
+            wb.save(path)
+
+            def fake_run(cmd, **kwargs):
+                outdir = Path(cmd[cmd.index("--outdir") + 1])
+                converted = outdir / f"{path.stem}.xlsx"
+                shutil.copy2(path, converted)
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+
+            with (
+                mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value="/usr/bin/soffice"),
+                mock.patch.object(recalc_xlsx_mod.subprocess, "run", side_effect=fake_run),
+                mock.patch.object(
+                    recalc_xlsx_mod,
+                    "atomic_copy",
+                    side_effect=PermissionError("Read-only output directory"),
+                ),
+            ):
+                rc, payload = self._run_main([str(path)])
+
+            self.assertEqual(rc, 1, payload)
+            self.assertEqual(payload["status"], "error")
+            self.assertFalse(payload["recalculated_with_libreoffice"])
+            self.assertIn("Failed to write recalculated workbook", payload["message"])
+
 
 @unittest.skipIf(openpyxl is None, "openpyxl is required for DCF validation tests")
 class TestValidateDcf(unittest.TestCase):
@@ -665,6 +769,55 @@ class TestValidateDcf(unittest.TestCase):
             self.assertFalse(any("#REF!" in e for e in results["errors"]), results["errors"])
             self.assertTrue(any("Total formulas: 2" in i for i in results["info"]), results["info"])
             self.assertTrue(any("Uncached formulas: 2" in i for i in results["info"]), results["info"])
+
+    def test_cached_empty_string_formula_passes_dcf_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "dcf_cached_empty_str.xlsx"
+            self._build_compliant_two_sheet_dcf(path, with_formula=False)
+            wb = openpyxl.load_workbook(path)
+            wb["DCF"]["B8"] = '=IF(B6>0,"","Flag")'
+            wb.save(path)
+            _rewrite_formula_cell_as_cached_empty_string(path, "B8")
+
+            results = validate_dcf_mod.validate_dcf_model(str(path))
+            self.assertEqual(results["status"], "PASS", results)
+            self.assertEqual(results["error_count"], 0, results["errors"])
+            self.assertTrue(any("Total formulas: 1" in i for i in results["info"]), results["info"])
+            self.assertTrue(any("Uncached formulas: 0" in i for i in results["info"]), results["info"])
+
+    def test_wacc_vs_terminal_growth_header_detected_as_inline_sensitivity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "dcf_wacc_vs_tg_header.xlsx"
+            wb = openpyxl.Workbook()
+            ws_dcf = wb.active
+            ws_dcf.title = "DCF"
+            ws_dcf["A1"] = "DCF Valuation Model"
+            ws_dcf["A3"] = "WACC"
+            ws_dcf["B3"] = 0.09
+            ws_dcf["A4"] = "Terminal Growth Rate"
+            ws_dcf["B4"] = 0.025
+            ws_dcf["A6"] = "PV of Terminal Value"
+            ws_dcf["B6"] = 600.0
+            ws_dcf["A7"] = "Enterprise Value"
+            ws_dcf["B7"] = 1000.0
+            # Spec-compliant header without the literal word "sensitivity"
+            ws_dcf["A10"] = "WACC vs Terminal Growth"
+            ws_dcf["B10"] = 0.02
+            ws_dcf["C10"] = 0.025
+            ws_dcf["D10"] = 0.03
+
+            ws_wacc = wb.create_sheet("WACC")
+            ws_wacc["A3"] = "WEIGHTED AVERAGE COST OF CAPITAL"
+            ws_wacc["B3"] = 0.09
+            wb.save(path)
+
+            results = validate_dcf_mod.validate_dcf_model(str(path))
+            self.assertEqual(results["status"], "PASS", results)
+            self.assertEqual(results["warning_count"], 0, results["warnings"])
+            self.assertTrue(
+                any("Found inline sensitivity analysis on DCF sheet" in i for i in results["info"]),
+                results["info"],
+            )
 
 
 if __name__ == "__main__":

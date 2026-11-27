@@ -81,9 +81,8 @@ Recalculate valuation with updated estimates:
 
 ### Step 6: Output
 
-- Updated Excel model (if user provides the existing model)
-- Estimate change summary (markdown or Word)
-- Updated price target derivation
+- Updated Excel model: `research/companies/<TICKER>/models/<TICKER>_Model_YYYY-MM-DD.xlsx` (if user provides or maintains an existing model; verify with `scripts/recalc_xlsx.py`)
+- Estimate change summary & updated price target derivation: `research/companies/<TICKER>/notes/<TICKER>_Model_Update_YYYY-MM-DD.md` (markdown or Word)
 
 ## Important Notes
 

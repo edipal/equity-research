@@ -151,7 +151,15 @@ def recalculate_with_libreoffice(
         output_path = (
             xlsx_path if xlsx_path.suffix.lower() == ".xlsx" else xlsx_path.with_suffix(".xlsx")
         )
-        atomic_copy(recalculated, output_path)
+        try:
+            atomic_copy(recalculated, output_path)
+        except OSError as exc:
+            return (
+                False,
+                "failed",
+                output_path,
+                f"Failed to write recalculated workbook to '{output_path}': {exc}",
+            )
         note = None
         if output_path != xlsx_path:
             note = (
@@ -240,7 +248,7 @@ def scan_workbook(xlsx_path: Path) -> dict:
                     is_formula = extract_formula_text(val_f) is not None
                     if is_formula:
                         total_formulas += 1
-                        if val_v is None:
+                        if val_v is None and getattr(cell_v, "data_type", None) not in ("s", "str"):
                             uncached_formulas += 1
 
                     err = detect_cell_error(cell_v, val_f)

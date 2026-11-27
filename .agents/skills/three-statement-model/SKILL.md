@@ -376,7 +376,7 @@ Enable iterative calculation in Excel: File → Options → Formulas → Enable 
 - NOL utilization ≤ 80% of EBT (post-2017 federal limitation)
 - NOL balance is non-negative (cannot utilize more than available)
 - NOL generated only when EBT < 0
-- Tax expense = 0 when taxable income ≤ 0
+- Current tax payable = 0 when taxable income ≤ 0 (GAAP Deferred Tax Expense / (Benefit) = -ΔDTA on IS and -ΔDTA on CFO; under a 100% valuation allowance, Net DTA stays 0 on BS and ΔDTA = 0 on both IS and CF)
 
 **Section 7: Scenario Hierarchy**
 - Absolute metrics: Upside > Base > Downside (NI, EBITDA, FCF)

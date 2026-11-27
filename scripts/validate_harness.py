@@ -204,10 +204,10 @@ def _iter_markdown_links(text: str) -> list[tuple[int, str]]:
 
 
 def validate_markdown_links(root: Path) -> list[str]:
-    """Validate relative markdown links in AGENTS.md, README.md, docs/*.md, and .agents/."""
+    """Validate relative markdown links in AGENTS.md, README.md, research/README.md, docs/*.md, and .agents/."""
     errors: list[str] = []
     md_files: list[Path] = []
-    for top_file in ("AGENTS.md", "README.md"):
+    for top_file in ("AGENTS.md", "README.md", "research/README.md"):
         p = root / top_file
         if p.exists():
             md_files.append(p)

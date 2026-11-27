@@ -143,7 +143,7 @@ class DCFModelValidator:
             dcf_ws = self.workbook_formulas['DCF']
             for row in dcf_ws.iter_rows(max_row=250, max_col=25):
                 for cell in row:
-                    if isinstance(cell.value, str) and 'sensitivity' in cell.value.lower():
+                    if isinstance(cell.value, str) and _is_sensitivity_header(cell.value):
                         has_inline_sensitivity = True
                         break
                 if has_inline_sensitivity:
@@ -180,7 +180,7 @@ class DCFModelValidator:
                     is_formula = formula_text is not None
                     if is_formula:
                         total_formulas += 1
-                        if val_v is None:
+                        if val_v is None and getattr(value_cell, 'data_type', None) not in ('s', 'str'):
                             uncached_formulas += 1
 
                     # Detect Excel error without false-positiving on prose notes or string literals

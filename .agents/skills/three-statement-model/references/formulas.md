@@ -169,17 +169,21 @@ Pre-Tax Income (EBT)
     Taxable Income = 0
     NOL Generated = ABS(EBT)
 
-TAX CALCULATION WITH NOL
+TAX CALCULATION WITH NOL (GAAP / ASC 740)
 
-Taxes Payable = MAX(0, Taxable Income × Tax Rate)
-  (Taxes cannot be negative; losses create NOL asset instead)
+Current Tax Expense (Taxes Payable) = MAX(0, Taxable Income × Tax Rate)
+  (Current cash taxes payable cannot be negative; losses create NOL carryforwards)
 
 DEFERRED TAX ASSET (DTA) FOR NOL
 
 DTA - NOL Carryforward = Ending NOL Balance × Tax Rate
+  (If a 100% valuation allowance applies, Net DTA = 0 on BS and ΔDTA = 0 on IS & CF)
 ΔDTA = Current DTA - Prior DTA
-  (Increase in DTA = non-cash benefit on CF)
-  (Decrease in DTA = non-cash expense on CF)
+Deferred Tax Expense / (Benefit) = -ΔDTA
+Total Income Tax Expense / (Benefit) = Current Tax Expense + Deferred Tax Expense / (Benefit)
+                                     = Current Tax Expense - ΔDTA
+  (Increase in DTA = non-cash tax benefit on IS; subtract ΔDTA from Net Income on CFO)
+  (Decrease in DTA = non-cash deferred tax expense on IS; add back |ΔDTA| on CFO)
 ```
 
 ## Balance Sheet Structure
@@ -219,7 +223,7 @@ CASH FROM OPERATIONS (CFO)
   Net Income (LINK: IS)
   + D&A (LINK: DA schedule)
   + Stock-Based Compensation (SBC) (LINK: IS or Assumptions)
-  - ΔDTA (Deferred Tax Asset) (LINK: NOL schedule; increase in DTA = use of cash)
+  - ΔDTA (Deferred Tax Asset) (LINK: NOL schedule; = Deferred Tax Expense/(Benefit) — increase in DTA subtracts non-cash IS tax benefit from NI)
   - ΔAR (LINK: WC)
   - ΔInventory (LINK: WC)
   + ΔAP (LINK: WC)
@@ -272,12 +276,12 @@ EBITDA
 (-) Interest Expense
 ────────────────
 EBT (Pre-Tax Income)
-(-) NOL Utilization (from NOL schedule, reduces taxable income)
+(-) Current Tax Expense (MAX(0, Taxable Income × Tax Rate), from NOL schedule)
+(-) Deferred Tax Expense / (Benefit) (= -ΔDTA from NOL schedule; 0 if 100% valuation allowance)
 ────────────────
-Taxable Income
-(-) Taxes (Taxable Income × Tax Rate)
+Total Income Tax Expense / (Benefit) (= Current Tax Expense - ΔDTA)
 ────────────────
-Net Income
+Net Income (= EBT - Total Income Tax Expense)
   Net Income Margin %
 ```
 

@@ -123,8 +123,9 @@ Before delivering an initiation report, verify all items below are complete.
 ## XLS Financial Model - Structure
 
 **File Structure:**
-- [ ] 15+ tabs in Excel workbook
-- [ ] Tabs include: Executive Summary, Assumptions, Historical Financials, Revenue Model, Operating Expenses, Income Statement, Balance Sheet, Cash Flow, Supporting Schedules, DCF Valuation, Comps Analysis, Precedent Transactions, Scenarios, Sensitivity Analysis, Charts
+- [ ] 10 core tabs in Excel workbook (6 Task 2 model tabs + 4 Task 3 valuation tabs)
+- [ ] Core tabs include: Revenue Model, Income Statement, Cash Flow Statement, Balance Sheet, Scenarios, DCF Inputs, DCF, Sensitivity Analysis, Comparable Companies, Valuation Summary
+- [ ] Optional additions (when applicable): Executive Summary, Assumptions, Historical Financials, Operating Expenses, Supporting Schedules, Precedent Transactions, Charts
 
 **Formatting:**
 - [ ] Blue text for hardcoded inputs
@@ -245,7 +246,7 @@ DOCX Report:
 - Word count: _____ words (MUST BE 10,000-15,000)
 
 XLS Model:
-- Tab count: _____ tabs (SHOULD BE 15+)
+- Tab count: _____ tabs (MUST BE 10+ core tabs: 6 Task 2 + 4 Task 3; supporting tabs optional)
 - Model years: _____ historical + _____ projected
 
 If any count is below minimum, STOP and add content before delivery.
