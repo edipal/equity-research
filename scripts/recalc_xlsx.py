@@ -222,7 +222,15 @@ def scan_workbook(xlsx_path: Path) -> dict:
     try:
         wb_formulas = openpyxl.load_workbook(xlsx_path, data_only=False)
         wb_values = openpyxl.load_workbook(xlsx_path, data_only=True)
-    except (zipfile.BadZipFile, InvalidFileException, ET.ParseError, KeyError, OSError, ValueError) as exc:
+    except (
+        zipfile.BadZipFile,
+        InvalidFileException,
+        ET.ParseError,
+        KeyError,
+        OSError,
+        ValueError,
+        AttributeError,
+    ) as exc:
         if wb_formulas is not None:
             wb_formulas.close()
         if wb_values is not None:
@@ -235,9 +243,12 @@ def scan_workbook(xlsx_path: Path) -> dict:
     total_errors = 0
 
     try:
-        for sheet_name in wb_formulas.sheetnames:
-            ws_f = wb_formulas[sheet_name]
-            ws_v = wb_values[sheet_name]
+        ws_v_by_title = {ws.title: ws for ws in wb_values.worksheets}
+        for ws_f in wb_formulas.worksheets:
+            sheet_name = ws_f.title
+            ws_v = ws_v_by_title.get(sheet_name)
+            if ws_v is None:
+                continue
 
             for row in ws_f.iter_rows():
                 for cell_f in row:

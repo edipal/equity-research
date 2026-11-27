@@ -11,6 +11,7 @@ Complete and populate integrated financial model templates with proper linkages 
 
 **Execution Environment (Antigravity):**
 - Build and populate `.xlsx` workbooks programmatically with Python (`openpyxl`). Write live Excel formula strings (`ws["D15"] = "=D14*(1+Assumptions!$B$5)"`), then run `python3 scripts/recalc_xlsx.py <path-to-model.xlsx>` and run the `audit-xls` checklist before delivery.
+- **Default output path** (aligned with `.agents/rules/research-outputs.md`): save completed models to `research/companies/<TICKER>/models/<TICKER>_3Statement_YYYY-MM-DD.xlsx`.
 - All principles below apply to every tab and schedule.
 
 **Formulas over hardcodes (non-negotiable):**

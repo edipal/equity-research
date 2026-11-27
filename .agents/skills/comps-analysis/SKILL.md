@@ -58,6 +58,7 @@ Start with headers that force strategic thinking about what matters, input clean
 
 **Execution Environment (Antigravity):**
 - Build standalone `.xlsx` workbooks programmatically with Python (`openpyxl`). Write formula strings (`cell.value = "=E7/C7"`), never pre-computed results.
+- **Default output paths** (aligned with `.agents/rules/research-outputs.md`): save single-company peer comps to `research/companies/<TICKER>/models/<TICKER>_Comps_YYYY-MM-DD.xlsx` and sector-level peer comps to `research/sectors/<sector-slug>/comps/<sector-slug>_comps_YYYY-MM-DD.xlsx`.
 - After generating the workbook, recalculate and verify zero formula errors by running `python3 scripts/recalc_xlsx.py <path-to-workbook.xlsx>` and checking against `audit-xls`.
 - If the user wants the comps table synced to Google Sheets and the `gsheets` plugin is connected, export or write the structured workbook cleanly after verifying formulas locally.
 

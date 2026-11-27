@@ -552,6 +552,53 @@ class TestRecalcXlsx(unittest.TestCase):
             self.assertFalse(payload["recalculated_with_libreoffice"])
             self.assertIn("Failed to write recalculated workbook", payload["message"])
 
+    def test_chartsheet_is_skipped_safely(self) -> None:
+        from openpyxl.chart import BarChart, Reference
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "with_chartsheet.xlsx"
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Model"
+            ws["A1"] = "Revenue"
+            ws["B1"] = 100.0
+            cs = wb.create_chartsheet("Valuation Chart")
+            chart = BarChart()
+            chart.add_data(Reference(ws, min_col=2, min_row=1, max_row=1))
+            cs.add_chart(chart)
+            wb.save(path)
+
+            # Confirm the saved workbook genuinely contains a Chartsheet in sheetnames
+            wb_check = openpyxl.load_workbook(path)
+            try:
+                self.assertIn("Valuation Chart", wb_check.sheetnames)
+                self.assertEqual([w.title for w in wb_check.worksheets], ["Model"])
+            finally:
+                wb_check.close()
+
+            with mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value=None):
+                rc, payload = self._run_main([str(path)])
+
+            self.assertEqual(rc, 0, payload)
+            self.assertEqual(payload["status"], "success")
+            self.assertEqual(payload["total_errors"], 0)
+            self.assertEqual(payload["total_formulas"], 0)
+
+    def test_malformed_workbook_attribute_error_returns_structured_json_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            # An empty Chartsheet (no drawing rels) triggers openpyxl's AttributeError on load
+            path = Path(tmp) / "malformed_chartsheet.xlsx"
+            wb = openpyxl.Workbook()
+            wb.create_chartsheet("Empty Chart")
+            wb.save(path)
+
+            with mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value=None):
+                rc, payload = self._run_main([str(path)])
+
+            self.assertEqual(rc, 1, payload)
+            self.assertEqual(payload["status"], "error")
+            self.assertIn("Failed to open workbook", payload["message"])
+
 
 @unittest.skipIf(openpyxl is None, "openpyxl is required for DCF validation tests")
 class TestValidateDcf(unittest.TestCase):
@@ -818,6 +865,83 @@ class TestValidateDcf(unittest.TestCase):
                 any("Found inline sensitivity analysis on DCF sheet" in i for i in results["info"]),
                 results["info"],
             )
+
+    def test_downstream_ratio_and_multiple_rows_do_not_corrupt_tv_proportion(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "dcf_with_crosschecks.xlsx"
+            self._build_compliant_two_sheet_dcf(path, with_formula=False)
+            wb = openpyxl.load_workbook(path)
+            ws_dcf = wb["DCF"]
+            # Downstream cross-check rows placed between Valuation Summary and Sensitivity
+            ws_dcf["A8"] = "PV of Terminal Value (% of EV)"
+            ws_dcf["B8"] = 0.60
+            ws_dcf["A9"] = "Implied Enterprise Value / EBITDA"
+            ws_dcf["B9"] = 12.5
+            ws_dcf["A10"] = "Enterprise Value / Revenue"
+            ws_dcf["B10"] = 3.2
+            ws_dcf["A12"] = "Sensitivity Analysis (WACC vs Terminal Growth)"
+            ws_dcf["A13"] = "Implied Enterprise Value"
+            ws_dcf["B13"] = 50.0
+            wb.save(path)
+
+            results = validate_dcf_mod.validate_dcf_model(str(path))
+            self.assertEqual(results["status"], "PASS", results)
+            self.assertEqual(results["error_count"], 0, results["errors"])
+            self.assertEqual(results["warning_count"], 0, results["warnings"])
+            self.assertTrue(
+                any("Terminal value is 60.0% of EV" in i for i in results["info"]),
+                results["info"],
+            )
+
+            # Also verify ratio rows appearing ABOVE the dollar summary rows are ignored
+            path_above = Path(tmp) / "dcf_ratio_above.xlsx"
+            wb2 = openpyxl.Workbook()
+            ws2 = wb2.active
+            ws2.title = "DCF"
+            ws2["A2"] = "WACC"
+            ws2["B2"] = 0.09
+            ws2["A3"] = "Terminal Growth Rate"
+            ws2["B3"] = 0.025
+            ws2["A5"] = "PV of Terminal Value (% of EV)"
+            ws2["B5"] = 0.60
+            ws2["A6"] = "Implied Enterprise Value / EBITDA"
+            ws2["B6"] = 12.5
+            ws2["A7"] = "PV of Terminal Value"
+            ws2["B7"] = 600.0
+            ws2["A8"] = "Enterprise Value"
+            ws2["B8"] = 1000.0
+            ws2["A12"] = "Sensitivity Analysis"
+            ws_wacc2 = wb2.create_sheet("WACC")
+            ws_wacc2["A3"] = "WACC"
+            ws_wacc2["B3"] = 0.09
+            wb2.save(path_above)
+
+            results_above = validate_dcf_mod.validate_dcf_model(str(path_above))
+            self.assertEqual(results_above["status"], "PASS", results_above)
+            self.assertEqual(results_above["warning_count"], 0, results_above["warnings"])
+            self.assertTrue(
+                any("Terminal value is 60.0% of EV" in i for i in results_above["info"]),
+                results_above["info"],
+            )
+
+    def test_chartsheet_in_dcf_workbook_is_skipped_safely(self) -> None:
+        from openpyxl.chart import BarChart, Reference
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "dcf_with_chartsheet.xlsx"
+            self._build_compliant_two_sheet_dcf(path, with_formula=False)
+            wb = openpyxl.load_workbook(path)
+            ws_dcf = wb["DCF"]
+            cs = wb.create_chartsheet("Football Field Chart")
+            chart = BarChart()
+            chart.add_data(Reference(ws_dcf, min_col=2, min_row=6, max_row=7))
+            cs.add_chart(chart)
+            wb.save(path)
+
+            results = validate_dcf_mod.validate_dcf_model(str(path))
+            self.assertEqual(results["status"], "PASS", results)
+            self.assertEqual(results["error_count"], 0, results["errors"])
+            self.assertEqual(results["warning_count"], 0, results["warnings"])
 
 
 if __name__ == "__main__":

@@ -13,6 +13,20 @@ from typing import Optional
 EXCEL_ERRORS = ('#VALUE!', '#DIV/0!', '#REF!', '#NAME?', '#NULL!', '#NUM!', '#N/A')
 STRING_LITERAL_RE = re.compile(r'"(?:""|[^"])*"')
 SENSITIVITY_VS_RE = re.compile(r'\bvs\.?\b')
+OF_EV_RE = re.compile(r'\bof\s+ev\b')
+EBIT_RE = re.compile(r'\bebit\b')
+RATIO_OR_MULTIPLE_TOKENS = (
+    '%',
+    '/',
+    'percent',
+    'proportion',
+    'of enterprise value',
+    'multiple',
+    'ebitda',
+    'revenue',
+    'sales',
+    'per share',
+)
 
 
 def _is_number(value) -> bool:
@@ -57,6 +71,16 @@ def _is_terminal_growth_label(text: str) -> bool:
     if _is_sensitivity_header(low):
         return False
     return 'terminal' in low and 'growth' in low
+
+
+def _is_ratio_or_multiple_label(text: str) -> bool:
+    """Return True if a row label represents a percentage, proportion, or valuation multiple."""
+    low = text.lower()
+    if any(tok in low for tok in RATIO_OR_MULTIPLE_TOKENS):
+        return True
+    if OF_EV_RE.search(low) or EBIT_RE.search(low):
+        return True
+    return False
 
 
 class DCFModelValidator:
@@ -126,10 +150,18 @@ class DCFModelValidator:
 
         return results
 
+    @staticmethod
+    def _get_worksheet(workbook, name: str):
+        """Return Worksheet by title, ignoring Chartsheet objects."""
+        for ws in workbook.worksheets:
+            if ws.title == name:
+                return ws
+        return None
+
     def check_sheet_structure(self):
         """Verify required sheets exist (2-sheet DCF + WACC spec with inline or separate sensitivity)."""
         required_sheets = ['DCF', 'WACC']
-        sheet_names = self.workbook_values.sheetnames
+        sheet_names = [ws.title for ws in self.workbook_values.worksheets]
 
         for sheet in required_sheets:
             if sheet not in sheet_names:
@@ -139,15 +171,16 @@ class DCFModelValidator:
 
         has_sensitivity_sheet = any('sensitivity' in name.lower() for name in sheet_names)
         has_inline_sensitivity = False
-        if not has_sensitivity_sheet and 'DCF' in sheet_names:
-            dcf_ws = self.workbook_formulas['DCF']
-            for row in dcf_ws.iter_rows(max_row=250, max_col=25):
-                for cell in row:
-                    if isinstance(cell.value, str) and _is_sensitivity_header(cell.value):
-                        has_inline_sensitivity = True
+        if not has_sensitivity_sheet:
+            dcf_ws = self._get_worksheet(self.workbook_formulas, 'DCF')
+            if dcf_ws is not None:
+                for row in dcf_ws.iter_rows(max_row=250, max_col=25):
+                    for cell in row:
+                        if isinstance(cell.value, str) and _is_sensitivity_header(cell.value):
+                            has_inline_sensitivity = True
+                            break
+                    if has_inline_sensitivity:
                         break
-                if has_inline_sensitivity:
-                    break
 
         if has_sensitivity_sheet:
             self.info.append("Found dedicated Sensitivity sheet")
@@ -159,15 +192,18 @@ class DCFModelValidator:
             )
 
     def check_formula_errors(self):
-        """Check for Excel formula errors and uncached formulas in all sheets."""
+        """Check for Excel formula errors and uncached formulas in all worksheets."""
         error_details = {err: [] for err in EXCEL_ERRORS}
         total_errors = 0
         total_formulas = 0
         uncached_formulas = 0
 
-        for sheet_name in self.workbook_values.sheetnames:
-            ws_values = self.workbook_values[sheet_name]
-            ws_formulas = self.workbook_formulas[sheet_name]
+        ws_values_by_title = {ws.title: ws for ws in self.workbook_values.worksheets}
+        for ws_formulas in self.workbook_formulas.worksheets:
+            sheet_name = ws_formulas.title
+            ws_values = ws_values_by_title.get(sheet_name)
+            if ws_values is None:
+                continue
 
             for row in ws_formulas.iter_rows():
                 for formula_cell in row:
@@ -266,12 +302,17 @@ class DCFModelValidator:
     def _check_terminal_growth_vs_wacc(self):
         """Critical check: Terminal growth must be less than WACC across all scenarios."""
         try:
-            dcf_sheet = self.workbook_values['DCF']
+            dcf_sheet = self._get_worksheet(self.workbook_values, 'DCF')
+            if dcf_sheet is None:
+                self.warnings.append("DCF sheet not found")
+                return
             tg_rows, wacc_rows = self._extract_rate_rows(dcf_sheet)
 
             # Fallback to WACC sheet if WACC is not explicitly displayed on DCF sheet
-            if not wacc_rows and 'WACC' in self.workbook_values.sheetnames:
-                _, wacc_rows = self._extract_rate_rows(self.workbook_values['WACC'])
+            if not wacc_rows:
+                wacc_sheet = self._get_worksheet(self.workbook_values, 'WACC')
+                if wacc_sheet is not None:
+                    _, wacc_rows = self._extract_rate_rows(wacc_sheet)
 
             if not tg_rows or not wacc_rows:
                 self.warnings.append("Could not locate terminal growth and WACC values")
@@ -322,10 +363,12 @@ class DCFModelValidator:
         """Check if WACC is in reasonable range"""
         try:
             wacc_sheet = (
-                self.workbook_values['WACC']
-                if 'WACC' in self.workbook_values.sheetnames
-                else self.workbook_values['DCF']
+                self._get_worksheet(self.workbook_values, 'WACC')
+                or self._get_worksheet(self.workbook_values, 'DCF')
             )
+            if wacc_sheet is None:
+                self.warnings.append("WACC and DCF sheets not found")
+                return
             _, wacc_rows = self._extract_rate_rows(wacc_sheet, max_row=100, max_col=20)
             wacc_values = []
             for _, entries in wacc_rows:
@@ -344,37 +387,57 @@ class DCFModelValidator:
             else:
                 self.warnings.append("Could not locate WACC value")
 
-        except KeyError:
-            self.warnings.append("WACC and DCF sheets not found")
         except Exception as e:
             self.warnings.append(f"Could not validate WACC range: {str(e)}")
 
     def _check_terminal_value_proportion(self):
         """Check if terminal value is reasonable proportion of enterprise value"""
         try:
-            dcf_sheet = self.workbook_values['DCF']
+            dcf_sheet = self._get_worksheet(self.workbook_values, 'DCF')
+            if dcf_sheet is None:
+                self.warnings.append("DCF sheet not found")
+                return
 
             terminal_value = None
             enterprise_value = None
 
             for row in dcf_sheet.iter_rows(max_row=200, max_col=20):
+                row_texts = [c.value.lower() for c in row if isinstance(c.value, str) and c.value.strip()]
+                if any(_is_sensitivity_header(t) for t in row_texts):
+                    if terminal_value is not None or enterprise_value is not None:
+                        break
+                    continue
+
                 for cell in row:
                     if cell.value and isinstance(cell.value, str):
                         cell_str = cell.value.lower()
-                        if _is_sensitivity_header(cell_str):
+                        if _is_sensitivity_header(cell_str) or _is_ratio_or_multiple_label(cell_str):
                             continue
-                        if 'terminal' in cell_str and 'value' in cell_str and 'pv' in cell_str:
+                        if (
+                            terminal_value is None
+                            and 'terminal' in cell_str
+                            and 'value' in cell_str
+                            and ('pv' in cell_str or 'present value' in cell_str)
+                        ):
                             for offset in range(1, 5):
                                 adjacent = dcf_sheet.cell(cell.row, cell.column + offset).value
                                 if _is_number(adjacent) and adjacent > 0:
                                     terminal_value = float(adjacent)
                                     break
-                        if 'enterprise' in cell_str and 'value' in cell_str:
+                        elif (
+                            enterprise_value is None
+                            and 'enterprise' in cell_str
+                            and 'value' in cell_str
+                            and 'terminal' not in cell_str
+                        ):
                             for offset in range(1, 5):
                                 adjacent = dcf_sheet.cell(cell.row, cell.column + offset).value
                                 if _is_number(adjacent) and adjacent > 0:
                                     enterprise_value = float(adjacent)
                                     break
+
+                if terminal_value is not None and enterprise_value is not None:
+                    break
 
             if terminal_value is not None and enterprise_value is not None and enterprise_value > 0:
                 proportion = terminal_value / enterprise_value

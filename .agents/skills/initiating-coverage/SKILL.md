@@ -160,7 +160,7 @@ Request 2: Task 2 - Financial Modeling (independent)
            ↓ [User reviews outputs and requests next task]
 Request 3: Task 3 - Valuation Analysis (requires Task 2 output)
            ↓ [User reviews outputs and requests next task]
-Request 4: Task 4 - Chart Generation (requires Tasks 2 & 3 outputs)
+Request 4: Task 4 - Chart Generation (requires Tasks 1, 2, & 3 outputs)
            ↓ [User reviews outputs and requests next task]
 Request 5: Task 5 - Report Assembly (requires ALL previous task outputs)
 ```
@@ -422,7 +422,7 @@ Required from External Sources:
 ```
 
 **Process**:
-1. Verify model and valuation outputs are accessible
+1. Verify company research (Task 1), model (Task 2), and valuation (Task 3) outputs are accessible
 2. Load detailed instructions from `references/task4-chart-generation.md`
 3. Execute chart generation workflow via Python (`matplotlib`, `seaborn`, `Pillow`)
 4. Save all 25–35 PNG charts and `chart_index.txt` directly into `research/companies/<TICKER>/reports/charts/`
@@ -642,7 +642,7 @@ Each task has strict prerequisites. Running a task without required inputs will:
 
 **Task 3**: Check financial model exists and is accessible
 
-**Task 4**: Check both model (Task 2) AND valuation (Task 3) exist
+**Task 4**: Check company research (Task 1), model (Task 2), AND valuation (Task 3) exist
 
 **Task 5**: Check ALL previous tasks complete (1, 2, 3, 4)
 
@@ -723,7 +723,7 @@ All outputs meet institutional standards from leading investment banks (JPMorgan
 - **Task 2** can run anytime (just needs historical data)
 - **Tasks 1 & 2** can run in parallel
 - **Task 3** requires Task 2
-- **Task 4** requires Tasks 2 & 3
+- **Task 4** requires Tasks 1, 2, & 3
 - **Task 5** requires Tasks 1, 2, 3, & 4
 
 ### Session Management
