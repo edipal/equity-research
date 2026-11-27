@@ -1152,6 +1152,85 @@ class TestRecalcXlsx(unittest.TestCase):
                     self.assertIn("What-If data table", payload["message"])
                     self.assertEqual(path.read_bytes(), orig_bytes)
 
+    def test_what_if_data_table_refuses_hardlink_output_flag(self) -> None:
+        from openpyxl.worksheet.formula import DataTableFormula
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dt_path = Path(tmp) / "dt.xlsx"
+            hardlink_path = Path(tmp) / "dt_hardlink.xlsx"
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Sensitivity"
+            ws["A1"] = 10
+            ws["A2"] = 2
+            ws["B2"] = "=A1*A2"
+            ws["C3"] = DataTableFormula(ref="C3:D4", dt2D=True, r1="A1", r2="A2")
+            wb.save(dt_path)
+            wb.close()
+
+            orig_bytes = dt_path.read_bytes()
+            os.link(dt_path, hardlink_path)
+
+            with (
+                mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value="/usr/bin/soffice"),
+                mock.patch.object(recalc_xlsx_mod.subprocess, "Popen") as mock_popen,
+            ):
+                rc, payload = self._run_main([str(dt_path), "--output", str(hardlink_path)])
+
+            mock_popen.assert_not_called()
+            self.assertEqual(rc, 1, payload)
+            self.assertEqual(payload["status"], "error")
+            self.assertFalse(payload["recalculated_with_libreoffice"])
+            self.assertEqual(payload["data_tables"], ["Sensitivity!C3:D4"])
+            self.assertIn("What-If data table", payload["message"])
+            self.assertEqual(dt_path.read_bytes(), orig_bytes)
+
+    def test_what_if_data_table_refuses_case_variant_output_flag(self) -> None:
+        from openpyxl.worksheet.formula import DataTableFormula
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dt_path = Path(tmp) / "dt.xlsx"
+            upper_path = Path(tmp) / "DT.xlsx"
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Sensitivity"
+            ws["A1"] = 10
+            ws["A2"] = 2
+            ws["B2"] = "=A1*A2"
+            ws["C3"] = DataTableFormula(ref="C3:D4", dt2D=True, r1="A1", r2="A2")
+            wb.save(dt_path)
+            wb.close()
+
+            orig_bytes = dt_path.read_bytes()
+            # Ensure upper_path exists on case-sensitive POSIX filesystems to simulate case-insensitive FS lookup
+            if not upper_path.exists():
+                shutil.copyfile(dt_path, upper_path)
+
+            real_samefile = os.path.samefile
+            resolved_dt = dt_path.resolve()
+            resolved_upper = upper_path.resolve()
+
+            def fake_samefile(a, b):
+                pair = {Path(a).resolve(), Path(b).resolve()}
+                if pair == {resolved_dt, resolved_upper}:
+                    return True
+                return real_samefile(a, b)
+
+            with (
+                mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value="/usr/bin/soffice"),
+                mock.patch.object(recalc_xlsx_mod.subprocess, "Popen") as mock_popen,
+                mock.patch.object(recalc_xlsx_mod.os.path, "samefile", side_effect=fake_samefile),
+            ):
+                rc, payload = self._run_main([str(dt_path), "--output", str(upper_path)])
+
+            mock_popen.assert_not_called()
+            self.assertEqual(rc, 1, payload)
+            self.assertEqual(payload["status"], "error")
+            self.assertFalse(payload["recalculated_with_libreoffice"])
+            self.assertEqual(payload["data_tables"], ["Sensitivity!C3:D4"])
+            self.assertIn("What-If data table", payload["message"])
+            self.assertEqual(dt_path.read_bytes(), orig_bytes)
+
     def test_output_rejects_non_xlsx_extension_before_libreoffice(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             src_path = Path(tmp) / "input.xlsx"
@@ -1753,6 +1832,60 @@ class TestValidateDcf(unittest.TestCase):
                     any("Terminal value is 60.0% of EV" in i for i in results["info"]),
                     results["info"],
                 )
+
+    def test_standalone_validate_dcf_outside_repo_emits_graceful_json_fail(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="standalone_dcf_") as tmp:
+            isolated_dir = Path(tmp)
+            isolated_script = isolated_dir / "validate_dcf.py"
+            shutil.copyfile(VALIDATE_DCF_PATH, isolated_script)
+
+            sample_xlsx = isolated_dir / "sample.xlsx"
+            self._build_compliant_two_sheet_dcf(sample_xlsx, with_formula=False)
+
+            clean_env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+            proc = subprocess.run(
+                [sys.executable, str(isolated_script), str(sample_xlsx)],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=clean_env,
+                cwd=tmp,
+            )
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertEqual(proc.stderr, "", f"Unexpected stderr output: {proc.stderr}")
+            self.assertNotIn("Traceback", proc.stdout + proc.stderr)
+
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["status"], "FAIL", payload)
+            self.assertGreaterEqual(payload["error_count"], 1, payload)
+            self.assertEqual(payload["warning_count"], 0, payload)
+            self.assertEqual(payload["warnings"], [], payload)
+            self.assertEqual(payload["info"], [], payload)
+            self.assertTrue(
+                any("xlsx_scan" in err for err in payload["errors"]),
+                f"Expected helpful error mentioning xlsx_scan, got: {payload['errors']}",
+            )
+
+            # Programmatic guard when scan_workbook_formulas is unavailable
+            with mock.patch.object(validate_dcf_mod, "scan_workbook_formulas", None):
+                prog_res = validate_dcf_mod.validate_dcf_model(str(sample_xlsx))
+            self.assertEqual(prog_res["status"], "FAIL", prog_res)
+            self.assertEqual(prog_res["error_count"], 1, prog_res)
+            self.assertTrue(any("xlsx_scan" in err for err in prog_res["errors"]), prog_res["errors"])
+
+            # Verify documented PYTHONPATH workaround succeeds from the isolated location
+            env_with_scripts = dict(clean_env)
+            env_with_scripts["PYTHONPATH"] = str(SCRIPTS_DIR)
+            proc_ok = subprocess.run(
+                [sys.executable, str(isolated_script), str(sample_xlsx)],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env_with_scripts,
+                cwd=tmp,
+            )
+            self.assertEqual(proc_ok.returncode, 0, proc_ok.stdout + proc_ok.stderr)
+            self.assertEqual(json.loads(proc_ok.stdout)["status"], "PASS")
 
 
 @unittest.skipIf(openpyxl is None, "openpyxl is required for DCF skeleton tests")

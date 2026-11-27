@@ -11,11 +11,40 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
-_REPO_SCRIPTS_DIR = str(Path(__file__).resolve().parents[4] / "scripts")
-if _REPO_SCRIPTS_DIR not in sys.path:
-    sys.path.insert(0, _REPO_SCRIPTS_DIR)
+_MISSING_XLSX_SCAN_MESSAGE = (
+    "Shared dependency 'scripts/xlsx_scan.py' could not be found. "
+    "Run validate_dcf.py from within the equity-research repository or add the "
+    "repository's scripts/ directory to PYTHONPATH."
+)
 
-from xlsx_scan import EXCEL_ERRORS, extract_formula_text as _extract_formula_text, scan_workbook_formulas  # noqa: E402
+
+def _find_repo_scripts_dir() -> Optional[Path]:
+    """Search ancestor directories for a shared `scripts/xlsx_scan.py` module."""
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "scripts"
+        if (candidate / "xlsx_scan.py").is_file():
+            return candidate
+    return None
+
+
+_REPO_SCRIPTS_DIR = _find_repo_scripts_dir()
+if _REPO_SCRIPTS_DIR is not None:
+    _repo_scripts_str = str(_REPO_SCRIPTS_DIR)
+    if _repo_scripts_str not in sys.path:
+        sys.path.insert(0, _repo_scripts_str)
+
+_XLSX_SCAN_IMPORT_ERROR: Optional[str] = None
+try:
+    from xlsx_scan import (  # noqa: E402
+        EXCEL_ERRORS,
+        extract_formula_text as _extract_formula_text,
+        scan_workbook_formulas,
+    )
+except ModuleNotFoundError:
+    EXCEL_ERRORS = ()
+    _extract_formula_text = None  # type: ignore[assignment]
+    scan_workbook_formulas = None  # type: ignore[assignment]
+    _XLSX_SCAN_IMPORT_ERROR = _MISSING_XLSX_SCAN_MESSAGE
 
 SENSITIVITY_VS_RE = re.compile(r'\bvs\.?\b')
 OF_EV_RE = re.compile(r'\bof\s+ev\b')
@@ -205,6 +234,19 @@ class DCFModelValidator:
         """
         from datetime import datetime
 
+        if scan_workbook_formulas is None:
+            self.errors.append(_XLSX_SCAN_IMPORT_ERROR or _MISSING_XLSX_SCAN_MESSAGE)
+            return {
+                'file': self.excel_path,
+                'validation_date': datetime.now().isoformat(),
+                'status': 'FAIL',
+                'error_count': len(self.errors),
+                'warning_count': len(self.warnings),
+                'errors': self.errors,
+                'warnings': self.warnings,
+                'info': self.info,
+            }
+
         self.check_sheet_structure()
         self.check_formula_errors()
         self.check_dcf_logic()
@@ -254,6 +296,10 @@ class DCFModelValidator:
 
     def check_formula_errors(self):
         """Check for Excel formula errors and uncached formulas in all worksheets using read_only=True."""
+        if scan_workbook_formulas is None:
+            self.errors.append(_XLSX_SCAN_IMPORT_ERROR or _MISSING_XLSX_SCAN_MESSAGE)
+            return {}, 0
+
         scan = scan_workbook_formulas(Path(self.excel_path))
         error_details = {err: [] for err in EXCEL_ERRORS}
         total_errors = scan['total_errors']
@@ -557,6 +603,22 @@ def main():
 
     excel_file = sys.argv[1]
     output_file = sys.argv[2] if len(sys.argv) > 2 else None
+
+    if scan_workbook_formulas is None:
+        results = {
+            'file': excel_file,
+            'status': 'FAIL',
+            'errors': [_XLSX_SCAN_IMPORT_ERROR or _MISSING_XLSX_SCAN_MESSAGE],
+            'warnings': [],
+            'info': [],
+            'error_count': 1,
+            'warning_count': 0,
+        }
+        print(json.dumps(results, indent=2))
+        if output_file:
+            with open(output_file, 'w', encoding='utf-8') as f:
+                json.dump(results, f, indent=2)
+        sys.exit(1)
 
     try:
         results = validate_dcf_model(excel_file)

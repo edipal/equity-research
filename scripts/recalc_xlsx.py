@@ -145,6 +145,16 @@ def preflight_validate_input(xlsx_path: Path) -> str | None:
     return None
 
 
+def _is_same_file(a: Path, b: Path) -> bool:
+    """Return True if two paths refer to the same file (handles case-insensitive FS & hardlinks)."""
+    if a == b:
+        return True
+    try:
+        return a.exists() and b.exists() and os.path.samefile(a, b)
+    except OSError:
+        return False
+
+
 def atomic_copy(src: Path, dst: Path, preserve_mode_from: Path | None = None) -> None:
     """Atomically replace dst with a copy of src via a temp file in dst.parent.
 
@@ -396,6 +406,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         dest_path = sibling
 
+    is_in_place = dest_path is not None and _is_same_file(dest_path, xlsx_path)
+
     # Protect Excel What-If data tables (<f t="dataTable">) from in-place LibreOffice corruption
     data_table_locs = workbook_has_data_tables(xlsx_path)
     warnings: list[str] = []
@@ -403,7 +415,7 @@ def main(argv: list[str] | None = None) -> int:
         locs_preview = ", ".join(data_table_locs[:5])
         if len(data_table_locs) > 5:
             locs_preview += f" (+{len(data_table_locs) - 5} more)"
-        if soffice is not None and not args.check_only and dest_path == xlsx_path:
+        if soffice is not None and not args.check_only and is_in_place:
             print(
                 json.dumps(
                     {
@@ -434,7 +446,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"Input workbook contains Excel What-If data table(s) ({locs_preview}); "
                 "audited in a temporary copy without modifying the input file."
             )
-        elif soffice is not None and dest_path is not None and dest_path != xlsx_path:
+        elif soffice is not None and dest_path is not None and not is_in_place:
             warnings.append(
                 f"Input workbook contains Excel What-If data table(s) ({locs_preview}); "
                 "LibreOffice re-export converts What-If data tables into Calc TABLE(...) formulas "
@@ -493,7 +505,7 @@ def main(argv: list[str] | None = None) -> int:
                     return 1
                 scan_target = dest_path
                 reported_file = dest_path
-                if dest_path != xlsx_path and not args.output:
+                if not is_in_place and not args.output:
                     warnings.append(
                         f"Converted non-.xlsx input '{xlsx_path.name}' to '{dest_path.name}' "
                         "without overwriting the original file."
@@ -556,7 +568,7 @@ def main(argv: list[str] | None = None) -> int:
     }
     if args.check_only:
         result["check_only"] = True
-    if reported_file != xlsx_path:
+    if not _is_same_file(reported_file, xlsx_path):
         result["source_file"] = str(xlsx_path)
     if warnings:
         result["warning"] = " ".join(warnings)
