@@ -31,6 +31,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = ROOT / "scripts"
 VALIDATE_HARNESS_PATH = SCRIPTS_DIR / "validate_harness.py"
 RECALC_XLSX_PATH = SCRIPTS_DIR / "recalc_xlsx.py"
+XLSX_SCAN_PATH = SCRIPTS_DIR / "xlsx_scan.py"
 VALIDATE_DCF_PATH = ROOT / ".agents" / "skills" / "dcf-model" / "scripts" / "validate_dcf.py"
 BUILD_DCF_SKELETON_PATH = ROOT / ".agents" / "skills" / "dcf-model" / "scripts" / "build_dcf_skeleton.py"
 
@@ -44,6 +45,7 @@ def load_module(name: str, path: Path):
 
 
 validate_harness_mod = load_module("validate_harness", VALIDATE_HARNESS_PATH)
+xlsx_scan_mod = load_module("xlsx_scan", XLSX_SCAN_PATH)
 recalc_xlsx_mod = load_module("recalc_xlsx", RECALC_XLSX_PATH)
 validate_dcf_mod = load_module("validate_dcf", VALIDATE_DCF_PATH)
 
@@ -401,6 +403,38 @@ class TestValidateHarness(unittest.TestCase):
             self.assertIs(fm_agent["mainAgent"], True)
             self.assertIs(fm_agent["subagent"], False)
             self.assertEqual(errors, [], errors)
+
+    def test_parses_crlf_frontmatter_cleanly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            create_minimal_valid_harness(base)
+            # Rewrite rule, skill, and agent files with Windows CRLF (\r\n) line endings
+            rule_md = base / ".agents" / "rules" / "integrity.md"
+            rule_md.write_bytes(
+                b"---\r\ntrigger: always_on\r\ndescription: Core rules\r\n---\r\n\r\n# Integrity\r\n"
+            )
+            skill_md = base / ".agents" / "skills" / "sample-skill" / "SKILL.md"
+            skill_md.write_bytes(
+                b"---\r\nname: sample-skill\r\ndescription: Valid CRLF skill.\r\n---\r\n\r\n# Skill\r\n"
+            )
+            agent_md = base / ".agents" / "agents" / "sample-agent.md"
+            agent_md.write_bytes(
+                b"---\r\nname: sample-agent\r\ndescription: CRLF agent.\r\n"
+                b"mainAgent: true\r\nsubagent: true\r\nmodel: inherit\r\n"
+                b"commandExecutionPolicy: sandbox\r\n---\r\n\r\n# Prompt\r\n"
+            )
+
+            # Must pass both with PyYAML (if installed) and with the fallback parser
+            errors, _, _ = validate_harness_mod.validate_harness(base)
+            self.assertEqual(errors, [], f"CRLF frontmatter failed: {errors}")
+
+            with mock.patch.object(validate_harness_mod, "yaml", None):
+                fm_skill, body, errs = validate_harness_mod.parse_frontmatter(skill_md, root=base)
+                self.assertEqual(errs, [])
+                self.assertEqual(fm_skill["name"], "sample-skill")
+                self.assertEqual(body, "# Skill")
+                errors_fb, _, _ = validate_harness_mod.validate_harness(base)
+                self.assertEqual(errors_fb, [], f"CRLF fallback failed: {errors_fb}")
 
 
 @unittest.skipIf(openpyxl is None, "openpyxl is required for Excel script tests")
@@ -1009,6 +1043,180 @@ class TestRecalcXlsx(unittest.TestCase):
             finally:
                 wb_after.close()
 
+    def test_what_if_data_table_refuses_inplace_allows_check_only_and_counts_formulas(self) -> None:
+        from openpyxl.worksheet.formula import DataTableFormula
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "what_if_model.xlsx"
+            out_path = Path(tmp) / "exported_copy.xlsx"
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Sensitivity"
+            ws["A1"] = 10
+            ws["A2"] = 2
+            ws["B2"] = "=A1*A2"
+            ws["C2"] = 10
+            ws["D2"] = 20
+            ws["B3"] = 2
+            ws["B4"] = 3
+            ws["C3"] = DataTableFormula(ref="C3:D4", dt2D=True, r1="A1", r2="A2")
+            wb.save(path)
+            wb.close()
+
+            orig_bytes = path.read_bytes()
+
+            # 1. XML detector finds the data table location accurately
+            locs = xlsx_scan_mod.workbook_has_data_tables(path)
+            self.assertEqual(locs, ["Sensitivity!C3:D4"])
+
+            # 2. Scan-only (no soffice): counts DataTableFormula in total_formulas and flags uncached
+            with mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value=None):
+                rc_scan, payload_scan = self._run_main([str(path)])
+            self.assertEqual(rc_scan, 2, payload_scan)
+            self.assertEqual(payload_scan["status"], "unverified")
+            self.assertEqual(payload_scan["total_formulas"], 2)  # B2 + C3 DataTableFormula
+            self.assertEqual(payload_scan["uncached_formulas"], 2)
+            self.assertEqual(path.read_bytes(), orig_bytes)
+
+            # 3. Default in-place with soffice: MUST REFUSE to overwrite and never call Popen
+            with (
+                mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value="/usr/bin/soffice"),
+                mock.patch.object(recalc_xlsx_mod.subprocess, "Popen") as mock_popen,
+            ):
+                rc_inplace, payload_inplace = self._run_main([str(path)])
+            mock_popen.assert_not_called()
+            self.assertEqual(rc_inplace, 1, payload_inplace)
+            self.assertEqual(payload_inplace["status"], "error")
+            self.assertIn("What-If data table", payload_inplace["message"])
+            self.assertIn("--check-only", payload_inplace["message"])
+            self.assertIn("--output", payload_inplace["message"])
+            self.assertEqual(path.read_bytes(), orig_bytes)
+
+            # 4. --check-only and --output work safely without modifying original input
+            def fake_popen(cmd, **kwargs):
+                outdir = Path(cmd[cmd.index("--outdir") + 1])
+                converted = outdir / f"{path.stem}.xlsx"
+                shutil.copyfile(path, converted)
+                proc = mock.MagicMock()
+                proc.returncode = 0
+                proc.communicate.return_value = ("", "")
+                return proc
+
+            with (
+                mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value="/usr/bin/soffice"),
+                mock.patch.object(recalc_xlsx_mod.subprocess, "Popen", side_effect=fake_popen),
+            ):
+                rc_chk, payload_chk = self._run_main([str(path), "--check-only"])
+                self.assertEqual(rc_chk, 0, payload_chk)
+                self.assertTrue(payload_chk["check_only"])
+                self.assertIn("What-If data table", payload_chk.get("warning", ""))
+                self.assertEqual(path.read_bytes(), orig_bytes)
+
+                rc_out, payload_out = self._run_main([str(path), "--output", str(out_path)])
+                self.assertEqual(rc_out, 0, payload_out)
+                self.assertTrue(out_path.exists())
+                self.assertIn("TABLE(...)", payload_out.get("warning", ""))
+                self.assertEqual(path.read_bytes(), orig_bytes)
+
+    def test_output_rejects_non_xlsx_extension_before_libreoffice(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src_path = Path(tmp) / "input.xlsx"
+            wb = openpyxl.Workbook()
+            wb.save(src_path)
+            wb.close()
+
+            for bad_name in ("model.xlsm", "model.xls", "model_no_ext"):
+                bad_out = Path(tmp) / bad_name
+                with self.subTest(bad_name=bad_name):
+                    with (
+                        mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value="/usr/bin/soffice"),
+                        mock.patch.object(recalc_xlsx_mod.subprocess, "Popen") as mock_popen,
+                    ):
+                        rc, payload = self._run_main([str(src_path), "--output", str(bad_out)])
+                    mock_popen.assert_not_called()
+                    self.assertEqual(rc, 1, payload)
+                    self.assertEqual(payload["status"], "error")
+                    self.assertIn(".xlsx", payload["message"])
+                    self.assertFalse(bad_out.exists())
+
+    def test_xlsm_scan_only_without_soffice_does_not_fail_sibling_check(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            xlsm_path = Path(tmp) / "coverage.xlsm"
+            sibling_xlsx = Path(tmp) / "coverage.xlsx"
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws["A1"] = 123.0
+            wb.save(xlsm_path)
+            wb.close()
+            sibling_xlsx.write_bytes(b"existing sibling untouched")
+
+            with mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value=None):
+                rc, payload = self._run_main([str(xlsm_path)])
+
+            self.assertEqual(rc, 0, payload)
+            self.assertEqual(payload["status"], "success")
+            self.assertFalse(payload["recalculated_with_libreoffice"])
+            self.assertEqual(sibling_xlsx.read_bytes(), b"existing sibling untouched")
+
+    def test_shared_scan_readonly_handles_stale_dimension_and_unified_error_fallback(self) -> None:
+        import xml.etree.ElementTree as ET
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "edge_cases.xlsx"
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "DCF"
+            ws["A1"] = "WACC"
+            ws["B1"] = 0.09
+            ws["A2"] = "Terminal Growth Rate"
+            ws["B2"] = 0.025
+            ws["A3"] = "PV of Terminal Value"
+            ws["B3"] = 600.0
+            ws["A4"] = "Enterprise Value"
+            ws["B4"] = 1000.0
+            ws["A5"] = "Sensitivity Analysis"
+            # Place an error-typed cell outside a truncated <dimension> range
+            ws["E8"] = "=1/0"
+            ws_wacc = wb.create_sheet("WACC")
+            ws_wacc["A1"] = "WACC"
+            ws_wacc["B1"] = 0.09
+            wb.save(path)
+            wb.close()
+
+            # Mutate sheet1.xml: truncate <dimension> to A1:B5 AND make E8 error-typed with empty <v/>
+            ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+            ET.register_namespace("", ns)
+            with zipfile.ZipFile(path, "r") as zin:
+                entries = {name: zin.read(name) for name in zin.namelist()}
+            root = ET.fromstring(entries["xl/worksheets/sheet1.xml"])
+            dim = root.find(f"{{{ns}}}dimension")
+            if dim is not None:
+                dim.attrib["ref"] = "A1:B5"
+            for cell in root.iter(f"{{{ns}}}c"):
+                if cell.attrib.get("r") == "E8":
+                    cell.attrib["t"] = "e"
+                    v_el = cell.find(f"{{{ns}}}v")
+                    if v_el is not None:
+                        cell.remove(v_el)
+            entries["xl/worksheets/sheet1.xml"] = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+            with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+                for name, data in entries.items():
+                    zout.writestr(name, data)
+
+            # Both recalc_xlsx.py and validate_dcf.py MUST find DCF!E8 as unified "#ERROR!"
+            with mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value=None):
+                rc, recalc_payload = self._run_main([str(path)])
+            self.assertEqual(rc, 1, recalc_payload)
+            self.assertIn("#ERROR!", recalc_payload["error_summary"])
+            self.assertEqual(recalc_payload["error_summary"]["#ERROR!"]["locations"], ["DCF!E8"])
+
+            dcf_results = validate_dcf_mod.validate_dcf_model(str(path))
+            self.assertEqual(dcf_results["status"], "FAIL", dcf_results)
+            self.assertTrue(
+                any("#ERROR! at DCF!E8" in e for e in dcf_results["errors"]),
+                f"Expected unified '#ERROR! at DCF!E8', got: {dcf_results['errors']}",
+            )
+
 
 @unittest.skipIf(openpyxl is None, "openpyxl is required for DCF validation tests")
 class TestValidateDcf(unittest.TestCase):
@@ -1437,6 +1645,43 @@ class TestValidateDcf(unittest.TestCase):
             payload_fail = json.loads(proc_fail.stdout)
             self.assertEqual(payload_fail["status"], "FAIL")
 
+    def test_tv_proportion_warns_outside_50_to_70_percent_target(self) -> None:
+        for tv_val, expect_warning in ((740.0, True), (450.0, True), (650.0, False)):
+            with self.subTest(tv_val=tv_val), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / f"tv_{int(tv_val)}.xlsx"
+                self._build_compliant_two_sheet_dcf(path, with_formula=False)
+                wb = openpyxl.load_workbook(path)
+                wb["DCF"]["B6"] = tv_val  # EV in B7 is 1000.0
+                wb.save(path)
+                wb.close()
+
+                results = validate_dcf_mod.validate_dcf_model(str(path))
+                self.assertEqual(results["status"], "PASS", results)
+                if expect_warning:
+                    self.assertGreater(results["warning_count"], 0, results)
+                    self.assertTrue(
+                        any("typically should be 50-70%" in w for w in results["warnings"]),
+                        results["warnings"],
+                    )
+                else:
+                    self.assertEqual(results["warning_count"], 0, results["warnings"])
+
+    def test_validate_dcf_counts_data_table_formula_as_uncached(self) -> None:
+        from openpyxl.worksheet.formula import DataTableFormula
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "dcf_datatable.xlsx"
+            self._build_compliant_two_sheet_dcf(path, with_formula=False)
+            wb = openpyxl.load_workbook(path)
+            wb["DCF"]["C12"] = DataTableFormula(ref="C12:D13", dt2D=True, r1="B3", r2="B4")
+            wb.save(path)
+            wb.close()
+
+            results = validate_dcf_mod.validate_dcf_model(str(path))
+            self.assertEqual(results["status"], "FAIL", results)
+            self.assertTrue(any("Total formulas: 1" in i for i in results["info"]), results["info"])
+            self.assertTrue(any("Uncached formulas: 1" in i for i in results["info"]), results["info"])
+
 
 @unittest.skipIf(openpyxl is None, "openpyxl is required for DCF skeleton tests")
 class TestBuildDcfSkeleton(unittest.TestCase):
@@ -1457,6 +1702,34 @@ class TestBuildDcfSkeleton(unittest.TestCase):
             )
             self.assertEqual(build_proc.returncode, 0, build_proc.stdout + build_proc.stderr)
             self.assertTrue(model_path.exists())
+
+            # Inspect formulas & DataValidation before recalculation
+            wb_f = openpyxl.load_workbook(model_path, data_only=False)
+            try:
+                ws_f = wb_f["DCF"]
+                # B4 DataValidation enforcing whole numbers 1..3
+                dvs = list(ws_f.data_validations.dataValidation)
+                b4_dvs = [dv for dv in dvs if "B4" in str(dv.sqref)]
+                self.assertEqual(len(b4_dvs), 1, f"Expected DataValidation on DCF!B4, got {dvs}")
+                self.assertEqual(b4_dvs[0].type, "whole")
+                self.assertEqual(b4_dvs[0].operator, "between")
+                self.assertEqual(str(b4_dvs[0].formula1), "1")
+                self.assertEqual(str(b4_dvs[0].formula2), "3")
+                # INT() guard in CHOOSE and INDEX
+                self.assertIn("INT(Case)", str(ws_f["C4"].value))
+                self.assertIn("INT($B$4)", str(ws_f["C62"].value))
+                # Perpetuity TV discounted at N - 0.5 ($G$87), Exit Multiple TV at N ($G$87+0.5)
+                self.assertIn("^$G$87", str(ws_f["C96"].value))
+                self.assertIn("^($G$87+0.5)", str(ws_f["C117"].value))
+                # Horizon-independent SUMPRODUCT sensitivity formula (no hardcoded ^0.5..^4.5 or ^5)
+                sens_formula = str(ws_f["E127"].value)
+                self.assertIn("SUMPRODUCT(", sens_formula)
+                self.assertIn("$G$87", sens_formula)
+                self.assertNotIn("^0.5", sens_formula)
+                self.assertNotIn("^4.5", sens_formula)
+                self.assertNotIn("^5", sens_formula)
+            finally:
+                wb_f.close()
 
             prices_by_case: dict[int, float] = {}
             expected_labels = {1: "Bear Case", 2: "Base Case", 3: "Bull Case"}
@@ -1506,16 +1779,67 @@ class TestBuildDcfSkeleton(unittest.TestCase):
                     # Gross-debt capital weights: non-negative and sum to 100%
                     self.assertGreaterEqual(ws_wacc["C23"].value, 0.0)
                     self.assertAlmostEqual(ws_wacc["C24"].value, 1.0, places=6)
-                    # Center cell of 5x5 sensitivity matches Active Case Implied Share Price
-                    implied_price = float(ws_dcf["C107"].value)
-                    sens_center = float(ws_dcf["E126"].value)
-                    self.assertAlmostEqual(implied_price, sens_center, places=4)
+                    # TV % of EV cleanly inside 50%-70%
+                    tv_pct = float(ws_dcf["C113"].value)
+                    self.assertGreaterEqual(tv_pct, 0.50)
+                    self.assertLessEqual(tv_pct, 0.70)
+                    # Perpetuity TV DF = 1/(1+WACC)^4.5 and Exit Multiple PV = ExitTV/(1+WACC)^5.0
+                    wacc = float(ws_dcf["C21"].value)
+                    self.assertAlmostEqual(float(ws_dcf["C96"].value), 1.0 / ((1.0 + wacc) ** 4.5), places=8)
+                    self.assertAlmostEqual(
+                        float(ws_dcf["C117"].value),
+                        float(ws_dcf["C116"].value) / ((1.0 + wacc) ** 5.0),
+                        places=6,
+                    )
+                    # Center cell of SUMPRODUCT 5x5 sensitivity matches Active Case Implied Share Price
+                    implied_price = float(ws_dcf["C108"].value)
+                    sens_center = float(ws_dcf["E127"].value)
+                    self.assertLess(abs(implied_price - sens_center), 1e-6)
                     prices_by_case[case_num] = implied_price
                 finally:
                     wb_val.close()
 
             self.assertLess(prices_by_case[1], prices_by_case[2])
             self.assertLess(prices_by_case[2], prices_by_case[3])
+
+            # Test fractional B4 = 2.5 does NOT misalign CHOOSE and INDEX (matches Base Case exactly)
+            wb_frac = openpyxl.load_workbook(model_path)
+            wb_frac["DCF"]["B4"] = 2.5
+            wb_frac.save(model_path)
+            wb_frac.close()
+            recalc_frac = subprocess.run(
+                [sys.executable, str(RECALC_XLSX_PATH), str(model_path), "30"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(recalc_frac.returncode, 0, recalc_frac.stdout + recalc_frac.stderr)
+            wb_frac_v = openpyxl.load_workbook(model_path, data_only=True)
+            try:
+                self.assertEqual(wb_frac_v["DCF"]["C4"].value, "Base Case")
+                self.assertAlmostEqual(float(wb_frac_v["DCF"]["C108"].value), prices_by_case[2], places=6)
+            finally:
+                wb_frac_v.close()
+
+            # Test OTM options ($14 < $15 strike): Unvested RSUs MUST remain 100% included (96.0 + 1.5 = 97.5)
+            wb_otm = openpyxl.load_workbook(model_path)
+            wb_otm["DCF"]["B4"] = 2
+            wb_otm["DCF"]["C8"] = 14.00
+            wb_otm.save(model_path)
+            wb_otm.close()
+            recalc_otm = subprocess.run(
+                [sys.executable, str(RECALC_XLSX_PATH), str(model_path), "30"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(recalc_otm.returncode, 0, recalc_otm.stdout + recalc_otm.stderr)
+            wb_otm_v = openpyxl.load_workbook(model_path, data_only=True)
+            try:
+                ws_otm = wb_otm_v["DCF"]
+                self.assertAlmostEqual(float(ws_otm["C13"].value), 97.5, places=6)
+            finally:
+                wb_otm_v.close()
 
 
 if __name__ == "__main__":

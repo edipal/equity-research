@@ -38,6 +38,7 @@ equity-research/
 │   └── data-sources.md              # Public filings (SEC EDGAR) & optional MCP setup
 ├── scripts/
 │   ├── recalc_xlsx.py               # LibreOffice Excel formula recalculation & error scan
+│   ├── xlsx_scan.py                 # Shared low-memory read_only=True Excel formula scanner
 │   └── validate_harness.py          # Automated Antigravity harness schema validator
 ├── tests/
 │   └── test_scripts.py              # Automated regression test suite
@@ -72,7 +73,7 @@ Every folder in `.agents/skills/` is both **semantically discovered** by Antigra
 | Slash Command | Purpose |
 |---|---|
 | `/comps-analysis` | Comparable company trading multiples (full EV, LTM/NTM calendarized `EV/Rev`, `EV/EBITDA`, `P/E`, `"NM"` guards) with Max/75th/Median/25th/Min statistics |
-| `/dcf-model` | Institutional 2-sheet DCF model (gross-debt WACC, Bear/Base/Bull `INDEX` blocks, mid-year FCF, end-of-year TV, 5×5 live sensitivities) + `build_dcf_skeleton.py` & `validate_dcf.py` |
+| `/dcf-model` | Institutional 2-sheet DCF model (gross-debt WACC, Bear/Base/Bull `INDEX` blocks, mid-year FCF & `N - 0.5` perpetuity TV, end-of-year exit-multiple TV, `SUMPRODUCT` 5×5 live sensitivities) + `build_dcf_skeleton.py` & `validate_dcf.py` |
 | `/three-statement-model` | Scratch-built or template-populated integrated Income Statement, Balance Sheet, and Cash Flow model (ASC 740 NOL/DTA, revolver sweep, equity roll-forwards) |
 | `/unit-economics` | Public-equity & SaaS recurring-revenue unit economics (ARR/billings bridge, cohorts/proxies, lagged CAC, NDR/GRR, LTV/CAC, Rule of 40) |
 

@@ -16,6 +16,7 @@ from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.workbook.defined_name import DefinedName
+from openpyxl.worksheet.datavalidation import DataValidation
 
 # Institutional color palette (aligned with .agents/rules/financial-modeling.md)
 COLOR_NAVY = "1F4E79"
@@ -59,6 +60,23 @@ FMT_DEC_2 = "0.00"
 FMT_DEC_4 = "0.0000"
 FMT_MULT = "0.0\"x\""
 FMT_INT = "0"
+
+# Locked DCF sheet Section 1 row constants (shared with WACC sheet cross-links)
+ROW_PRICE = 8
+ROW_BASIC_SH = 9
+ROW_RSUS = 10
+ROW_OPTIONS = 11
+ROW_STRIKE = 12
+ROW_DILUTED_SH = 13
+ROW_MKTCAP = 14
+ROW_DEBT = 15
+ROW_PREF = 16
+ROW_NCI = 17
+ROW_CASH = 18
+ROW_EQ_INV = 19
+ROW_BASE_REV = 20
+ROW_WACC = 21
+ROW_TAX_RATE = 22
 
 
 def _comment(text: str) -> Comment:
@@ -140,12 +158,12 @@ def _build_wacc_sheet(ws) -> None:
 
     ws.cell(row=7, column=1, value="Equity Beta (5Y Monthly)").font = FONT_FORMULA
     ws.cell(row=7, column=2, value="x").font = FONT_NOTE
-    _write_input_cell(ws, 7, 3, 1.15, FMT_DEC_2, "Source: 5-year monthly regression vs S&P 500 [ASSUMPTION]")
+    _write_input_cell(ws, 7, 3, 1.35, FMT_DEC_2, "Source: 5-year monthly regression vs S&P 500 [ASSUMPTION]")
     ws.cell(row=7, column=4, value="5-year monthly levered beta").font = FONT_NOTE
 
     ws.cell(row=8, column=1, value="Equity Risk Premium (ERP)").font = FONT_FORMULA
     ws.cell(row=8, column=2, value="%").font = FONT_NOTE
-    _write_input_cell(ws, 8, 3, 0.0575, FMT_PCT_2, "Source: Damodaran / institutional ERP [ASSUMPTION]")
+    _write_input_cell(ws, 8, 3, 0.0600, FMT_PCT_2, "Source: Damodaran / institutional ERP [ASSUMPTION]")
     ws.cell(row=8, column=4, value="Long-run implied US equity risk premium").font = FONT_NOTE
 
     ws.cell(row=9, column=1, value="Cost of Equity (Ke)").font = FONT_FORMULA_BOLD
@@ -159,7 +177,7 @@ def _build_wacc_sheet(ws) -> None:
 
     ws.cell(row=13, column=1, value="Pre-Tax Cost of Debt (Kd)").font = FONT_FORMULA
     ws.cell(row=13, column=2, value="%").font = FONT_NOTE
-    _write_input_cell(ws, 13, 3, 0.055, FMT_PCT_2, "Source: Corporate bond YTM / weighted avg borrowing rate [ASSUMPTION]")
+    _write_input_cell(ws, 13, 3, 0.0600, FMT_PCT_2, "Source: Corporate bond YTM / weighted avg borrowing rate [ASSUMPTION]")
     ws.cell(row=13, column=4, value="Weighted-average yield on gross debt").font = FONT_NOTE
 
     ws.cell(row=14, column=1, value="Effective Marginal Tax Rate").font = FONT_FORMULA
@@ -178,12 +196,12 @@ def _build_wacc_sheet(ws) -> None:
 
     ws.cell(row=19, column=1, value="Market Value of Equity (E)").font = FONT_FORMULA
     ws.cell(row=19, column=2, value="$M").font = FONT_NOTE
-    _write_formula_cell(ws, 19, 3, "=DCF!C13", FMT_CURRENCY_M, cross_sheet=True)
+    _write_formula_cell(ws, 19, 3, f"=DCF!C{ROW_MKTCAP}", FMT_CURRENCY_M, cross_sheet=True)
     ws.cell(row=19, column=4, value="Linked from DCF Market Capitalization").font = FONT_NOTE
 
     ws.cell(row=20, column=1, value="Total Gross Debt (D)").font = FONT_FORMULA
     ws.cell(row=20, column=2, value="$M").font = FONT_NOTE
-    _write_formula_cell(ws, 20, 3, "=DCF!C14", FMT_CURRENCY_M, cross_sheet=True)
+    _write_formula_cell(ws, 20, 3, f"=DCF!C{ROW_DEBT}", FMT_CURRENCY_M, cross_sheet=True)
     ws.cell(row=20, column=4, value="Linked from DCF Total Gross Debt (gross basis, >= 0)").font = FONT_NOTE
 
     ws.cell(row=21, column=1, value="Total Capitalization (E + D)").font = FONT_FORMULA_BOLD
@@ -249,10 +267,25 @@ def _build_dcf_sheet(ws, wb: openpyxl.Workbook, default_case: int = 2) -> None:
     ws["B4"].fill = FILL_HIGHLIGHT
     wb.defined_names["Case"] = DefinedName("Case", attr_text="DCF!$B$4")
 
+    # Enforce integer 1..3 validation on DCF!B4
+    case_dv = DataValidation(
+        type="whole",
+        operator="between",
+        formula1="1",
+        formula2="3",
+        allow_blank=False,
+    )
+    case_dv.promptTitle = "Scenario Case"
+    case_dv.prompt = "Enter 1 (Bear Case), 2 (Base Case), or 3 (Bull Case)."
+    case_dv.errorTitle = "Invalid Scenario"
+    case_dv.error = "Case must be a whole number between 1 and 3 (1=Bear, 2=Base, 3=Bull)."
+    ws.add_data_validation(case_dv)
+    case_dv.add("B4")
+
     case_label_cell = ws.cell(
         row=4,
         column=3,
-        value='=CHOOSE(Case,"Bear Case","Base Case","Bull Case")',
+        value='=CHOOSE(INT(Case),"Bear Case","Base Case","Bull Case")',
     )
     case_label_cell.font = FONT_FORMULA_BOLD
     case_label_cell.fill = FILL_HIGHLIGHT
@@ -263,137 +296,149 @@ def _build_dcf_sheet(ws, wb: openpyxl.Workbook, default_case: int = 2) -> None:
     _style_banner(ws, 6, 8, "1. MARKET DATA & VALUATION INPUTS")
     _style_col_headers(ws, 7, ["Item", "Units", "Value", "Notes / Source", "", "", "", ""])
 
-    ws.cell(row=8, column=1, value="Current Share Price").font = FONT_FORMULA
-    ws.cell(row=8, column=2, value="$").font = FONT_NOTE
-    _write_input_cell(ws, 8, 3, 25.00, FMT_PRICE, "Source: Market closing price placeholder [ASSUMPTION]")
-    ws.cell(row=8, column=4, value="Reference closing price").font = FONT_NOTE
+    ws.cell(row=ROW_PRICE, column=1, value="Current Share Price").font = FONT_FORMULA
+    ws.cell(row=ROW_PRICE, column=2, value="$").font = FONT_NOTE
+    _write_input_cell(ws, ROW_PRICE, 3, 25.00, FMT_PRICE, "Source: Market closing price placeholder [ASSUMPTION]")
+    ws.cell(row=ROW_PRICE, column=4, value="Reference closing price").font = FONT_NOTE
 
-    ws.cell(row=9, column=1, value="Basic Shares Outstanding").font = FONT_FORMULA
-    ws.cell(row=9, column=2, value="M").font = FONT_NOTE
-    _write_input_cell(ws, 9, 3, 96.0, FMT_DEC_1, "Source: Latest 10-Q/10-K cover page [ASSUMPTION]")
-    ws.cell(row=9, column=4, value="Basic common shares").font = FONT_NOTE
+    ws.cell(row=ROW_BASIC_SH, column=1, value="Basic Shares Outstanding").font = FONT_FORMULA
+    ws.cell(row=ROW_BASIC_SH, column=2, value="M").font = FONT_NOTE
+    _write_input_cell(ws, ROW_BASIC_SH, 3, 96.0, FMT_DEC_1, "Source: Latest 10-Q/10-K cover page [ASSUMPTION]")
+    ws.cell(row=ROW_BASIC_SH, column=4, value="Basic common shares").font = FONT_NOTE
 
-    ws.cell(row=10, column=1, value="Dilutive Options & RSUs").font = FONT_FORMULA
-    ws.cell(row=10, column=2, value="M").font = FONT_NOTE
-    _write_input_cell(ws, 10, 3, 6.0, FMT_DEC_1, "Source: Stock-based compensation footnote [ASSUMPTION]")
-    ws.cell(row=10, column=4, value="In-the-money options and unvested RSUs").font = FONT_NOTE
+    ws.cell(row=ROW_RSUS, column=1, value="Unvested RSUs").font = FONT_FORMULA
+    ws.cell(row=ROW_RSUS, column=2, value="M").font = FONT_NOTE
+    _write_input_cell(
+        ws,
+        ROW_RSUS,
+        3,
+        1.5,
+        FMT_DEC_1,
+        "Source: Stock-based compensation footnote ($0 strike price; always dilutive) [ASSUMPTION]",
+    )
+    ws.cell(row=ROW_RSUS, column=4, value="Unvested restricted stock units ($0 strike; full dilution)").font = FONT_NOTE
 
-    ws.cell(row=11, column=1, value="Weighted Average Option Strike Price").font = FONT_FORMULA
-    ws.cell(row=11, column=2, value="$").font = FONT_NOTE
-    _write_input_cell(ws, 11, 3, 15.00, FMT_PRICE, "Source: Stock-based compensation footnote [ASSUMPTION]")
-    ws.cell(row=11, column=4, value="Weighted-average exercise price for TSM").font = FONT_NOTE
+    ws.cell(row=ROW_OPTIONS, column=1, value="Options Outstanding").font = FONT_FORMULA
+    ws.cell(row=ROW_OPTIONS, column=2, value="M").font = FONT_NOTE
+    _write_input_cell(ws, ROW_OPTIONS, 3, 4.5, FMT_DEC_1, "Source: Stock-based compensation footnote [ASSUMPTION]")
+    ws.cell(row=ROW_OPTIONS, column=4, value="Stock options subject to Treasury Stock Method").font = FONT_NOTE
 
-    ws.cell(row=12, column=1, value="Fully Diluted Shares (TSM)").font = FONT_FORMULA_BOLD
-    ws.cell(row=12, column=2, value="M").font = FONT_NOTE
+    ws.cell(row=ROW_STRIKE, column=1, value="Weighted Average Option Strike Price").font = FONT_FORMULA
+    ws.cell(row=ROW_STRIKE, column=2, value="$").font = FONT_NOTE
+    _write_input_cell(ws, ROW_STRIKE, 3, 15.00, FMT_PRICE, "Source: Stock-based compensation footnote [ASSUMPTION]")
+    ws.cell(row=ROW_STRIKE, column=4, value="Weighted-average exercise price for options TSM").font = FONT_NOTE
+
+    ws.cell(row=ROW_DILUTED_SH, column=1, value="Fully Diluted Shares (TSM)").font = FONT_FORMULA_BOLD
+    ws.cell(row=ROW_DILUTED_SH, column=2, value="M").font = FONT_NOTE
     _write_formula_cell(
         ws,
-        12,
+        ROW_DILUTED_SH,
         3,
-        "=C9+IF(C8>C11,C10-(C10*C11/C8),0)",
+        f"=C{ROW_BASIC_SH}+C{ROW_RSUS}+IF(C{ROW_PRICE}>C{ROW_STRIKE},C{ROW_OPTIONS}-(C{ROW_OPTIONS}*C{ROW_STRIKE}/C{ROW_PRICE}),0)",
         FMT_DEC_1,
         bold=True,
         border=BORDER_SUBTOTAL,
     )
-    ws.cell(row=12, column=4, value="Basic Shares + Treasury Stock Method net dilution").font = FONT_NOTE
+    ws.cell(row=ROW_DILUTED_SH, column=4, value="Basic Shares + Unvested RSUs + ITM Option TSM dilution").font = FONT_NOTE
 
-    ws.cell(row=13, column=1, value="Market Capitalization").font = FONT_FORMULA_BOLD
-    ws.cell(row=13, column=2, value="$M").font = FONT_NOTE
-    _write_formula_cell(ws, 13, 3, "=C8*C12", FMT_CURRENCY_M, bold=True)
-    ws.cell(row=13, column=4, value="Current Share Price * Fully Diluted Shares").font = FONT_NOTE
+    ws.cell(row=ROW_MKTCAP, column=1, value="Market Capitalization").font = FONT_FORMULA_BOLD
+    ws.cell(row=ROW_MKTCAP, column=2, value="$M").font = FONT_NOTE
+    _write_formula_cell(ws, ROW_MKTCAP, 3, f"=C{ROW_PRICE}*C{ROW_DILUTED_SH}", FMT_CURRENCY_M, bold=True)
+    ws.cell(row=ROW_MKTCAP, column=4, value="Current Share Price * Fully Diluted Shares").font = FONT_NOTE
 
-    ws.cell(row=14, column=1, value="Total Gross Debt").font = FONT_FORMULA
-    ws.cell(row=14, column=2, value="$M").font = FONT_NOTE
-    _write_input_cell(ws, 14, 3, 500.0, FMT_CURRENCY_M, "Source: Balance Sheet ST + LT Debt & finance leases [ASSUMPTION]")
-    ws.cell(row=14, column=4, value="Short-term + long-term gross debt").font = FONT_NOTE
+    ws.cell(row=ROW_DEBT, column=1, value="Total Gross Debt").font = FONT_FORMULA
+    ws.cell(row=ROW_DEBT, column=2, value="$M").font = FONT_NOTE
+    _write_input_cell(ws, ROW_DEBT, 3, 500.0, FMT_CURRENCY_M, "Source: Balance Sheet ST + LT Debt & finance leases [ASSUMPTION]")
+    ws.cell(row=ROW_DEBT, column=4, value="Short-term + long-term gross debt").font = FONT_NOTE
 
-    ws.cell(row=15, column=1, value="Preferred Stock").font = FONT_FORMULA
-    ws.cell(row=15, column=2, value="$M").font = FONT_NOTE
-    _write_input_cell(ws, 15, 3, 25.0, FMT_CURRENCY_M, "Source: Balance Sheet liquidation value of preferred [ASSUMPTION]")
-    ws.cell(row=15, column=4, value="Preferred equity liquidation preference").font = FONT_NOTE
+    ws.cell(row=ROW_PREF, column=1, value="Preferred Stock").font = FONT_FORMULA
+    ws.cell(row=ROW_PREF, column=2, value="$M").font = FONT_NOTE
+    _write_input_cell(ws, ROW_PREF, 3, 25.0, FMT_CURRENCY_M, "Source: Balance Sheet liquidation value of preferred [ASSUMPTION]")
+    ws.cell(row=ROW_PREF, column=4, value="Preferred equity liquidation preference").font = FONT_NOTE
 
-    ws.cell(row=16, column=1, value="Non-Controlling Interest").font = FONT_FORMULA
-    ws.cell(row=16, column=2, value="$M").font = FONT_NOTE
-    _write_input_cell(ws, 16, 3, 15.0, FMT_CURRENCY_M, "Source: Balance Sheet minority interest [ASSUMPTION]")
-    ws.cell(row=16, column=4, value="Minority / non-controlling interest").font = FONT_NOTE
+    ws.cell(row=ROW_NCI, column=1, value="Non-Controlling Interest").font = FONT_FORMULA
+    ws.cell(row=ROW_NCI, column=2, value="$M").font = FONT_NOTE
+    _write_input_cell(ws, ROW_NCI, 3, 15.0, FMT_CURRENCY_M, "Source: Balance Sheet minority interest [ASSUMPTION]")
+    ws.cell(row=ROW_NCI, column=4, value="Minority / non-controlling interest").font = FONT_NOTE
 
-    ws.cell(row=17, column=1, value="Cash & Marketable Securities").font = FONT_FORMULA
-    ws.cell(row=17, column=2, value="$M").font = FONT_NOTE
-    _write_input_cell(ws, 17, 3, 300.0, FMT_CURRENCY_M, "Source: Balance Sheet cash + short-term investments [ASSUMPTION]")
-    ws.cell(row=17, column=4, value="Unrestricted cash and marketable securities").font = FONT_NOTE
+    ws.cell(row=ROW_CASH, column=1, value="Cash & Marketable Securities").font = FONT_FORMULA
+    ws.cell(row=ROW_CASH, column=2, value="$M").font = FONT_NOTE
+    _write_input_cell(ws, ROW_CASH, 3, 300.0, FMT_CURRENCY_M, "Source: Balance Sheet cash + short-term investments [ASSUMPTION]")
+    ws.cell(row=ROW_CASH, column=4, value="Unrestricted cash and marketable securities").font = FONT_NOTE
 
-    ws.cell(row=18, column=1, value="Equity Investments").font = FONT_FORMULA
-    ws.cell(row=18, column=2, value="$M").font = FONT_NOTE
-    _write_input_cell(ws, 18, 3, 40.0, FMT_CURRENCY_M, "Source: Non-consolidated equity method investments [ASSUMPTION]")
-    ws.cell(row=18, column=4, value="Non-operating unconsolidated equity stakes").font = FONT_NOTE
+    ws.cell(row=ROW_EQ_INV, column=1, value="Equity Investments").font = FONT_FORMULA
+    ws.cell(row=ROW_EQ_INV, column=2, value="$M").font = FONT_NOTE
+    _write_input_cell(ws, ROW_EQ_INV, 3, 40.0, FMT_CURRENCY_M, "Source: Non-consolidated equity method investments [ASSUMPTION]")
+    ws.cell(row=ROW_EQ_INV, column=4, value="Non-operating unconsolidated equity stakes").font = FONT_NOTE
 
-    ws.cell(row=19, column=1, value="LTM / Base Year Revenue (FY2025A)").font = FONT_FORMULA
-    ws.cell(row=19, column=2, value="$M").font = FONT_NOTE
-    _write_input_cell(ws, 19, 3, 1000.0, FMT_CURRENCY_M, "Source: FY2025 10-K Income Statement placeholder [ASSUMPTION]")
-    ws.cell(row=19, column=4, value="Historical anchor revenue for Year 1 projection").font = FONT_NOTE
+    ws.cell(row=ROW_BASE_REV, column=1, value="LTM / Base Year Revenue (FY2025A)").font = FONT_FORMULA
+    ws.cell(row=ROW_BASE_REV, column=2, value="$M").font = FONT_NOTE
+    _write_input_cell(ws, ROW_BASE_REV, 3, 1000.0, FMT_CURRENCY_M, "Source: FY2025 10-K Income Statement placeholder [ASSUMPTION]")
+    ws.cell(row=ROW_BASE_REV, column=4, value="Historical anchor revenue for Year 1 projection").font = FONT_NOTE
 
-    ws.cell(row=20, column=1, value="Discount Rate (WACC)").font = FONT_FORMULA_BOLD
-    ws.cell(row=20, column=2, value="%").font = FONT_NOTE
-    _write_formula_cell(ws, 20, 3, "=WACC!C27", FMT_PCT_2, bold=True, cross_sheet=True)
-    ws.cell(row=20, column=4, value="Linked from WACC worksheet").font = FONT_NOTE
+    ws.cell(row=ROW_WACC, column=1, value="Discount Rate (WACC)").font = FONT_FORMULA_BOLD
+    ws.cell(row=ROW_WACC, column=2, value="%").font = FONT_NOTE
+    _write_formula_cell(ws, ROW_WACC, 3, "=WACC!C27", FMT_PCT_2, bold=True, cross_sheet=True)
+    ws.cell(row=ROW_WACC, column=4, value="Linked from WACC worksheet").font = FONT_NOTE
 
-    ws.cell(row=21, column=1, value="Effective Tax Rate").font = FONT_FORMULA
-    ws.cell(row=21, column=2, value="%").font = FONT_NOTE
-    _write_formula_cell(ws, 21, 3, "=WACC!C14", FMT_PCT, cross_sheet=True)
-    ws.cell(row=21, column=4, value="Linked from WACC worksheet").font = FONT_NOTE
+    ws.cell(row=ROW_TAX_RATE, column=1, value="Effective Tax Rate").font = FONT_FORMULA
+    ws.cell(row=ROW_TAX_RATE, column=2, value="%").font = FONT_NOTE
+    _write_formula_cell(ws, ROW_TAX_RATE, 3, "=WACC!C14", FMT_PCT, cross_sheet=True)
+    ws.cell(row=ROW_TAX_RATE, column=4, value="Linked from WACC worksheet").font = FONT_NOTE
 
     # Section 2: Vertically Stacked Scenario Assumption Blocks (Bear / Base / Bull)
-    # Fixed stride of 12 rows per block so Active Case uses a single clean INDEX(range, ($B$4-1)*12 + offset)
-    # Bear header: row 23, col header: row 24, metrics: rows 25..33 (9 rows), blank: row 34
-    # Base header: row 35, col header: row 36, metrics: rows 37..45 (9 rows), blank: row 46
-    # Bull header: row 47, col header: row 48, metrics: rows 49..57 (9 rows), blank: row 58
+    # Fixed stride of 12 rows per block so Active Case uses a single clean INDEX(range, (INT($B$4)-1)*12 + offset)
+    # Bear header: row 24, col header: row 25, metrics: rows 26..34 (9 rows), blank: row 35
+    # Base header: row 36, col header: row 37, metrics: rows 38..46 (9 rows), blank: row 47
+    # Bull header: row 48, col header: row 49, metrics: rows 50..58 (9 rows), blank: row 59
     BLOCK_STRIDE = 12
-    FIRST_METRIC_ROW = 25
-    LAST_METRIC_ROW = 57  # row 49 + 8
+    FIRST_METRIC_ROW = 26
+    LAST_METRIC_ROW = 58  # row 50 + 8
 
     scenario_specs = [
         (
-            23,
+            24,
             "2A. BEAR CASE ASSUMPTIONS (Case = 1)",
             {
-                "Revenue Growth": ([0.06, 0.05, 0.04, 0.035, 0.03], FMT_PCT),
-                "Gross Margin": ([0.62, 0.62, 0.615, 0.615, 0.61], FMT_PCT),
-                "R&D % of Revenue": ([0.14, 0.14, 0.135, 0.135, 0.135], FMT_PCT),
-                "SG&A % of Revenue": ([0.25, 0.25, 0.245, 0.245, 0.245], FMT_PCT),
+                "Revenue Growth": ([0.04, 0.035, 0.03, 0.025, 0.02], FMT_PCT),
+                "Gross Margin": ([0.63, 0.63, 0.625, 0.625, 0.62], FMT_PCT),
+                "R&D % of Revenue": ([0.135, 0.135, 0.135, 0.135, 0.135], FMT_PCT),
+                "SG&A % of Revenue": ([0.245, 0.245, 0.245, 0.245, 0.245], FMT_PCT),
                 "D&A % of Revenue": ([0.045, 0.045, 0.045, 0.045, 0.045], FMT_PCT),
-                "CapEx % of Revenue": ([0.055, 0.055, 0.050, 0.050, 0.050], FMT_PCT),
-                "NWC % of Revenue Change": ([0.02, 0.02, 0.02, 0.02, 0.02], FMT_PCT),
+                "CapEx % of Revenue": ([0.050, 0.050, 0.050, 0.050, 0.050], FMT_PCT),
+                "NWC % of Revenue Change": ([0.015, 0.015, 0.015, 0.015, 0.015], FMT_PCT),
                 "Terminal Growth Rate": ([0.020], FMT_PCT_2),
-                "Exit EV/EBITDA Multiple": ([9.0], FMT_MULT),
+                "Exit EV/EBITDA Multiple": ([7.5], FMT_MULT),
             },
         ),
         (
-            35,
+            36,
             "2B. BASE CASE ASSUMPTIONS (Case = 2)",
             {
-                "Revenue Growth": ([0.10, 0.09, 0.08, 0.07, 0.06], FMT_PCT),
-                "Gross Margin": ([0.65, 0.655, 0.66, 0.665, 0.67], FMT_PCT),
-                "R&D % of Revenue": ([0.14, 0.135, 0.13, 0.125, 0.12], FMT_PCT),
-                "SG&A % of Revenue": ([0.24, 0.235, 0.23, 0.225, 0.22], FMT_PCT),
+                "Revenue Growth": ([0.06, 0.055, 0.05, 0.045, 0.04], FMT_PCT),
+                "Gross Margin": ([0.65, 0.655, 0.655, 0.66, 0.66], FMT_PCT),
+                "R&D % of Revenue": ([0.13, 0.125, 0.125, 0.125, 0.12], FMT_PCT),
+                "SG&A % of Revenue": ([0.235, 0.23, 0.23, 0.225, 0.225], FMT_PCT),
                 "D&A % of Revenue": ([0.045, 0.045, 0.045, 0.045, 0.045], FMT_PCT),
-                "CapEx % of Revenue": ([0.055, 0.050, 0.050, 0.045, 0.045], FMT_PCT),
+                "CapEx % of Revenue": ([0.050, 0.050, 0.050, 0.050, 0.050], FMT_PCT),
                 "NWC % of Revenue Change": ([0.015, 0.015, 0.015, 0.015, 0.015], FMT_PCT),
-                "Terminal Growth Rate": ([0.025], FMT_PCT_2),
-                "Exit EV/EBITDA Multiple": ([11.0], FMT_MULT),
+                "Terminal Growth Rate": ([0.0225], FMT_PCT_2),
+                "Exit EV/EBITDA Multiple": ([8.0], FMT_MULT),
             },
         ),
         (
-            47,
+            48,
             "2C. BULL CASE ASSUMPTIONS (Case = 3)",
             {
-                "Revenue Growth": ([0.14, 0.13, 0.11, 0.09, 0.08], FMT_PCT),
-                "Gross Margin": ([0.67, 0.68, 0.685, 0.69, 0.695], FMT_PCT),
-                "R&D % of Revenue": ([0.135, 0.13, 0.125, 0.12, 0.115], FMT_PCT),
-                "SG&A % of Revenue": ([0.23, 0.22, 0.215, 0.21, 0.205], FMT_PCT),
+                "Revenue Growth": ([0.08, 0.07, 0.06, 0.05, 0.045], FMT_PCT),
+                "Gross Margin": ([0.67, 0.675, 0.68, 0.68, 0.68], FMT_PCT),
+                "R&D % of Revenue": ([0.125, 0.12, 0.12, 0.115, 0.115], FMT_PCT),
+                "SG&A % of Revenue": ([0.225, 0.22, 0.22, 0.215, 0.215], FMT_PCT),
                 "D&A % of Revenue": ([0.045, 0.045, 0.045, 0.045, 0.045], FMT_PCT),
-                "CapEx % of Revenue": ([0.055, 0.050, 0.045, 0.045, 0.040], FMT_PCT),
-                "NWC % of Revenue Change": ([0.010, 0.010, 0.010, 0.010, 0.010], FMT_PCT),
-                "Terminal Growth Rate": ([0.030], FMT_PCT_2),
-                "Exit EV/EBITDA Multiple": ([13.0], FMT_MULT),
+                "CapEx % of Revenue": ([0.050, 0.050, 0.050, 0.050, 0.050], FMT_PCT),
+                "NWC % of Revenue Change": ([0.015, 0.015, 0.015, 0.015, 0.015], FMT_PCT),
+                "Terminal Growth Rate": ([0.025], FMT_PCT_2),
+                "Exit EV/EBITDA Multiple": ([8.5], FMT_MULT),
             },
         ),
     ]
@@ -439,9 +484,9 @@ def _build_dcf_sheet(ws, wb: openpyxl.Workbook, default_case: int = 2) -> None:
                 )
                 ws.cell(row=row, column=8, value="Scalar terminal assumption").font = FONT_NOTE
 
-    # Section 3: Active Case Consolidation Block driven by INDEX(..., $B$4) (Rows 59-69)
-    ACTIVE_HEADER_ROW = 59
-    ACTIVE_START_ROW = 61  # rows 61..69 map 1:1 to metric_order
+    # Section 3: Active Case Consolidation Block driven by INDEX(..., INT($B$4)) (Rows 60-70)
+    ACTIVE_HEADER_ROW = 60
+    ACTIVE_START_ROW = 62  # rows 62..70 map 1:1 to metric_order
     _style_banner(ws, ACTIVE_HEADER_ROW, 8, "3. ACTIVE CASE ASSUMPTIONS (DRIVEN BY INDEX / CASE SELECTOR)")
     _style_col_headers(ws, ACTIVE_HEADER_ROW + 1, ["Active Assumption", "Units", *years, "Formula Pattern"])
 
@@ -455,37 +500,37 @@ def _build_dcf_sheet(ws, wb: openpyxl.Workbook, default_case: int = 2) -> None:
                 col_ltr = get_column_letter(col)
                 formula = (
                     f"=INDEX({col_ltr}${FIRST_METRIC_ROW}:{col_ltr}${LAST_METRIC_ROW},"
-                    f"($B$4-1)*{BLOCK_STRIDE}+{offset + 1})"
+                    f"(INT($B$4)-1)*{BLOCK_STRIDE}+{offset + 1})"
                 )
                 _write_formula_cell(ws, row, col, formula, fmt)
             ws.cell(row=row, column=8, value="INDEX over stacked Bear/Base/Bull blocks").font = FONT_NOTE
         else:
             formula = (
                 f"=INDEX(C${FIRST_METRIC_ROW}:C${LAST_METRIC_ROW},"
-                f"($B$4-1)*{BLOCK_STRIDE}+{offset + 1})"
+                f"(INT($B$4)-1)*{BLOCK_STRIDE}+{offset + 1})"
             )
             _write_formula_cell(ws, row, 3, formula, fmt, bold=True)
             ws.cell(row=row, column=8, value="INDEX scalar terminal driver").font = FONT_NOTE
 
     # Active assumption row constants:
-    ROW_ACT_REV_G = ACTIVE_START_ROW + 0   # 61
-    ROW_ACT_GM = ACTIVE_START_ROW + 1      # 62
-    ROW_ACT_RD = ACTIVE_START_ROW + 2      # 63
-    ROW_ACT_SGA = ACTIVE_START_ROW + 3     # 64
-    ROW_ACT_DA = ACTIVE_START_ROW + 4      # 65
-    ROW_ACT_CAPEX = ACTIVE_START_ROW + 5   # 66
-    ROW_ACT_NWC = ACTIVE_START_ROW + 6     # 67
-    ROW_ACT_TG = ACTIVE_START_ROW + 7      # 68
-    ROW_ACT_EXIT_M = ACTIVE_START_ROW + 8  # 69
+    ROW_ACT_REV_G = ACTIVE_START_ROW + 0   # 62
+    ROW_ACT_GM = ACTIVE_START_ROW + 1      # 63
+    ROW_ACT_RD = ACTIVE_START_ROW + 2      # 64
+    ROW_ACT_SGA = ACTIVE_START_ROW + 3     # 65
+    ROW_ACT_DA = ACTIVE_START_ROW + 4      # 66
+    ROW_ACT_CAPEX = ACTIVE_START_ROW + 5   # 67
+    ROW_ACT_NWC = ACTIVE_START_ROW + 6     # 68
+    ROW_ACT_TG = ACTIVE_START_ROW + 7      # 69
+    ROW_ACT_EXIT_M = ACTIVE_START_ROW + 8  # 70
 
-    # Section 4: 5-Year Unlevered FCF Projections (Rows 71-88)
-    _style_banner(ws, 71, 8, "4. UNLEVERED FREE CASH FLOW PROJECTIONS ($M)")
-    _style_col_headers(ws, 72, ["Line Item", "FY2025A", *years, "Notes"])
+    # Section 4: 5-Year Unlevered FCF Projections (Rows 72-89)
+    _style_banner(ws, 72, 8, "4. UNLEVERED FREE CASH FLOW PROJECTIONS ($M)")
+    _style_col_headers(ws, 73, ["Line Item", "FY2025A", *years, "Notes"])
 
-    # Row 73: Revenue
-    ROW_REV = 73
+    # Row 74: Revenue
+    ROW_REV = 74
     ws.cell(row=ROW_REV, column=1, value="Revenue").font = FONT_FORMULA_BOLD
-    _write_formula_cell(ws, ROW_REV, 2, "=C19", FMT_CURRENCY_M, bold=True)
+    _write_formula_cell(ws, ROW_REV, 2, f"=C{ROW_BASE_REV}", FMT_CURRENCY_M, bold=True)
     for yr_idx in range(5):
         col = 3 + yr_idx
         prev_ltr = get_column_letter(col - 1)
@@ -500,32 +545,32 @@ def _build_dcf_sheet(ws, wb: openpyxl.Workbook, default_case: int = 2) -> None:
         )
     ws.cell(row=ROW_REV, column=8, value="Prior Revenue * (1 + Active Revenue Growth)").font = FONT_NOTE
 
-    # Row 74: Gross Profit
-    ROW_GP = 74
+    # Row 75: Gross Profit
+    ROW_GP = 75
     ws.cell(row=ROW_GP, column=1, value="Gross Profit").font = FONT_FORMULA
     for yr_idx in range(5):
         col = 3 + yr_idx
         col_ltr = get_column_letter(col)
         _write_formula_cell(ws, ROW_GP, col, f"={col_ltr}{ROW_REV}*{col_ltr}{ROW_ACT_GM}", FMT_CURRENCY_M)
 
-    # Row 75: R&D Expense
-    ROW_RD = 75
+    # Row 76: R&D Expense
+    ROW_RD = 76
     ws.cell(row=ROW_RD, column=1, value="Less: R&D Expense").font = FONT_FORMULA
     for yr_idx in range(5):
         col = 3 + yr_idx
         col_ltr = get_column_letter(col)
         _write_formula_cell(ws, ROW_RD, col, f"={col_ltr}{ROW_REV}*{col_ltr}{ROW_ACT_RD}", FMT_CURRENCY_M)
 
-    # Row 76: SG&A Expense
-    ROW_SGA = 76
+    # Row 77: SG&A Expense
+    ROW_SGA = 77
     ws.cell(row=ROW_SGA, column=1, value="Less: SG&A Expense").font = FONT_FORMULA
     for yr_idx in range(5):
         col = 3 + yr_idx
         col_ltr = get_column_letter(col)
         _write_formula_cell(ws, ROW_SGA, col, f"={col_ltr}{ROW_REV}*{col_ltr}{ROW_ACT_SGA}", FMT_CURRENCY_M)
 
-    # Row 77: Total Operating Expenses
-    ROW_OPEX = 77
+    # Row 78: Total Operating Expenses
+    ROW_OPEX = 78
     ws.cell(row=ROW_OPEX, column=1, value="Total Operating Expenses").font = FONT_FORMULA_BOLD
     for yr_idx in range(5):
         col = 3 + yr_idx
@@ -540,8 +585,8 @@ def _build_dcf_sheet(ws, wb: openpyxl.Workbook, default_case: int = 2) -> None:
             border=BORDER_SUBTOTAL,
         )
 
-    # Row 78: EBIT (Operating Income)
-    ROW_EBIT = 78
+    # Row 79: EBIT (Operating Income)
+    ROW_EBIT = 79
     ws.cell(row=ROW_EBIT, column=1, value="EBIT (Operating Income)").font = FONT_FORMULA_BOLD
     for yr_idx in range(5):
         col = 3 + yr_idx
@@ -555,16 +600,16 @@ def _build_dcf_sheet(ws, wb: openpyxl.Workbook, default_case: int = 2) -> None:
             bold=True,
         )
 
-    # Row 79: Taxes on EBIT
-    ROW_TAX = 79
+    # Row 80: Taxes on EBIT
+    ROW_TAX = 80
     ws.cell(row=ROW_TAX, column=1, value="Less: Cash Taxes on EBIT").font = FONT_FORMULA
     for yr_idx in range(5):
         col = 3 + yr_idx
         col_ltr = get_column_letter(col)
-        _write_formula_cell(ws, ROW_TAX, col, f"={col_ltr}{ROW_EBIT}*$C$21", FMT_CURRENCY_M)
+        _write_formula_cell(ws, ROW_TAX, col, f"={col_ltr}{ROW_EBIT}*$C${ROW_TAX_RATE}", FMT_CURRENCY_M)
 
-    # Row 80: NOPAT
-    ROW_NOPAT = 80
+    # Row 81: NOPAT
+    ROW_NOPAT = 81
     ws.cell(row=ROW_NOPAT, column=1, value="NOPAT").font = FONT_FORMULA_BOLD
     for yr_idx in range(5):
         col = 3 + yr_idx
@@ -579,32 +624,32 @@ def _build_dcf_sheet(ws, wb: openpyxl.Workbook, default_case: int = 2) -> None:
             border=BORDER_SUBTOTAL,
         )
 
-    # Row 81: D&A
-    ROW_DA = 81
+    # Row 82: D&A
+    ROW_DA = 82
     ws.cell(row=ROW_DA, column=1, value="Plus: Depreciation & Amortization (D&A)").font = FONT_FORMULA
     for yr_idx in range(5):
         col = 3 + yr_idx
         col_ltr = get_column_letter(col)
         _write_formula_cell(ws, ROW_DA, col, f"={col_ltr}{ROW_REV}*{col_ltr}{ROW_ACT_DA}", FMT_CURRENCY_M)
 
-    # Row 82: EBITDA (memo for Exit Multiple & cross-checks)
-    ROW_EBITDA = 82
+    # Row 83: EBITDA (memo for Exit Multiple & cross-checks)
+    ROW_EBITDA = 83
     ws.cell(row=ROW_EBITDA, column=1, value="Memo: EBITDA (EBIT + D&A)").font = FONT_NOTE
     for yr_idx in range(5):
         col = 3 + yr_idx
         col_ltr = get_column_letter(col)
         _write_formula_cell(ws, ROW_EBITDA, col, f"={col_ltr}{ROW_EBIT}+{col_ltr}{ROW_DA}", FMT_CURRENCY_M)
 
-    # Row 83: CapEx
-    ROW_CAPEX = 83
+    # Row 84: CapEx
+    ROW_CAPEX = 84
     ws.cell(row=ROW_CAPEX, column=1, value="Less: Capital Expenditures (CapEx)").font = FONT_FORMULA
     for yr_idx in range(5):
         col = 3 + yr_idx
         col_ltr = get_column_letter(col)
         _write_formula_cell(ws, ROW_CAPEX, col, f"={col_ltr}{ROW_REV}*{col_ltr}{ROW_ACT_CAPEX}", FMT_CURRENCY_M)
 
-    # Row 84: Change in NWC
-    ROW_DNWC = 84
+    # Row 85: Change in NWC
+    ROW_DNWC = 85
     ws.cell(row=ROW_DNWC, column=1, value="Less: Change in Net Working Capital").font = FONT_FORMULA
     for yr_idx in range(5):
         col = 3 + yr_idx
@@ -618,8 +663,8 @@ def _build_dcf_sheet(ws, wb: openpyxl.Workbook, default_case: int = 2) -> None:
             FMT_CURRENCY_M,
         )
 
-    # Row 85: Unlevered Free Cash Flow
-    ROW_UFCF = 85
+    # Row 86: Unlevered Free Cash Flow
+    ROW_UFCF = 86
     ws.cell(row=ROW_UFCF, column=1, value="Unlevered Free Cash Flow (UFCF)").font = FONT_FORMULA_BOLD
     for yr_idx in range(5):
         col = 3 + yr_idx
@@ -635,8 +680,8 @@ def _build_dcf_sheet(ws, wb: openpyxl.Workbook, default_case: int = 2) -> None:
             border=BORDER_TOTAL,
         )
 
-    # Row 86: Discount Period (Mid-Year Convention)
-    ROW_PERIOD = 86
+    # Row 87: Discount Period (Mid-Year Convention)
+    ROW_PERIOD = 87
     ws.cell(row=ROW_PERIOD, column=1, value="Discount Period (Mid-Year Convention)").font = FONT_FORMULA
     for yr_idx in range(5):
         col = 3 + yr_idx
@@ -644,16 +689,16 @@ def _build_dcf_sheet(ws, wb: openpyxl.Workbook, default_case: int = 2) -> None:
         _write_formula_cell(ws, ROW_PERIOD, col, f"={yr_idx + 1}-0.5", FMT_DEC_1)
     ws.cell(row=ROW_PERIOD, column=8, value="t - 0.5 (mid-year cash flow timing)").font = FONT_NOTE
 
-    # Row 87: Discount Factor
-    ROW_DF = 87
+    # Row 88: Discount Factor
+    ROW_DF = 88
     ws.cell(row=ROW_DF, column=1, value="Mid-Year Discount Factor").font = FONT_FORMULA
     for yr_idx in range(5):
         col = 3 + yr_idx
         col_ltr = get_column_letter(col)
-        _write_formula_cell(ws, ROW_DF, col, f"=1/(1+$C$20)^{col_ltr}{ROW_PERIOD}", FMT_DEC_4)
+        _write_formula_cell(ws, ROW_DF, col, f"=1/(1+$C${ROW_WACC})^{col_ltr}{ROW_PERIOD}", FMT_DEC_4)
 
-    # Row 88: PV of Unlevered FCF
-    ROW_PV_FCF = 88
+    # Row 89: PV of Unlevered FCF
+    ROW_PV_FCF = 89
     ws.cell(row=ROW_PV_FCF, column=1, value="Present Value of Unlevered FCF").font = FONT_FORMULA_BOLD
     for yr_idx in range(5):
         col = 3 + yr_idx
@@ -667,137 +712,162 @@ def _build_dcf_sheet(ws, wb: openpyxl.Workbook, default_case: int = 2) -> None:
             bold=True,
         )
 
-    # Section 5: Terminal Value & Enterprise-to-Equity Valuation Bridge (Rows 90-118)
-    _style_banner(ws, 90, 8, "5. TERMINAL VALUE & ENTERPRISE-TO-EQUITY VALUATION BRIDGE")
-    _style_col_headers(ws, 91, ["Valuation Component", "Units", "Value", "Methodology / Formula Basis", "", "", "", ""])
+    # Section 5: Terminal Value & Enterprise-to-Equity Valuation Bridge (Rows 91-109)
+    _style_banner(ws, 91, 8, "5. TERMINAL VALUE & ENTERPRISE-TO-EQUITY VALUATION BRIDGE")
+    _style_col_headers(ws, 92, ["Valuation Component", "Units", "Value", "Methodology / Formula Basis", "", "", "", ""])
 
-    # 5A. Perpetuity Growth Terminal Value (Primary)
-    ws.cell(row=92, column=1, value="Terminal Year (FY2030E) Unlevered FCF").font = FONT_FORMULA
-    ws.cell(row=92, column=2, value="$M").font = FONT_NOTE
-    _write_formula_cell(ws, 92, 3, f"=G{ROW_UFCF}", FMT_CURRENCY_M)
+    # 5A. Perpetuity Growth Terminal Value (Primary — Mid-Year Consistent N - 0.5 Discounting)
+    ROW_TERM_UFCF = 93
+    ROW_TERM_G = 94
+    ROW_UNDISC_TV = 95
+    ROW_TERM_DF = 96
 
-    ws.cell(row=93, column=1, value="Active Terminal Growth Rate (g)").font = FONT_FORMULA
-    ws.cell(row=93, column=2, value="%").font = FONT_NOTE
-    _write_formula_cell(ws, 93, 3, f"=C{ROW_ACT_TG}", FMT_PCT_2)
+    ws.cell(row=ROW_TERM_UFCF, column=1, value="Terminal Year (FY2030E) Unlevered FCF").font = FONT_FORMULA
+    ws.cell(row=ROW_TERM_UFCF, column=2, value="$M").font = FONT_NOTE
+    _write_formula_cell(ws, ROW_TERM_UFCF, 3, f"=G{ROW_UFCF}", FMT_CURRENCY_M)
 
-    ws.cell(row=94, column=1, value="Undiscounted Terminal Value (Perpetuity Growth)").font = FONT_FORMULA
-    ws.cell(row=94, column=2, value="$M").font = FONT_NOTE
-    _write_formula_cell(ws, 94, 3, "=C92*(1+C93)/($C$20-C93)", FMT_CURRENCY_M)
-    ws.cell(row=94, column=4, value="FCF_5 * (1 + g) / (WACC - g)").font = FONT_NOTE
+    ws.cell(row=ROW_TERM_G, column=1, value="Active Terminal Growth Rate (g)").font = FONT_FORMULA
+    ws.cell(row=ROW_TERM_G, column=2, value="%").font = FONT_NOTE
+    _write_formula_cell(ws, ROW_TERM_G, 3, f"=C{ROW_ACT_TG}", FMT_PCT_2)
 
-    ws.cell(row=95, column=1, value="Terminal Discount Factor (End of Year 5)").font = FONT_FORMULA
-    ws.cell(row=95, column=2, value="x").font = FONT_NOTE
-    _write_formula_cell(ws, 95, 3, "=1/(1+$C$20)^5", FMT_DEC_4)
-    ws.cell(row=95, column=4, value="End-of-year Year 5 discounting: 1 / (1 + WACC)^5").font = FONT_NOTE
+    ws.cell(row=ROW_UNDISC_TV, column=1, value="Undiscounted Terminal Value (Perpetuity Growth)").font = FONT_FORMULA
+    ws.cell(row=ROW_UNDISC_TV, column=2, value="$M").font = FONT_NOTE
+    _write_formula_cell(ws, ROW_UNDISC_TV, 3, f"=C{ROW_TERM_UFCF}*(1+C{ROW_TERM_G})/($C${ROW_WACC}-C{ROW_TERM_G})", FMT_CURRENCY_M)
+    ws.cell(row=ROW_UNDISC_TV, column=4, value="FCF_N * (1 + g) / (WACC - g) valued at mid-year N - 0.5").font = FONT_NOTE
+
+    ws.cell(row=ROW_TERM_DF, column=1, value="Terminal Discount Factor (Mid-Year Perpetuity, N - 0.5)").font = FONT_FORMULA
+    ws.cell(row=ROW_TERM_DF, column=2, value="x").font = FONT_NOTE
+    _write_formula_cell(ws, ROW_TERM_DF, 3, f"=1/(1+$C${ROW_WACC})^$G${ROW_PERIOD}", FMT_DEC_4)
+    ws.cell(row=ROW_TERM_DF, column=4, value="Mid-year perpetuity discounting: 1 / (1 + WACC)^(N - 0.5)").font = FONT_NOTE
 
     # Bridge (Primary Perpetuity Growth)
-    ws.cell(row=97, column=1, value="Sum of PV of Explicit FCFs (FY2026E-FY2030E)").font = FONT_FORMULA
-    ws.cell(row=97, column=2, value="$M").font = FONT_NOTE
-    _write_formula_cell(ws, 97, 3, f"=SUM(C{ROW_PV_FCF}:G{ROW_PV_FCF})", FMT_CURRENCY_M)
+    ROW_SUM_PV_FCF = 98
+    ROW_PV_TV = 99
+    ROW_EV = 100
+    ROW_BR_DEBT = 101
+    ROW_BR_PREF = 102
+    ROW_BR_NCI = 103
+    ROW_BR_CASH = 104
+    ROW_BR_EQ_INV = 105
+    ROW_EQ_VAL = 106
+    ROW_BR_SHARES = 107
+    ROW_IMPLIED_PRICE = 108
+    ROW_UPSIDE = 109
 
-    ws.cell(row=98, column=1, value="PV of Terminal Value").font = FONT_FORMULA
-    ws.cell(row=98, column=2, value="$M").font = FONT_NOTE
-    _write_formula_cell(ws, 98, 3, "=C94*C95", FMT_CURRENCY_M)
-    ws.cell(row=98, column=4, value="Perpetuity Growth Terminal Value discounted at (1 + WACC)^5").font = FONT_NOTE
+    ws.cell(row=ROW_SUM_PV_FCF, column=1, value="Sum of PV of Explicit FCFs (FY2026E-FY2030E)").font = FONT_FORMULA
+    ws.cell(row=ROW_SUM_PV_FCF, column=2, value="$M").font = FONT_NOTE
+    _write_formula_cell(ws, ROW_SUM_PV_FCF, 3, f"=SUM(C{ROW_PV_FCF}:G{ROW_PV_FCF})", FMT_CURRENCY_M)
 
-    ws.cell(row=99, column=1, value="Enterprise Value").font = FONT_FORMULA_BOLD
-    ws.cell(row=99, column=2, value="$M").font = FONT_NOTE
-    _write_formula_cell(ws, 99, 3, "=C97+C98", FMT_CURRENCY_M, bold=True, border=BORDER_SUBTOTAL)
+    ws.cell(row=ROW_PV_TV, column=1, value="PV of Terminal Value").font = FONT_FORMULA
+    ws.cell(row=ROW_PV_TV, column=2, value="$M").font = FONT_NOTE
+    _write_formula_cell(ws, ROW_PV_TV, 3, f"=C{ROW_UNDISC_TV}*C{ROW_TERM_DF}", FMT_CURRENCY_M)
+    ws.cell(row=ROW_PV_TV, column=4, value="Perpetuity Growth TV discounted consistently at (1 + WACC)^(N - 0.5)").font = FONT_NOTE
 
-    ws.cell(row=100, column=1, value="Less: Total Gross Debt").font = FONT_FORMULA
-    ws.cell(row=100, column=2, value="$M").font = FONT_NOTE
-    _write_formula_cell(ws, 100, 3, "=-C14", FMT_CURRENCY_M)
+    ws.cell(row=ROW_EV, column=1, value="Enterprise Value").font = FONT_FORMULA_BOLD
+    ws.cell(row=ROW_EV, column=2, value="$M").font = FONT_NOTE
+    _write_formula_cell(ws, ROW_EV, 3, f"=C{ROW_SUM_PV_FCF}+C{ROW_PV_TV}", FMT_CURRENCY_M, bold=True, border=BORDER_SUBTOTAL)
 
-    ws.cell(row=101, column=1, value="Less: Preferred Stock").font = FONT_FORMULA
-    ws.cell(row=101, column=2, value="$M").font = FONT_NOTE
-    _write_formula_cell(ws, 101, 3, "=-C15", FMT_CURRENCY_M)
+    ws.cell(row=ROW_BR_DEBT, column=1, value="Less: Total Gross Debt").font = FONT_FORMULA
+    ws.cell(row=ROW_BR_DEBT, column=2, value="$M").font = FONT_NOTE
+    _write_formula_cell(ws, ROW_BR_DEBT, 3, f"=-C{ROW_DEBT}", FMT_CURRENCY_M)
 
-    ws.cell(row=102, column=1, value="Less: Non-Controlling Interest").font = FONT_FORMULA
-    ws.cell(row=102, column=2, value="$M").font = FONT_NOTE
-    _write_formula_cell(ws, 102, 3, "=-C16", FMT_CURRENCY_M)
+    ws.cell(row=ROW_BR_PREF, column=1, value="Less: Preferred Stock").font = FONT_FORMULA
+    ws.cell(row=ROW_BR_PREF, column=2, value="$M").font = FONT_NOTE
+    _write_formula_cell(ws, ROW_BR_PREF, 3, f"=-C{ROW_PREF}", FMT_CURRENCY_M)
 
-    ws.cell(row=103, column=1, value="Plus: Cash & Marketable Securities").font = FONT_FORMULA
-    ws.cell(row=103, column=2, value="$M").font = FONT_NOTE
-    _write_formula_cell(ws, 103, 3, "=C17", FMT_CURRENCY_M)
+    ws.cell(row=ROW_BR_NCI, column=1, value="Less: Non-Controlling Interest").font = FONT_FORMULA
+    ws.cell(row=ROW_BR_NCI, column=2, value="$M").font = FONT_NOTE
+    _write_formula_cell(ws, ROW_BR_NCI, 3, f"=-C{ROW_NCI}", FMT_CURRENCY_M)
 
-    ws.cell(row=104, column=1, value="Plus: Equity Investments").font = FONT_FORMULA
-    ws.cell(row=104, column=2, value="$M").font = FONT_NOTE
-    _write_formula_cell(ws, 104, 3, "=C18", FMT_CURRENCY_M)
+    ws.cell(row=ROW_BR_CASH, column=1, value="Plus: Cash & Marketable Securities").font = FONT_FORMULA
+    ws.cell(row=ROW_BR_CASH, column=2, value="$M").font = FONT_NOTE
+    _write_formula_cell(ws, ROW_BR_CASH, 3, f"=C{ROW_CASH}", FMT_CURRENCY_M)
 
-    ws.cell(row=105, column=1, value="Implied Equity Value").font = FONT_FORMULA_BOLD
-    ws.cell(row=105, column=2, value="$M").font = FONT_NOTE
-    _write_formula_cell(ws, 105, 3, "=SUM(C99:C104)", FMT_CURRENCY_M, bold=True, border=BORDER_SUBTOTAL)
+    ws.cell(row=ROW_BR_EQ_INV, column=1, value="Plus: Equity Investments").font = FONT_FORMULA
+    ws.cell(row=ROW_BR_EQ_INV, column=2, value="$M").font = FONT_NOTE
+    _write_formula_cell(ws, ROW_BR_EQ_INV, 3, f"=C{ROW_EQ_INV}", FMT_CURRENCY_M)
 
-    ws.cell(row=106, column=1, value="Fully Diluted Shares (TSM)").font = FONT_FORMULA
-    ws.cell(row=106, column=2, value="M").font = FONT_NOTE
-    _write_formula_cell(ws, 106, 3, "=C12", FMT_DEC_1)
+    ws.cell(row=ROW_EQ_VAL, column=1, value="Implied Equity Value").font = FONT_FORMULA_BOLD
+    ws.cell(row=ROW_EQ_VAL, column=2, value="$M").font = FONT_NOTE
+    _write_formula_cell(ws, ROW_EQ_VAL, 3, f"=SUM(C{ROW_EV}:C{ROW_BR_EQ_INV})", FMT_CURRENCY_M, bold=True, border=BORDER_SUBTOTAL)
 
-    ROW_IMPLIED_PRICE = 107
+    ws.cell(row=ROW_BR_SHARES, column=1, value="Fully Diluted Shares (TSM)").font = FONT_FORMULA
+    ws.cell(row=ROW_BR_SHARES, column=2, value="M").font = FONT_NOTE
+    _write_formula_cell(ws, ROW_BR_SHARES, 3, f"=C{ROW_DILUTED_SH}", FMT_DEC_1)
+
     ws.cell(row=ROW_IMPLIED_PRICE, column=1, value="Implied Share Price (Perpetuity Growth)").font = FONT_FORMULA_BOLD
     ws.cell(row=ROW_IMPLIED_PRICE, column=2, value="$").font = FONT_NOTE
     _write_formula_cell(
         ws,
         ROW_IMPLIED_PRICE,
         3,
-        "=C105/C106",
+        f"=C{ROW_EQ_VAL}/C{ROW_BR_SHARES}",
         FMT_PRICE,
         bold=True,
         highlight=True,
         border=BORDER_TOTAL,
     )
 
-    ws.cell(row=108, column=1, value="Implied Upside / (Downside) %").font = FONT_FORMULA_BOLD
-    ws.cell(row=108, column=2, value="%").font = FONT_NOTE
-    _write_formula_cell(ws, 108, 3, f"=C{ROW_IMPLIED_PRICE}/C8-1", FMT_PCT, bold=True)
+    ws.cell(row=ROW_UPSIDE, column=1, value="Implied Upside / (Downside) %").font = FONT_FORMULA_BOLD
+    ws.cell(row=ROW_UPSIDE, column=2, value="%").font = FONT_NOTE
+    _write_formula_cell(ws, ROW_UPSIDE, 3, f"=C{ROW_IMPLIED_PRICE}/C{ROW_PRICE}-1", FMT_PCT, bold=True)
 
-    # 5B. Valuation Cross-Checks & Exit Multiple Method (Rows 110-119)
-    _style_banner(ws, 110, 8, "6. VALUATION CROSS-CHECKS & EXIT MULTIPLE METHOD")
-    _style_col_headers(ws, 111, ["Cross-Check Metric", "Units", "Value", "Notes", "", "", "", ""])
+    # 5B. Valuation Cross-Checks & Exit Multiple Method (Rows 111-119)
+    _style_banner(ws, 111, 8, "6. VALUATION CROSS-CHECKS & EXIT MULTIPLE METHOD")
+    _style_col_headers(ws, 112, ["Cross-Check Metric", "Units", "Value", "Notes", "", "", "", ""])
 
-    ws.cell(row=112, column=1, value="TV % of Enterprise Value").font = FONT_FORMULA
-    ws.cell(row=112, column=2, value="%").font = FONT_NOTE
-    _write_formula_cell(ws, 112, 3, "=C98/C99", FMT_PCT)
-    ws.cell(row=112, column=4, value="Target institutional range: 50%-70%").font = FONT_NOTE
+    ROW_TV_PCT = 113
+    ROW_EV_EBITDA1 = 114
+    ROW_IMPL_EXIT_M = 115
+    ROW_EXIT_TV = 116
+    ROW_PV_EXIT_TV = 117
+    ROW_EXIT_EV = 118
+    ROW_EXIT_PRICE = 119
 
-    ws.cell(row=113, column=1, value="Implied EV / FY2026E EBITDA").font = FONT_FORMULA
-    ws.cell(row=113, column=2, value="x").font = FONT_NOTE
-    _write_formula_cell(ws, 113, 3, f"=C99/C{ROW_EBITDA}", FMT_MULT)
-    ws.cell(row=113, column=4, value="Cross-check vs peer NTM EV/EBITDA").font = FONT_NOTE
+    ws.cell(row=ROW_TV_PCT, column=1, value="TV % of Enterprise Value").font = FONT_FORMULA
+    ws.cell(row=ROW_TV_PCT, column=2, value="%").font = FONT_NOTE
+    _write_formula_cell(ws, ROW_TV_PCT, 3, f"=C{ROW_PV_TV}/C{ROW_EV}", FMT_PCT)
+    ws.cell(row=ROW_TV_PCT, column=4, value="Target institutional range: 50%-70%").font = FONT_NOTE
 
-    ws.cell(row=114, column=1, value="Implied Exit EV / FY2030E EBITDA (from Perpetuity)").font = FONT_FORMULA
-    ws.cell(row=114, column=2, value="x").font = FONT_NOTE
-    _write_formula_cell(ws, 114, 3, f"=C94/G{ROW_EBITDA}", FMT_MULT)
-    ws.cell(row=114, column=4, value="Undiscounted Perpetuity TV / Year 5 EBITDA").font = FONT_NOTE
+    ws.cell(row=ROW_EV_EBITDA1, column=1, value="Implied EV / FY2026E EBITDA").font = FONT_FORMULA
+    ws.cell(row=ROW_EV_EBITDA1, column=2, value="x").font = FONT_NOTE
+    _write_formula_cell(ws, ROW_EV_EBITDA1, 3, f"=C{ROW_EV}/C{ROW_EBITDA}", FMT_MULT)
+    ws.cell(row=ROW_EV_EBITDA1, column=4, value="Cross-check vs peer NTM EV/EBITDA").font = FONT_NOTE
 
-    ws.cell(row=115, column=1, value="Undiscounted Exit Multiple TV (FY2030E EBITDA * Multiple)").font = FONT_FORMULA
-    ws.cell(row=115, column=2, value="$M").font = FONT_NOTE
-    _write_formula_cell(ws, 115, 3, f"=G{ROW_EBITDA}*C{ROW_ACT_EXIT_M}", FMT_CURRENCY_M)
+    ws.cell(row=ROW_IMPL_EXIT_M, column=1, value="Implied Exit EV / FY2030E EBITDA (from Perpetuity)").font = FONT_FORMULA
+    ws.cell(row=ROW_IMPL_EXIT_M, column=2, value="x").font = FONT_NOTE
+    _write_formula_cell(ws, ROW_IMPL_EXIT_M, 3, f"=C{ROW_UNDISC_TV}/G{ROW_EBITDA}", FMT_MULT)
+    ws.cell(row=ROW_IMPL_EXIT_M, column=4, value="Undiscounted Perpetuity TV / Year 5 EBITDA").font = FONT_NOTE
 
-    ws.cell(row=116, column=1, value="PV of Exit Multiple TV (Discounted at (1 + WACC)^5)").font = FONT_FORMULA
-    ws.cell(row=116, column=2, value="$M").font = FONT_NOTE
-    _write_formula_cell(ws, 116, 3, "=C115/(1+$C$20)^5", FMT_CURRENCY_M)
-    ws.cell(row=116, column=4, value="Strictly end-of-year Year 5 discounting (NOT N-0.5)").font = FONT_NOTE
+    ws.cell(row=ROW_EXIT_TV, column=1, value="Undiscounted Exit Multiple TV (FY2030E EBITDA * Multiple)").font = FONT_FORMULA
+    ws.cell(row=ROW_EXIT_TV, column=2, value="$M").font = FONT_NOTE
+    _write_formula_cell(ws, ROW_EXIT_TV, 3, f"=G{ROW_EBITDA}*C{ROW_ACT_EXIT_M}", FMT_CURRENCY_M)
 
-    ws.cell(row=117, column=1, value="Implied Enterprise Value (Exit Multiple Method)").font = FONT_FORMULA
-    ws.cell(row=117, column=2, value="$M").font = FONT_NOTE
-    _write_formula_cell(ws, 117, 3, "=C97+C116", FMT_CURRENCY_M)
+    ws.cell(row=ROW_PV_EXIT_TV, column=1, value="PV of Exit Multiple TV (Discounted at (1 + WACC)^N)").font = FONT_FORMULA
+    ws.cell(row=ROW_PV_EXIT_TV, column=2, value="$M").font = FONT_NOTE
+    _write_formula_cell(ws, ROW_PV_EXIT_TV, 3, f"=C{ROW_EXIT_TV}/(1+$C${ROW_WACC})^($G${ROW_PERIOD}+0.5)", FMT_CURRENCY_M)
+    ws.cell(row=ROW_PV_EXIT_TV, column=4, value="Strictly end-of-year Year N discounting: 1 / (1 + WACC)^5 (NOT N-0.5)").font = FONT_NOTE
 
-    ws.cell(row=118, column=1, value="Implied Share Price (Exit Multiple Method)").font = FONT_FORMULA_BOLD
-    ws.cell(row=118, column=2, value="$").font = FONT_NOTE
-    _write_formula_cell(ws, 118, 3, "=(C117+SUM(C100:C104))/C106", FMT_PRICE, bold=True)
+    ws.cell(row=ROW_EXIT_EV, column=1, value="Implied Enterprise Value (Exit Multiple Method)").font = FONT_FORMULA
+    ws.cell(row=ROW_EXIT_EV, column=2, value="$M").font = FONT_NOTE
+    _write_formula_cell(ws, ROW_EXIT_EV, 3, f"=C{ROW_SUM_PV_FCF}+C{ROW_PV_EXIT_TV}", FMT_CURRENCY_M)
 
-    # Section 7: 5x5 Live-Formula Sensitivity Analysis (Rows 121-128)
-    SENS_BANNER_ROW = 121
-    SENS_HEADER_ROW = 123
-    SENS_FIRST_DATA_ROW = 124  # rows 124..128 (center row = 126)
-    SENS_CENTER_ROW = 126
+    ws.cell(row=ROW_EXIT_PRICE, column=1, value="Implied Share Price (Exit Multiple Method)").font = FONT_FORMULA_BOLD
+    ws.cell(row=ROW_EXIT_PRICE, column=2, value="$").font = FONT_NOTE
+    _write_formula_cell(ws, ROW_EXIT_PRICE, 3, f"=(C{ROW_EXIT_EV}+SUM(C{ROW_BR_DEBT}:C{ROW_BR_EQ_INV}))/C{ROW_BR_SHARES}", FMT_PRICE, bold=True)
+
+    # Section 7: 5x5 Live-Formula Sensitivity Analysis (Rows 122-129)
+    SENS_BANNER_ROW = 122
+    SENS_HEADER_ROW = 124
+    SENS_FIRST_DATA_ROW = 125  # rows 125..129 (center row = 127)
+    SENS_CENTER_ROW = 127
     SENS_CENTER_COL = 5        # cols C(3), D(4), E(5), F(6), G(7) -> center = E(5)
 
     _style_banner(ws, SENS_BANNER_ROW, 8, "7. SENSITIVITY ANALYSIS: WACC vs TERMINAL GROWTH (IMPLIED SHARE PRICE $)")
     ws.cell(
-        row=122,
+        row=SENS_BANNER_ROW + 1,
         column=1,
-        value="Live full-DCF recalculation in every cell; center cell (highlighted) matches Active Case Implied Share Price.",
+        value="Live horizon-independent SUMPRODUCT DCF recalculation in every cell; center cell matches Active Case Implied Share Price.",
     ).font = FONT_NOTE
 
     corner = ws.cell(row=SENS_HEADER_ROW, column=2, value="WACC \\ Terminal g")
@@ -806,7 +876,7 @@ def _build_dcf_sheet(ws, wb: openpyxl.Workbook, default_case: int = 2) -> None:
     corner.border = BORDER_CELL
     corner.alignment = Alignment(horizontal="center", vertical="center")
 
-    # Formula-driven Terminal Growth axis (centered on live Active Case Terminal Growth C68)
+    # Formula-driven Terminal Growth axis (centered on live Active Case Terminal Growth)
     tg_axis_formulas = {
         3: f"={get_column_letter(SENS_CENTER_COL)}{SENS_HEADER_ROW}-0.01",
         4: f"={get_column_letter(SENS_CENTER_COL)}{SENS_HEADER_ROW}-0.005",
@@ -818,34 +888,28 @@ def _build_dcf_sheet(ws, wb: openpyxl.Workbook, default_case: int = 2) -> None:
         cell = _write_formula_cell(ws, SENS_HEADER_ROW, col, formula, FMT_PCT_2, bold=True, border=BORDER_CELL)
         cell.fill = FILL_SUBHEADER
 
-    # Formula-driven WACC axis (centered on live WACC C20)
+    # Formula-driven WACC axis (centered on live WACC)
     wacc_axis_formulas = {
-        124: f"=B{SENS_CENTER_ROW}-0.01",
-        125: f"=B{SENS_CENTER_ROW}-0.005",
-        126: "=C20",
-        127: f"=B{SENS_CENTER_ROW}+0.005",
-        128: f"=B{SENS_CENTER_ROW}+0.01",
+        SENS_FIRST_DATA_ROW + 0: f"=B{SENS_CENTER_ROW}-0.01",
+        SENS_FIRST_DATA_ROW + 1: f"=B{SENS_CENTER_ROW}-0.005",
+        SENS_FIRST_DATA_ROW + 2: f"=C{ROW_WACC}",
+        SENS_FIRST_DATA_ROW + 3: f"=B{SENS_CENTER_ROW}+0.005",
+        SENS_FIRST_DATA_ROW + 4: f"=B{SENS_CENTER_ROW}+0.01",
     }
     for row, formula in wacc_axis_formulas.items():
         cell = _write_formula_cell(ws, row, 2, formula, FMT_PCT_2, bold=True, border=BORDER_CELL)
         cell.fill = FILL_SUBHEADER
 
-    # Populate all 25 sensitivity cells with live full-DCF implied share price formulas
+    # Populate all 25 sensitivity cells with horizon-independent SUMPRODUCT DCF formulas
     for row in range(SENS_FIRST_DATA_ROW, SENS_FIRST_DATA_ROW + 5):
         for col in range(3, 8):
             col_ltr = get_column_letter(col)
             w_ref = f"$B{row}"
             g_ref = f"{col_ltr}${SENS_HEADER_ROW}"
-            pv_fcf_expr = (
-                f"($C${ROW_UFCF}/(1+{w_ref})^0.5"
-                f"+$D${ROW_UFCF}/(1+{w_ref})^1.5"
-                f"+$E${ROW_UFCF}/(1+{w_ref})^2.5"
-                f"+$F${ROW_UFCF}/(1+{w_ref})^3.5"
-                f"+$G${ROW_UFCF}/(1+{w_ref})^4.5)"
-            )
-            pv_tv_expr = f"(($G${ROW_UFCF}*(1+{g_ref})/({w_ref}-{g_ref}))/(1+{w_ref})^5)"
-            eq_adj_expr = "(-$C$14-$C$15-$C$16+$C$17+$C$18)"
-            formula = f"=({pv_fcf_expr}+{pv_tv_expr}+{eq_adj_expr})/$C$12"
+            pv_fcf_expr = f"SUMPRODUCT($C${ROW_UFCF}:$G${ROW_UFCF}/((1+{w_ref})^$C${ROW_PERIOD}:$G${ROW_PERIOD}))"
+            pv_tv_expr = f"(($G${ROW_UFCF}*(1+{g_ref})/({w_ref}-{g_ref}))/((1+{w_ref})^$G${ROW_PERIOD}))"
+            eq_adj_expr = f"(-$C${ROW_DEBT}-$C${ROW_PREF}-$C${ROW_NCI}+$C${ROW_CASH}+$C${ROW_EQ_INV})"
+            formula = f"=({pv_fcf_expr}+{pv_tv_expr}+{eq_adj_expr})/$C${ROW_DILUTED_SH}"
             is_center = row == SENS_CENTER_ROW and col == SENS_CENTER_COL
             _write_formula_cell(
                 ws,

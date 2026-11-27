@@ -189,7 +189,7 @@ def _parse_yaml_fallback(raw_fm: str, rel_path: str) -> tuple[dict[str, Any], li
 
 def parse_frontmatter(path: Path, root: Path = ROOT) -> tuple[dict[str, Any], str, list[str]]:
     rel = str(path.relative_to(root))
-    text = path.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
     if not text.startswith("---\n"):
         return {}, text, [f"{rel}: missing YAML frontmatter block"]
     end = text.find("\n---\n", 4)
@@ -307,7 +307,8 @@ def validate_harness(root: Path = ROOT) -> tuple[list[str], list[str], dict[str,
             errors.append(
                 f"AGENTS.md exceeds {SINGLE_RULE_MAX_BYTES:,}-byte Antigravity rule cap ({size} bytes)"
             )
-        if agents_md.read_text(encoding="utf-8").startswith("---\n"):
+        agents_text = agents_md.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
+        if agents_text.startswith("---\n"):
             errors.append("AGENTS.md should not contain YAML frontmatter")
 
     # 2. Rules (.agents/rules/*.md)

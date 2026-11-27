@@ -199,9 +199,9 @@ Rule of 40: =[Growth %]+[FCF Margin %]
 ### Core Valuation Columns (Start with these)
 1. **Company** — Same order as operating section
 2. **Market Cap** — Current Share Price × Fully Diluted Shares (TSM)
-3. **Enterprise Value** — Full institutional formula:
-   `Enterprise Value = Market Cap + Total Gross Debt + Preferred Stock + Non-Controlling Interest - Cash & Short-Term Investments`
-   *(Exclude ASC 842 operating lease liabilities unless peer EBITDA is consistently adjusted on an IFRS 16 / EBITDAR basis.)*
+3. **Enterprise Value** — Full institutional formula (strictly apples-to-apples with the `dcf-model` equity bridge):
+   `Enterprise Value = Market Cap + Total Gross Debt + Preferred Stock + Non-Controlling Interest - Cash & Short-Term Investments - Equity Investments`
+   *(Subtract non-operating unconsolidated equity-method investments so EV/EBITDA exit multiples are apples-to-apples with the DCF bridge; exclude ASC 842 operating lease liabilities unless peer EBITDA is consistently adjusted on an IFRS 16 / EBITDAR basis.)*
 4. **EV/Revenue (LTM & NTM / FY+1)** — How much the market pays per dollar of sales
 5. **EV/EBITDA (LTM & NTM / FY+1)** — How much the market pays per dollar of operating cash flow proxy
 6. **P/E Ratio (LTM & NTM / FY+1)** — Price relative to net earnings (match GAAP vs. Non-GAAP strictly across all peers!)
@@ -220,8 +220,8 @@ Public peers often have different fiscal year-ends (e.g., Jan, Mar, Jun, Sep, De
 
 ### Formula Examples (Always Guard Negative/Zero Denominators with `"NM"`)
 ```excel
-// Enterprise Value (full formula)
-Enterprise Value: =MarketCap + TotalGrossDebt + PreferredStock + NCI - CashAndSTI
+// Enterprise Value (full formula, matching DCF equity bridge)
+Enterprise Value: =MarketCap + TotalGrossDebt + PreferredStock + NCI - CashAndSTI - EquityInvestments
 
 // Core multiples — return "NM" (NOT 0!) for non-meaningful/negative/zero denominators
 // Returning "NM" ensures MEDIAN / QUARTILE / AVERAGE ignore invalid rows instead of skewing toward zero
@@ -259,7 +259,7 @@ Same structure as operating section: Max, 75th, Median, 25th, Min for every comp
 - Calendarization formula for off-calendar fiscal year-ends
 
 **Valuation Methodology:**
-- Enterprise Value = `Market Cap + Total Gross Debt + Preferred Stock + Non-Controlling Interest - Cash & Short-Term Investments`
+- Enterprise Value = `Market Cap + Total Gross Debt + Preferred Stock + Non-Controlling Interest - Cash & Short-Term Investments - Equity Investments`
 - Diluted share count basis (Treasury Stock Method + if-converted test)
 - Outlier exclusions and adjustments documented transparently
 
@@ -504,7 +504,7 @@ This helps answer: "Is our target company trading rich or cheap vs. peers?"
 │ 25th %   │   —      │   —      │ =QUART  │ =QUART   │ =QUART   │ =QUART    │
 │ Min      │   —      │   —      │ =MIN()  │ =MIN()   │ =MIN()   │ =MIN()    │
 └──────────┴──────────┴──────────┴─────────┴──────────┴──────────┴───────────┘
-*EV = Market Cap + Total Gross Debt + Preferred + NCI - Cash & ST Investments.
+*EV = Market Cap + Total Gross Debt + Preferred + NCI - Cash & ST Investments - Equity Investments.
 ```
 
 **Add complexity only when needed:**

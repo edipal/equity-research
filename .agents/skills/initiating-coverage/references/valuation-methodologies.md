@@ -74,10 +74,10 @@ EBIT
 **Method A: Perpetuity Growth Method (Primary)**
 ```
 Undiscounted TV = UFCF(final year) × (1 + g) / (WACC - g)
-PV of TV        = Undiscounted TV / (1 + WACC)^N
+PV of TV        = Undiscounted TV / (1 + WACC)^(N - 0.5)   (consistent mid-year perpetuity timing)
 ```
 - `g` = perpetual growth rate, strictly `< WACC` and `<= long-term nominal GDP / Rf` (typically `2.0%–3.5%`; never `3.5%–5.0%+`).
-- Target TV `%` of EV: `50%–70%` (flag and investigate `< 40%` or `> 80%`).
+- Target TV `%` of EV: `50%–70%` (`validate_dcf.py` warns if `< 50%` or `> 70%`).
 
 **Method B: Exit Multiple Method (Cross-Check)**
 ```
@@ -102,7 +102,8 @@ WACC                     = (E/V × Cost of Equity) + (D/V × Pre-Tax Cost of Deb
 #### 7. Discount Cash Flows to Present Value
 
 - **Explicit UFCFs (Mid-Year Convention):** `PV(UFCF_t) = UFCF_t / (1 + WACC)^(t - 0.5)` for `t = 1..N`.
-- **Terminal Value (End-of-Year):** `PV(TV) = TV / (1 + WACC)^N`.
+- **Perpetuity Growth Terminal Value (Mid-Year Consistent):** `PV(TV) = TV / (1 + WACC)^(N - 0.5)`.
+- **Exit Multiple Terminal Value (Strict End-of-Year):** `PV(TV) = TV / (1 + WACC)^N` (NEVER `N - 0.5`).
 - **SBC Treatment:** Keep Stock-Based Compensation as a real economic expense in GAAP EBIT / UFCF (do not add back SBC without explicit dilution reconciliation).
 
 #### 8. Calculate Enterprise Value and Equity Value
@@ -179,7 +180,7 @@ Trading comps values a company based on how similar companies are valued in the 
 
 **Calculate Market Metrics:**
 - Market Cap = Share Price × Shares Outstanding
-- Enterprise Value = Market Cap + Debt + Minority Interest + Preferred - Cash
+- Enterprise Value = Market Cap + Total Gross Debt + Preferred Stock + Non-Controlling Interest - Cash & Short-Term Investments - Equity Investments
 - Net Debt = Total Debt - Cash & Equivalents
 
 #### 3. Calculate Valuation Multiples

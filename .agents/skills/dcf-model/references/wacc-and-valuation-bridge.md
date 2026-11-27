@@ -8,7 +8,7 @@ Reference guide for the `dcf-model` skill. Every formula and convention here mat
 
 ## 1. Weighted Average Cost of Capital (WACC)
 
-Build WACC on a dedicated `WACC` worksheet and link `DCF!C20 = WACC!C27` as the single source of truth.
+Build WACC on a dedicated `WACC` worksheet and link `DCF!C21 = WACC!C27` as the single source of truth (`WACC!C19 = DCF!C14` for Market Cap and `WACC!C20 = DCF!C15` for Total Gross Debt).
 
 ### 1.1 Cost of Equity (CAPM)
 
@@ -113,17 +113,19 @@ PV of UFCF (t)               = UFCF(t) × Discount Factor(t)
 
 ### 3.2 Terminal Value — Perpetuity Growth Method (Primary)
 
+When explicit forecast cash flows use the mid-year convention (`t = 0.5, 1.5, ..., N - 0.5`), the first terminal cash flow (`UFCF_N × (1 + g)`) also occurs mid-year at `t = N + 0.5` — exactly 1.0 year after `t = N - 0.5`. Therefore, Gordon Growth values the perpetuity at `t = N - 0.5`, and discounting to `t = 0` uses **`(1 + WACC)^(N - 0.5)`** (mathematically equivalent to `TV / (1 + WACC)^N × (1 + WACC)^0.5`):
+
 ```text
 Undiscounted TV (Perpetuity) = UFCF_N × (1 + g) / (WACC - g)
-Terminal Discount Factor     = 1 / (1 + WACC)^N          (end of Year N)
+Terminal Discount Factor     = 1 / (1 + WACC)^(N - 0.5)   (consistent mid-year perpetuity timing)
 PV of Terminal Value         = Undiscounted TV × Terminal Discount Factor
 ```
 
-*(Note: In Gordon Growth, `UFCF_N × (1 + g) / (WACC - g)` values the perpetuity at the end of Year `N` assuming end-of-year terminal cash flows. Discounting by `(1 + WACC)^N` is the conservative, standard institutional convention used in `build_dcf_skeleton.py`. If a model explicitly applies a mid-year Gordon Growth adjustment `× (1 + WACC)^0.5`, document it clearly — never mix formulas silently.)*
+*(Note: Discounting a mid-year Perpetuity Growth TV at `N - 0.5` eliminates the half-year timing gap between Year `N` and Year `N + 1` and matches `build_dcf_skeleton.py` dynamically via `=1/(1+$C$21)^$G$87`. If an explicit model uses end-of-year cash flows `1..N`, then both explicit cash flows and Perpetuity TV use integer periods `1..N` and `N`.)*
 
 **Terminal Growth Rate (`g`) Guardrails:**
 - **Mathematical requirement:** Strictly `g < WACC` (`validate_dcf.py` fails otherwise).
-- **Economic ceiling:** `g <= long-term nominal GDP growth / 10Y risk-free rate` — typically **`2.0%–3.5%`** across scenarios (e.g., Bear `2.0%`, Base `2.5%`, Bull `3.0%`).
+- **Economic ceiling:** `g <= long-term nominal GDP growth / 10Y risk-free rate` — typically **`2.0%–3.5%`** across scenarios (e.g., Bear `2.0%`, Base `2.25%–2.5%`, Bull `2.5%–3.0%`).
 - **Never** set perpetuity `g` to `3.5%–5.0%+`: a company growing faster than nominal GDP forever mathematically exceeds the global economy. If a company has a longer high-growth runway, extend the explicit projection horizon to 7–10 years rather than inflating `g`.
 
 ### 3.3 Terminal Value — Exit Multiple Method (Cross-Check)
@@ -133,12 +135,12 @@ Undiscounted TV (Exit Multiple) = EBITDA_N × Exit EV/EBITDA Multiple
 PV of Exit Multiple TV          = Undiscounted TV / (1 + WACC)^N
 ```
 
-- **CRITICAL DISCOUNTING RULE:** An exit multiple (`EBITDA_N × Multiple`) values the business at the **end of Year `N`** (point-in-time exit transaction). It MUST ALWAYS be discounted by **`(1 + WACC)^N`** — **NEVER `(1 + WACC)^(N - 0.5)`**, even when explicit FCFs use the mid-year convention.
+- **CRITICAL DISCOUNTING RULE:** An exit multiple (`EBITDA_N × Multiple`) values the business at the **end of Year `N`** (point-in-time exit transaction). It MUST ALWAYS be discounted by **`(1 + WACC)^N`** (`N = 5.0` in a 5-year model, e.g., `^($G$87+0.5)`) — **NEVER `(1 + WACC)^(N - 0.5)`**, even when explicit FCFs and Perpetuity Growth TV use the mid-year convention.
 - Always display **Implied Exit EV / Terminal EBITDA** from the Perpetuity Growth TV (`= Undiscounted Perpetuity TV / EBITDA_N`) and cross-check against peer trading multiples from `comps-analysis`.
 
 ### 3.4 Terminal Value Sanity Checks
-- **TV % of Enterprise Value:** Target **`50%–70%`** for a 5-year model.
-- Flag and investigate if **`< 40%`** (terminal assumptions overly conservative) or **`> 80%`** (over-reliant on terminal assumptions; consider extending the explicit forecast period).
+- **TV % of Enterprise Value:** Target **`50%–70%`** (`validate_dcf.py` warns if `< 50%` or `> 70%`).
+- If `> 70%`, review terminal growth `g` or extend the explicit forecast horizon to 7–10 years; if `< 50%`, verify terminal assumptions are not overly conservative.
 
 ---
 
@@ -171,9 +173,12 @@ Under **ASC 842**, operating lease liabilities appear on the balance sheet, whil
 ### 4.3 Fully Diluted Shares Outstanding
 
 Never use basic shares alone when dilutive securities exist:
-1. **Treasury Stock Method (TSM)** for in-the-money stock options, warrants, and unvested RSUs (`strike = $0` for RSUs):
-   $$\text{Net Dilutive Shares} = \max\left(0,\; N_{\text{grant}} - \frac{N_{\text{grant}} \times K}{P}\right)$$
-   where `K` is weighted-average strike price and `P` is the reference/implied share price.
+1. **Separate RSUs & Treasury Stock Method (TSM) for options/warrants:**
+   - **Unvested RSUs (`$0` strike price):** Always included 1:1 in diluted shares regardless of share price (NEVER lump RSUs into an option strike test, or they would be erroneously dropped whenever `P <= K`!).
+   - **Stock options & warrants:**
+     $$\text{Net Option Dilution} = \max\left(0,\; N_{\text{opt}} - \frac{N_{\text{opt}} \times K}{P}\right)$$
+     where `K` is weighted-average option strike price and `P` is the reference/implied share price.
+   - **Total Fully Diluted Shares:** `Basic Shares + Unvested RSUs + Net Option Dilution` (`=C9+C10+IF(C8>C12,C11-(C11*C12/C8),0)` in `build_dcf_skeleton.py`).
 2. **If-Converted Method** for convertible debt or convertible preferred stock:
    - Test whether conversion price `<` implied/reference share price (in-the-money).
    - If in-the-money: add converted shares to diluted share count AND remove the convertible face value from Total Gross Debt / Preferred Stock in the equity bridge (avoid double-counting!).

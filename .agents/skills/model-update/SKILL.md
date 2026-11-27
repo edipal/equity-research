@@ -83,7 +83,7 @@ Recalculate valuation with updated estimates:
 
 ### Step 6: Output
 
-- Updated Excel model: `research/companies/<TICKER>/models/<TICKER>_Model_YYYY-MM-DD.xlsx` (verify with `python3 scripts/recalc_xlsx.py <file.xlsx> 30` until exit `0` / `"status": "success"`, plus `python3 .agents/skills/dcf-model/scripts/validate_dcf.py <file.xlsx>` whenever a `DCF` tab is present)
+- Updated Excel model: `research/companies/<TICKER>/models/<TICKER>_Model_YYYY-MM-DD.xlsx` (use `python3 scripts/recalc_xlsx.py <file.xlsx> --check-only` when auditing an **existing** coverage/user workbook so Excel-only features like charts, What-If data tables, and VBA remain untouched; run default in-place `python3 scripts/recalc_xlsx.py <file.xlsx> 30` or `--output <new.xlsx>` only on newly Python-generated `.xlsx` models; plus `python3 .agents/skills/dcf-model/scripts/validate_dcf.py <file.xlsx>` whenever a `DCF` tab is present)
 - Estimate change summary & updated price target derivation (`DRAFT — FOR INTERNAL ANALYST REVIEW ONLY`): `research/companies/<TICKER>/notes/<TICKER>_Model_Update_YYYY-MM-DD.md` (markdown or Word)
 
 ## Important Notes

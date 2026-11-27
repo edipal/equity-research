@@ -32,7 +32,7 @@ Given a ticker and reporting period (e.g., `MSFT Q3 FY26`), deliver staged draft
    - Plug reported actuals and revised forward assumptions into `research/companies/<TICKER>/models/` (tag every revised driver `[ASSUMPTION]` with cell comments).
    - Recompute forward estimates, DCF/comps valuation, and updated Price Target once inside the model.
 3. **Audit the updated model (`recalc_xlsx.py` + `audit-xls`):**
-   - Run `python3 scripts/recalc_xlsx.py <model.xlsx> 30` (to cache recalculated values; use `--check-only` for read-only verification) and `python3 .agents/skills/dcf-model/scripts/validate_dcf.py <model.xlsx>` if a `DCF` tab exists.
+   - Run `python3 scripts/recalc_xlsx.py <model.xlsx> --check-only` when auditing an **existing** coverage or user-supplied workbook (preserves Excel-only features such as charts, What-If data tables, and VBA macros); run default in-place `python3 scripts/recalc_xlsx.py <model.xlsx> 30` (or `--output <new.xlsx>`) only on newly Python-generated `.xlsx` models that require cached values written to disk. Also run `python3 .agents/skills/dcf-model/scripts/validate_dcf.py <model.xlsx>` if a `DCF` tab exists.
    - Apply the `audit-xls` checklist (balance checks, cash tie-out, zero `#REF!`/`#DIV/0!`/`#VALUE!`/`#NAME?`/`#N/A`/`#NUM!`/`#NULL!`, no hardcoded calculation overrides).
 4. **Draft the note strictly from the audited model (`earnings-analysis` or `morning-note`):**
    - Pull all old-vs.-new estimates, margins, and valuation targets directly from the audited workbook so prose and model match 100%.

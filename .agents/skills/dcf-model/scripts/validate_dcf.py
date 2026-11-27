@@ -5,14 +5,18 @@ DCF Model Validation Script
 Validates Excel DCF models for formula errors and common DCF mistakes
 """
 
-import sys
 import json
 import re
+import sys
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
-EXCEL_ERRORS = ('#VALUE!', '#DIV/0!', '#REF!', '#NAME?', '#NULL!', '#NUM!', '#N/A')
-STRING_LITERAL_RE = re.compile(r'"(?:""|[^"])*"')
+_REPO_SCRIPTS_DIR = str(Path(__file__).resolve().parents[4] / "scripts")
+if _REPO_SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _REPO_SCRIPTS_DIR)
+
+from xlsx_scan import EXCEL_ERRORS, extract_formula_text as _extract_formula_text, scan_workbook_formulas  # noqa: E402
+
 SENSITIVITY_VS_RE = re.compile(r'\bvs\.?\b')
 OF_EV_RE = re.compile(r'\bof\s+ev\b')
 EBIT_RE = re.compile(r'\bebit\b')
@@ -58,17 +62,6 @@ RATIO_OR_MULTIPLE_TOKENS = (
 def _is_number(value) -> bool:
     """Return True for numeric values while excluding Python booleans."""
     return isinstance(value, (int, float)) and not isinstance(value, bool)
-
-
-def _extract_formula_text(value) -> Optional[str]:
-    """Extract formula string from standard string formulas and openpyxl ArrayFormula objects."""
-    if isinstance(value, str):
-        return value if value.startswith('=') else None
-    if type(value).__name__ == 'ArrayFormula':
-        text = getattr(value, 'text', None)
-        if isinstance(text, str) and text:
-            return text if text.startswith('=') else f'={text}'
-    return None
 
 
 SENSITIVITY_AXIS_RE = re.compile(
@@ -136,6 +129,24 @@ def _is_ratio_or_multiple_label(text: str) -> bool:
     return False
 
 
+def _cache_sheet_rows(ws, max_row: int, max_col: int) -> list[tuple[int, dict[int, tuple[Any, str]]]]:
+    """Read a bounded slice of a read_only worksheet into lightweight (row_idx, {col: (val, coord)}) tuples."""
+    from openpyxl.utils import get_column_letter
+
+    ws.reset_dimensions()
+    rows_out: list[tuple[int, dict[int, tuple[Any, str]]]] = []
+    for row_idx, row in enumerate(ws.iter_rows(max_row=max_row, max_col=max_col), start=1):
+        row_map: dict[int, tuple[Any, str]] = {}
+        for col_idx, cell in enumerate(row, start=1):
+            val = cell.value
+            if val is not None:
+                coord = getattr(cell, 'coordinate', None) or f"{get_column_letter(col_idx)}{row_idx}"
+                row_map[col_idx] = (val, coord)
+        if row_map:
+            rows_out.append((row_idx, row_map))
+    return rows_out
+
+
 class DCFModelValidator:
     """Validates DCF models for errors and quality issues"""
 
@@ -154,22 +165,30 @@ class DCFModelValidator:
         if not path_obj.is_file():
             raise IsADirectoryError(f"Not a file: {excel_path}")
 
-        self.workbook_formulas = openpyxl.load_workbook(excel_path, data_only=False)
+        # Single lightweight read_only=True pass for sheet structure & DCF logic checks.
+        wb_values = openpyxl.load_workbook(excel_path, data_only=True, read_only=True)
         try:
-            self.workbook_values = openpyxl.load_workbook(excel_path, data_only=True)
-        except Exception:
-            self.workbook_formulas.close()
-            raise
-        self.errors = []
-        self.warnings = []
-        self.info = []
+            self.sheet_names: list[str] = [ws.title for ws in wb_values.worksheets]
+            ws_by_title = {ws.title: ws for ws in wb_values.worksheets}
+            self._dcf_rows: Optional[list[tuple[int, dict[int, tuple[Any, str]]]]] = (
+                _cache_sheet_rows(ws_by_title['DCF'], max_row=250, max_col=25)
+                if 'DCF' in ws_by_title
+                else None
+            )
+            self._wacc_rows: Optional[list[tuple[int, dict[int, tuple[Any, str]]]]] = (
+                _cache_sheet_rows(ws_by_title['WACC'], max_row=150, max_col=20)
+                if 'WACC' in ws_by_title
+                else None
+            )
+        finally:
+            wb_values.close()
+
+        self.errors: list[str] = []
+        self.warnings: list[str] = []
+        self.info: list[str] = []
 
     def close(self) -> None:
-        """Close underlying openpyxl workbooks."""
-        if getattr(self, 'workbook_formulas', None) is not None:
-            self.workbook_formulas.close()
-        if getattr(self, 'workbook_values', None) is not None:
-            self.workbook_values.close()
+        """No-op cleanup retained for context-manager backwards compatibility."""
 
     def __enter__(self) -> "DCFModelValidator":
         return self
@@ -203,37 +222,26 @@ class DCFModelValidator:
 
         return results
 
-    @staticmethod
-    def _get_worksheet(workbook, name: str):
-        """Return Worksheet by title, ignoring Chartsheet objects."""
-        for ws in workbook.worksheets:
-            if ws.title == name:
-                return ws
-        return None
-
     def check_sheet_structure(self):
         """Verify required sheets exist (2-sheet DCF + WACC spec with inline or separate sensitivity)."""
         required_sheets = ['DCF', 'WACC']
-        sheet_names = [ws.title for ws in self.workbook_values.worksheets]
 
         for sheet in required_sheets:
-            if sheet not in sheet_names:
+            if sheet not in self.sheet_names:
                 self.errors.append(f"Required sheet missing: {sheet}")
             else:
                 self.info.append(f"Found sheet: {sheet}")
 
-        has_sensitivity_sheet = any('sensitivity' in name.lower() for name in sheet_names)
+        has_sensitivity_sheet = any('sensitivity' in name.lower() for name in self.sheet_names)
         has_inline_sensitivity = False
-        if not has_sensitivity_sheet:
-            dcf_ws = self._get_worksheet(self.workbook_formulas, 'DCF')
-            if dcf_ws is not None:
-                for row in dcf_ws.iter_rows(max_row=250, max_col=25):
-                    for cell in row:
-                        if isinstance(cell.value, str) and _is_sensitivity_header(cell.value):
-                            has_inline_sensitivity = True
-                            break
-                    if has_inline_sensitivity:
+        if not has_sensitivity_sheet and self._dcf_rows is not None:
+            for _, row_map in self._dcf_rows:
+                for val, _ in row_map.values():
+                    if isinstance(val, str) and _is_sensitivity_header(val):
+                        has_inline_sensitivity = True
                         break
+                if has_inline_sensitivity:
+                    break
 
         if has_sensitivity_sheet:
             self.info.append("Found dedicated Sensitivity sheet")
@@ -245,51 +253,18 @@ class DCFModelValidator:
             )
 
     def check_formula_errors(self):
-        """Check for Excel formula errors and uncached formulas in all worksheets."""
+        """Check for Excel formula errors and uncached formulas in all worksheets using read_only=True."""
+        scan = scan_workbook_formulas(Path(self.excel_path))
         error_details = {err: [] for err in EXCEL_ERRORS}
-        total_errors = 0
-        total_formulas = 0
-        uncached_formulas = 0
+        total_errors = scan['total_errors']
+        total_formulas = scan['total_formulas']
+        uncached_formulas = scan['uncached_formulas']
 
-        ws_values_by_title = {ws.title: ws for ws in self.workbook_values.worksheets}
-        for ws_formulas in self.workbook_formulas.worksheets:
-            sheet_name = ws_formulas.title
-            ws_values = ws_values_by_title.get(sheet_name)
-            if ws_values is None:
-                continue
-
-            for row in ws_formulas.iter_rows():
-                for formula_cell in row:
-                    coord = formula_cell.coordinate
-                    value_cell = ws_values[coord]
-                    val_f = formula_cell.value
-                    val_v = value_cell.value
-
-                    formula_text = _extract_formula_text(val_f)
-                    is_formula = formula_text is not None
-                    if is_formula:
-                        total_formulas += 1
-                        if val_v is None and getattr(value_cell, 'data_type', None) not in ('s', 'str'):
-                            uncached_formulas += 1
-
-                    # Detect Excel error without false-positiving on prose notes or string literals
-                    detected_err = None
-                    if getattr(value_cell, 'data_type', None) == 'e':
-                        detected_err = str(val_v) if val_v is not None else '#VALUE!'
-                    elif isinstance(val_v, str) and val_v in EXCEL_ERRORS:
-                        detected_err = val_v
-                    elif is_formula:
-                        stripped_formula = STRING_LITERAL_RE.sub('', formula_text)
-                        for err in EXCEL_ERRORS:
-                            if err in stripped_formula:
-                                detected_err = err
-                                break
-
-                    if detected_err is not None:
-                        location = f"{sheet_name}!{coord}"
-                        error_details.setdefault(detected_err, []).append(location)
-                        total_errors += 1
-                        self.errors.append(f"{detected_err} at {location}")
+        for err_tok, bucket in scan['error_summary'].items():
+            locs = bucket['locations']
+            error_details.setdefault(err_tok, []).extend(locs)
+            for location in locs:
+                self.errors.append(f"{err_tok} at {location}")
 
         if uncached_formulas > 0:
             self.errors.append(
@@ -313,59 +288,78 @@ class DCFModelValidator:
         self._check_wacc_range()
         self._check_terminal_value_proportion()
 
-    def _collect_adjacent_rates(self, sheet, label_cell, allow_zero: bool = False):
+    @staticmethod
+    def _collect_adjacent_rates(
+        sheet_title: str,
+        row_map: dict[int, tuple[Any, str]],
+        label_col: int,
+        allow_zero: bool = False,
+    ):
         """Collect all rate values (0 < v < 1, or 0 <= v < 1) adjacent to a label cell."""
         entries = []
         for offset in range(1, 6):
-            adj_cell = sheet.cell(label_cell.row, label_cell.column + offset)
-            val = adj_cell.value
+            adj = row_map.get(label_col + offset)
+            if adj is None:
+                continue
+            val, coord = adj
             if _is_number(val):
                 in_range = (0 <= val < 1) if allow_zero else (0 < val < 1)
                 if in_range:
-                    entries.append((adj_cell.column, float(val), f"{sheet.title}!{adj_cell.coordinate}"))
+                    entries.append((label_col + offset, float(val), f"{sheet_title}!{coord}"))
         return entries
 
-    def _extract_rate_rows(self, sheet, max_row: int = 150, max_col: int = 20):
-        """Extract terminal-growth and WACC rows from a sheet, stopping before sensitivity tables."""
+    def _extract_rate_rows(
+        self,
+        sheet_title: str,
+        cached_rows: list[tuple[int, dict[int, tuple[Any, str]]]],
+        max_row: int = 150,
+        max_col: int = 20,
+    ):
+        """Extract terminal-growth and WACC rows from a cached sheet grid, stopping before sensitivity tables."""
         tg_rows = []
         wacc_rows = []
 
-        for row in sheet.iter_rows(max_row=max_row, max_col=max_col):
-            # Stop scanning if we hit a sensitivity section header after collecting assumptions
-            row_texts = [c.value.lower() for c in row if isinstance(c.value, str) and c.value.strip()]
+        for row_idx, row_map in cached_rows:
+            if row_idx > max_row:
+                break
+            row_texts = [
+                val.lower()
+                for col_idx, (val, _) in row_map.items()
+                if col_idx <= max_col and isinstance(val, str) and val.strip()
+            ]
             if any(_is_sensitivity_header(t) for t in row_texts):
                 if tg_rows or wacc_rows:
                     break
                 continue
 
-            for cell in row:
-                if not (cell.value and isinstance(cell.value, str)):
+            for col_idx in sorted(row_map):
+                if col_idx > max_col:
+                    break
+                val, _ = row_map[col_idx]
+                if not (val and isinstance(val, str)):
                     continue
-                if _is_terminal_growth_label(cell.value):
-                    entries = self._collect_adjacent_rates(sheet, cell, allow_zero=True)
+                if _is_terminal_growth_label(val):
+                    entries = self._collect_adjacent_rates(sheet_title, row_map, col_idx, allow_zero=True)
                     if entries:
-                        tg_rows.append((cell.row, entries))
-                elif _is_wacc_label(cell.value):
-                    entries = self._collect_adjacent_rates(sheet, cell, allow_zero=False)
+                        tg_rows.append((row_idx, entries))
+                elif _is_wacc_label(val):
+                    entries = self._collect_adjacent_rates(sheet_title, row_map, col_idx, allow_zero=False)
                     if entries:
-                        wacc_rows.append((cell.row, entries))
+                        wacc_rows.append((row_idx, entries))
 
         return tg_rows, wacc_rows
 
     def _check_terminal_growth_vs_wacc(self):
         """Critical check: Terminal growth must be less than WACC across all scenarios."""
         try:
-            dcf_sheet = self._get_worksheet(self.workbook_values, 'DCF')
-            if dcf_sheet is None:
+            if self._dcf_rows is None:
                 # Missing DCF sheet is already recorded as an error in check_sheet_structure()
                 return
-            tg_rows, wacc_rows = self._extract_rate_rows(dcf_sheet)
+            tg_rows, wacc_rows = self._extract_rate_rows('DCF', self._dcf_rows)
 
             # Fallback to WACC sheet if WACC is not explicitly displayed on DCF sheet
-            if not wacc_rows:
-                wacc_sheet = self._get_worksheet(self.workbook_values, 'WACC')
-                if wacc_sheet is not None:
-                    _, wacc_rows = self._extract_rate_rows(wacc_sheet)
+            if not wacc_rows and self._wacc_rows is not None:
+                _, wacc_rows = self._extract_rate_rows('WACC', self._wacc_rows)
 
             if not tg_rows:
                 self.errors.append("Could not locate terminal growth rate on DCF sheet")
@@ -416,17 +410,19 @@ class DCFModelValidator:
     def _check_wacc_range(self):
         """Check if WACC is in reasonable range across both WACC and DCF sheets (deduplicated)."""
         try:
-            wacc_sheet = self._get_worksheet(self.workbook_values, 'WACC')
-            dcf_sheet = self._get_worksheet(self.workbook_values, 'DCF')
-            sheets_to_check = [s for s in (wacc_sheet, dcf_sheet) if s is not None]
+            sheets_to_check = [
+                (title, rows)
+                for title, rows in (('WACC', self._wacc_rows), ('DCF', self._dcf_rows))
+                if rows is not None
+            ]
             if not sheets_to_check:
                 # Missing sheets already recorded as errors in check_sheet_structure()
                 return
 
             seen_rounded: set[float] = set()
             wacc_entries: list[tuple[float, str]] = []
-            for sheet in sheets_to_check:
-                _, wacc_rows = self._extract_rate_rows(sheet, max_row=150, max_col=20)
+            for title, rows in sheets_to_check:
+                _, wacc_rows = self._extract_rate_rows(title, rows, max_row=150, max_col=20)
                 for _, entries in wacc_rows:
                     for _, val, coord in entries:
                         key = round(val, 8)
@@ -449,26 +445,34 @@ class DCFModelValidator:
             self.errors.append(f"Could not validate WACC range: {str(e)}")
 
     def _check_terminal_value_proportion(self):
-        """Check if terminal value is reasonable proportion of enterprise value"""
+        """Check if terminal value is within the institutional 50%-70% of EV target range."""
         try:
-            dcf_sheet = self._get_worksheet(self.workbook_values, 'DCF')
-            if dcf_sheet is None:
+            if self._dcf_rows is None:
                 # Missing DCF sheet already recorded as error in check_sheet_structure()
                 return
 
             terminal_value = None
             enterprise_value = None
 
-            for row in dcf_sheet.iter_rows(max_row=200, max_col=20):
-                row_texts = [c.value.lower() for c in row if isinstance(c.value, str) and c.value.strip()]
+            for row_idx, row_map in self._dcf_rows:
+                if row_idx > 200:
+                    break
+                row_texts = [
+                    val.lower()
+                    for col_idx, (val, _) in row_map.items()
+                    if col_idx <= 20 and isinstance(val, str) and val.strip()
+                ]
                 if any(_is_sensitivity_header(t) for t in row_texts):
                     if terminal_value is not None or enterprise_value is not None:
                         break
                     continue
 
-                for cell in row:
-                    if cell.value and isinstance(cell.value, str):
-                        cell_str = cell.value.lower()
+                for col_idx in sorted(row_map):
+                    if col_idx > 20:
+                        break
+                    val, _ = row_map[col_idx]
+                    if val and isinstance(val, str):
+                        cell_str = val.lower()
                         if _is_sensitivity_header(cell_str) or _is_ratio_or_multiple_label(cell_str):
                             continue
                         if (
@@ -478,9 +482,9 @@ class DCFModelValidator:
                             and ('pv' in cell_str or 'present value' in cell_str)
                         ):
                             for offset in range(1, 6):
-                                adjacent = dcf_sheet.cell(cell.row, cell.column + offset).value
-                                if _is_number(adjacent) and adjacent > 0:
-                                    terminal_value = float(adjacent)
+                                adj = row_map.get(col_idx + offset)
+                                if adj is not None and _is_number(adj[0]) and adj[0] > 0:
+                                    terminal_value = float(adj[0])
                                     break
                         elif (
                             enterprise_value is None
@@ -489,9 +493,9 @@ class DCFModelValidator:
                             and 'terminal' not in cell_str
                         ):
                             for offset in range(1, 6):
-                                adjacent = dcf_sheet.cell(cell.row, cell.column + offset).value
-                                if _is_number(adjacent) and adjacent > 0:
-                                    enterprise_value = float(adjacent)
+                                adj = row_map.get(col_idx + offset)
+                                if adj is not None and _is_number(adj[0]) and adj[0] > 0:
+                                    enterprise_value = float(adj[0])
                                     break
 
                 if terminal_value is not None and enterprise_value is not None:
@@ -499,12 +503,12 @@ class DCFModelValidator:
 
             if terminal_value is not None and enterprise_value is not None and enterprise_value > 0:
                 proportion = terminal_value / enterprise_value
-                if proportion > 0.80:
+                if proportion > 0.70:
                     self.warnings.append(
                         f"Terminal value is {proportion:.1%} of EV (typically should be 50-70%). "
                         "Model may be over-reliant on terminal assumptions."
                     )
-                elif proportion < 0.40:
+                elif proportion < 0.50:
                     self.warnings.append(
                         f"Terminal value is {proportion:.1%} of EV (typically should be 50-70%). "
                         "Check if terminal assumptions are too conservative."
@@ -543,7 +547,7 @@ def main():
         print("  - Formula errors (#REF!, #DIV/0!, etc.) and uncached formulas")
         print("  - Terminal growth < WACC (critical)")
         print("  - WACC in reasonable range (5-20%)")
-        print("  - Terminal value proportion of EV (40-80%)")
+        print("  - Terminal value proportion of EV (50-70%)")
         print("\nReturns JSON with errors, warnings, and info")
         print("\nExample: python validate_dcf.py model.xlsx")
         print("Example: python validate_dcf.py model.xlsx results.json")
