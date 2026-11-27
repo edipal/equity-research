@@ -39,17 +39,18 @@ modification notices referencing their upstream path at commit 3e32c22.
      single-revision post-earnings agent order, restored interactive/subagent
      human review checkpoints, and sharpened overlapping skill descriptions.
    - DCF & Valuation Methodology Fixes: Replaced `Net Debt / EV` WACC weights
-     with gross-debt market weights `E/(E+D)` and `D/(E+D)`, unified the canonical
-     2-sheet `DCF` + `WACC` layout (`Case` at `DCF!B4`, vertically stacked
-     Bear/Base/Bull blocks + `INDEX` consolidation, live centered 5x5 sensitivity
-     formulas matching `build_dcf_skeleton.py`), enforced mid-year explicit UFCF
-     (`t - 0.5`) and mid-year perpetuity TV (`(1 + WACC)^(N - 0.5)`) discounting
-     with strict end-of-year `(1 + WACC)^N` exit-multiple TV discounting,
-     capped terminal growth to `<= 3.5%` / long-term nominal GDP, completed the
-     EV-to-equity bridge with ASC 842 operating lease double-counting warnings,
-     required TSM/if-converted diluted shares and SBC expense treatment, and
-     fixed worked-example arithmetic and precedent-transaction weighting in
-     `initiating-coverage`.
+     with 3-tranche gross-debt market weights `E/(E+D+P)`, `D/(E+D+P)`, and
+     `P/(E+D+P)` (with NCI excluded from WACC and deducted in the equity bridge),
+     unified the canonical 2-sheet `DCF` + `WACC` layout (`Case` at `DCF!B4`,
+     vertically stacked Bear/Base/Bull blocks + `INDEX` consolidation, live
+     centered 5x5 sensitivity formulas matching `build_dcf_skeleton.py`),
+     enforced mid-year explicit UFCF (`t - 0.5`) and mid-year perpetuity TV
+     (`(1 + WACC)^(N - 0.5)`) discounting with strict end-of-year `(1 + WACC)^N`
+     exit-multiple TV discounting, capped terminal growth to `<= 3.5%` /
+     long-term nominal GDP, completed the EV-to-equity bridge with ASC 842
+     operating lease double-counting warnings, required TSM/if-converted diluted
+     shares and SBC expense treatment, and fixed worked-example arithmetic and
+     precedent-transaction weighting in `initiating-coverage`.
    - 3-Statement & GAAP Accounting Fixes: Added scratch-build support alongside
      template completion, GAAP ASC 740 NOL/DTA accounting, complete equity
      roll-forwards (SBC/APIC, Treasury Stock/buybacks, AOCI), revolver minimum-cash
@@ -69,4 +70,5 @@ modification notices referencing their upstream path at commit 3e32c22.
    - Python Programmatic Authoring & QA Tooling: Replaced Claude/Office JS/Cowork
      GUI flows with Python (`openpyxl`, `python-docx`, `python-pptx`, `matplotlib`,
      `seaborn`, `pypdf`), LibreOffice recalculation/audit (`recalc_xlsx.py` with
-     `--check-only`, `--output`, and `unverified` exit 2), and CI regression tests.
+     non-destructive default, `--in-place`, `--check-only`, `--output`, and
+     `unverified` exit 2), and CI regression tests.

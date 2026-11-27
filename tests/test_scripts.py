@@ -2707,6 +2707,16 @@ class TestValidateDcf(unittest.TestCase):
             ("Best Case", "best"),
             ("Scenario 1: Bear", "bear"),
             ("SECTION 2: BEAR CASE", "bear"),
+            ("A) Bear Case", "bear"),
+            ("B) Base Case", "base"),
+            ("C) Bull Case", "bull"),
+            ("A. Bear Case", "bear"),
+            ("A: Bear Case", "bear"),
+            ("Scenario 1", "scenario_1"),
+            ("Scenario A", "scenario_a"),
+            ("Case 2", "scenario_2"),
+            ("Case B", "scenario_b"),
+            ("Scenario II", "scenario_ii"),
             ("Bear", "bear"),
             ("Base", "base"),
             ("Bull", "bull"),
@@ -2734,6 +2744,11 @@ class TestValidateDcf(unittest.TestCase):
             "Best Practice",
             "Case Selector",
             "Active Scenario Selector (1=Bear, 2=Base, 3=Bull)",
+            "Case Notes",
+            "Scenario Description",
+            "Case Summary",
+            "Case Study",
+            "Scenario Inputs",
         ]
         for label in negative_cases:
             with self.subTest(negative=label):
@@ -2869,6 +2884,154 @@ class TestValidateDcf(unittest.TestCase):
             self.assertEqual(tg_tags_by_row.get(45), "base")
             self.assertEqual(tg_tags_by_row.get(57), "bull")
             self.assertEqual(tg_tags_by_row.get(69), "active")
+
+    def test_letter_prefixed_scenario_banners_isolate_bull_invalid_tg_from_bear_wacc(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            # 1. Invalid B) Bull Case (g=7.5% >= WACC=7.0%) next to A) Bear Case (WACC=11.0%)
+            #    MUST be caught rather than pairing Bull g against Bear WACC.
+            path = Path(tmp) / "letter_prefixed_invalid_bull.xlsx"
+            wb = openpyxl.Workbook()
+            ws_dcf = wb.active
+            ws_dcf.title = "DCF"
+
+            ws_dcf["A2"] = "A) Bear Case"
+            ws_dcf["A3"] = "WACC"
+            ws_dcf["B3"] = 0.11
+            ws_dcf["A4"] = "Terminal Growth Rate"
+            ws_dcf["B4"] = 0.02
+
+            ws_dcf["A6"] = "B) Bull Case"
+            ws_dcf["A7"] = "WACC"
+            ws_dcf["B7"] = 0.07
+            ws_dcf["A8"] = "Terminal Growth Rate"
+            ws_dcf["B8"] = 0.075  # INVALID: 7.50% >= Bull WACC 7.00%
+
+            ws_dcf["A12"] = "PV of Terminal Value"
+            ws_dcf["B12"] = 600.0
+            ws_dcf["A13"] = "Enterprise Value"
+            ws_dcf["B13"] = 1000.0
+            ws_dcf["A16"] = "Sensitivity Analysis"
+
+            ws_wacc = wb.create_sheet("WACC")
+            ws_wacc["A3"] = "WEIGHTED AVERAGE COST OF CAPITAL"
+            ws_wacc["B3"] = 0.09
+            wb.save(path)
+            wb.close()
+
+            res = validate_dcf_mod.validate_dcf_model(str(path))
+            self.assertEqual(res["status"], "FAIL", res)
+            self.assertEqual(res["error_count"], 1, res["errors"])
+            self.assertTrue(
+                any(
+                    "Terminal growth (7.50% at DCF!B8) >= WACC (7.00% at DCF!B7)" in e
+                    for e in res["errors"]
+                ),
+                res["errors"],
+            )
+
+            # 2. Valid A) Bear Case / B) Base Case / C) Bull Case workbook passes cleanly
+            valid_path = Path(tmp) / "letter_prefixed_valid_three_cases.xlsx"
+            wb2 = openpyxl.Workbook()
+            ws2 = wb2.active
+            ws2.title = "DCF"
+
+            ws2["A2"] = "A) Bear Case"
+            ws2["A3"] = "WACC"
+            ws2["B3"] = 0.11
+            ws2["A4"] = "Terminal Growth Rate"
+            ws2["B4"] = 0.02
+
+            ws2["A6"] = "B) Base Case"
+            ws2["A7"] = "WACC"
+            ws2["B7"] = 0.09
+            ws2["A8"] = "Terminal Growth Rate"
+            ws2["B8"] = 0.025
+
+            ws2["A10"] = "C) Bull Case"
+            ws2["A11"] = "WACC"
+            ws2["B11"] = 0.07
+            ws2["A12"] = "Terminal Growth Rate"
+            ws2["B12"] = 0.03
+
+            ws2["A15"] = "PV of Terminal Value"
+            ws2["B15"] = 600.0
+            ws2["A16"] = "Enterprise Value"
+            ws2["B16"] = 1000.0
+            ws2["A19"] = "Sensitivity Analysis"
+
+            ws_wacc2 = wb2.create_sheet("WACC")
+            ws_wacc2["A3"] = "WEIGHTED AVERAGE COST OF CAPITAL"
+            ws_wacc2["B3"] = 0.09
+            wb2.save(valid_path)
+            wb2.close()
+
+            res_ok = validate_dcf_mod.validate_dcf_model(str(valid_path))
+            self.assertEqual(res_ok["status"], "PASS", res_ok)
+            self.assertEqual(res_ok["error_count"], 0, res_ok["errors"])
+            self.assertEqual(res_ok["warning_count"], 0, res_ok["warnings"])
+
+    def test_case_notes_and_scenario_prose_headers_do_not_split_bear_scenario_block(self) -> None:
+        prose_headers = (
+            "Case Notes",
+            "Scenario Description",
+            "Case Summary",
+            "Case Study",
+            "Scenario Inputs",
+        )
+        for prose_header in prose_headers:
+            with self.subTest(prose_header=prose_header), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "prose_header_inside_bear.xlsx"
+                wb = openpyxl.Workbook()
+                ws_dcf = wb.active
+                ws_dcf.title = "DCF"
+
+                # BEAR CASE (valid: g=7.5% < Bear WACC=11.0%) with intervening prose subheader.
+                # If the prose header wrongly starts a new generic scenario block, Bear g=7.5%
+                # would fall back to Bull WACC=7.0% and falsely FAIL!
+                ws_dcf["A2"] = "BEAR CASE"
+                ws_dcf["A3"] = "WACC"
+                ws_dcf["B3"] = 0.11
+                ws_dcf["A4"] = prose_header
+                ws_dcf["A5"] = "Terminal Growth Rate"
+                ws_dcf["B5"] = 0.075
+
+                # BULL CASE (valid: g=3.0% < Bull WACC=7.0%)
+                ws_dcf["A7"] = "BULL CASE"
+                ws_dcf["A8"] = "WACC"
+                ws_dcf["B8"] = 0.07
+                ws_dcf["A9"] = "Terminal Growth Rate"
+                ws_dcf["B9"] = 0.03
+
+                ws_dcf["A12"] = "PV of Terminal Value"
+                ws_dcf["B12"] = 600.0
+                ws_dcf["A13"] = "Enterprise Value"
+                ws_dcf["B13"] = 1000.0
+                ws_dcf["A16"] = "Sensitivity Analysis"
+
+                ws_wacc = wb.create_sheet("WACC")
+                ws_wacc["A3"] = "WEIGHTED AVERAGE COST OF CAPITAL"
+                ws_wacc["B3"] = 0.09
+                wb.save(path)
+                wb.close()
+
+                res = validate_dcf_mod.validate_dcf_model(str(path))
+                self.assertEqual(res["status"], "PASS", res)
+                self.assertEqual(res["error_count"], 0, res["errors"])
+                self.assertEqual(res["warning_count"], 0, res["warnings"])
+                self.assertTrue(
+                    any(
+                        "Terminal growth (7.50% at DCF!B5) < WACC (11.00% at DCF!B3)" in i
+                        for i in res["info"]
+                    ),
+                    res["info"],
+                )
+                self.assertTrue(
+                    any(
+                        "Terminal growth (3.00% at DCF!B9) < WACC (7.00% at DCF!B8)" in i
+                        for i in res["info"]
+                    ),
+                    res["info"],
+                )
 
 
 @unittest.skipIf(openpyxl is None, "openpyxl is required for DCF skeleton tests")

@@ -132,7 +132,7 @@ def _sheet_titles_by_xml_path(zf: zipfile.ZipFile) -> dict[str, str]:
 
 
 def inspect_workbook_xml(xlsx_path: Path) -> dict[str, Any]:
-    """Inspect OOXML worksheets in a single O(1)-memory streaming XML pass.
+    """Inspect OOXML worksheets in a single low-memory streaming XML pass.
 
     Returns a dictionary with:
         - ``"data_tables"``: list of Excel What-If data table locations (``Sheet!ref``).

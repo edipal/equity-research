@@ -128,7 +128,7 @@ SCENARIO_HEADER_PREFIX_RE = re.compile(
     r'(?:section|part|tab|block|schedule)\s+[a-z0-9]+(?:\.[a-z0-9]+)?'
     r'|(?:scenario|case)(?:\s+[a-z0-9]+)?'
     r'|[0-9]+[a-z]?(?:\.[0-9]+[a-z]?)?'
-    r'|[a-z]\)'
+    r'|[a-z]'
     r')\s*[:.\-\u2013\u2014)]\s*'
 )
 _SCENARIO_HEADER_SUFFIX = (
@@ -150,7 +150,9 @@ ACTIVE_SCENARIO_HEADER_RE = re.compile(
     + r'(?:\s*[:\-\u2013\u2014]\s*[^|]{1,40})?$'
 )
 GENERIC_SCENARIO_HEADER_RE = re.compile(
-    r'^(?:scenario|case)\s+([a-z0-9]+)' + _SCENARIO_HEADER_SUFFIX + r'$'
+    r'^(?:scenario|case)\s+([0-9]+[a-z]?|[a-z]|i{1,3}|iv|v|vi{0,3})'
+    + _SCENARIO_HEADER_SUFFIX
+    + r'$'
 )
 
 NAMED_WACC_ALIASES = ('dcf_wacc', 'wacc', 'wacc_rate')
