@@ -172,6 +172,9 @@ _SAFE_REGEX_PARTS = (
     # Legacy comment VML emitted by openpyxl / Excel / LibreOffice
     re.compile(r"^xl/drawings/(?:vml|comments)drawing\d*\.vml$"),
     re.compile(r"^xl/drawings/_rels/(?:vml|comments)drawing\d*\.vml\.rels$"),
+    # Standard Excel tables (query-backed tables still have xl/queryTables/ & xl/connections.xml)
+    re.compile(r"^xl/tables/table\d+\.xml$"),
+    re.compile(r"^xl/tables/_rels/table\d+\.xml\.rels$"),
 )
 
 # Verified-safe worksheet <extLst><ext uri="..."> URIs (empty: neither openpyxl nor
@@ -225,17 +228,18 @@ def _is_empty_ooxml_root(stream, expected_root: str) -> bool:
 
 def _detect_manifest_lossy_features(
     namelist: list[str],
-) -> tuple[set[str], list[str], list[str]]:
+) -> tuple[dict[str, set[str]], list[str], list[str]]:
     """Identify non-allowlisted OOXML archive parts that LibreOffice re-export can drop or alter.
 
     Uses an allowlist of known-safe core OOXML parts (worksheets, styles, sharedStrings,
-    calcChain, themes, docProps, printerSettings, and legacy comment XML/VML) so unknown
-    or newer Excel parts fail closed as ``unsupported_ooxml_parts`` instead of slipping past
-    a denylist. Non-VML ``xl/drawings/*.xml`` and ``xl/drawings/_rels/*.xml.rels`` entries are
-    returned separately for content inspection so empty LibreOffice AutoFilter ``<xdr:wsDr/>``
-    stubs do not trigger false positives while non-empty drawings still fail closed.
+    calcChain, themes, docProps, printerSettings, standard Excel tables, and legacy comment
+    XML/VML) so unknown or newer Excel parts fail closed as ``unsupported_ooxml_parts`` instead
+    of slipping past a denylist. Returns a mapping of ``category -> set[zip_member_path]``
+    alongside non-VML ``xl/drawings/*.xml`` and ``xl/drawings/_rels/*.xml.rels`` entries for
+    content inspection so empty LibreOffice AutoFilter ``<xdr:wsDr/>`` stubs do not trigger
+    false positives while non-empty drawings still fail closed.
     """
-    features: set[str] = set()
+    feature_details: dict[str, set[str]] = {}
     drawing_xml_entries: list[str] = []
     drawing_rels_entries: list[str] = []
     for name in namelist:
@@ -251,42 +255,43 @@ def _detect_manifest_lossy_features(
             drawing_rels_entries.append(name)
             continue
         if low.startswith(("xl/charts/", "xl/chartsheets/")):
-            features.add("charts")
+            category = "charts"
         elif low.startswith(("xl/pivottables/", "xl/pivotcache/")):
-            features.add("pivot_tables")
+            category = "pivot_tables"
         elif low.startswith(
             ("xl/slicers/", "xl/slicercaches/", "xl/timelines/", "xl/timelinecaches/")
         ):
-            features.add("slicers_or_timelines")
+            category = "slicers_or_timelines"
         elif low.startswith("xl/drawings/"):
-            features.add("drawings_or_shapes")
+            category = "drawings_or_shapes"
         elif low.startswith(("xl/ctrlprops/", "xl/activex/")):
-            features.add("form_or_activex_controls")
+            category = "form_or_activex_controls"
         elif low.startswith(("xl/threadedcomments/", "xl/persons/")):
-            features.add("threaded_comments")
+            category = "threaded_comments"
         elif (
             low in ("xl/connections.xml", "xl/_rels/connections.xml.rels")
             or low.startswith(("xl/querytables/", "xl/model/", "customxml/"))
         ):
-            features.add("connections_or_power_query")
+            category = "connections_or_power_query"
         elif low.startswith(("xl/media/", "xl/embeddings/")):
-            features.add("embedded_media_or_objects")
+            category = "embedded_media_or_objects"
         elif (
             low in ("xl/metadata.xml", "xl/_rels/metadata.xml.rels")
             or low.startswith("xl/richdata/")
         ):
-            features.add("excel_metadata_or_rich_data")
+            category = "excel_metadata_or_rich_data"
         elif low.startswith("xl/externallinks/"):
-            features.add("external_links")
+            category = "external_links"
         elif (
             low in ("xl/vbaproject.bin", "xl/vbadata.xml")
             or low.endswith(("/vbaproject.bin", "/vbadata.xml"))
             or low.startswith(("xl/vbaproject", "xl/vbadata", "xl/macrosheets/", "xl/dialogsheets/"))
         ):
-            features.add("vba_macros")
+            category = "vba_macros"
         else:
-            features.add("unsupported_ooxml_parts")
-    return features, drawing_xml_entries, drawing_rels_entries
+            category = "unsupported_ooxml_parts"
+        feature_details.setdefault(category, set()).add(name)
+    return feature_details, drawing_xml_entries, drawing_rels_entries
 
 
 def inspect_workbook_xml(xlsx_path: Path) -> dict[str, Any]:
@@ -308,27 +313,36 @@ def inspect_workbook_xml(xlsx_path: Path) -> dict[str, Any]:
           ``slicers_or_timelines``, ``sparklines``, ``threaded_comments``,
           ``unsupported_ooxml_parts``, ``vba_macros``, ``worksheet_extensions``,
           ``x14_conditional_formatting``, ``x14_data_validation``).
+        - ``"lossy_feature_details"``: dict mapping each flagged category in
+          ``lossy_features`` to the sorted list of exact offending zip member paths or
+          ``<sheet_xml>:<ext_uri>`` / ``<sheet_xml>:sparklineGroups`` /
+          ``<sheet_xml>:<missing-uri>`` identifiers.
 
     Fails closed by raising ``WorkbookLoadError`` on corrupt OOXML archives or malformed XML.
     """
     if xlsx_path.suffix.lower() not in OOXML_ZIP_SUFFIXES:
-        return {"data_tables": [], "uncached_formulas": None, "lossy_features": []}
+        return {
+            "data_tables": [],
+            "uncached_formulas": None,
+            "lossy_features": [],
+            "lossy_feature_details": {},
+        }
     try:
         locations: list[str] = []
         uncached_formulas = 0
         with zipfile.ZipFile(xlsx_path, "r") as zf:
             namelist = zf.namelist()
-            lossy_features, drawing_xml_entries, drawing_rels_entries = _detect_manifest_lossy_features(
+            lossy_details, drawing_xml_entries, drawing_rels_entries = _detect_manifest_lossy_features(
                 namelist
             )
             for entry in drawing_xml_entries:
                 with zf.open(entry, "r") as stream:
                     if not _is_empty_ooxml_root(stream, "wsDr"):
-                        lossy_features.add("drawings_or_shapes")
+                        lossy_details.setdefault("drawings_or_shapes", set()).add(entry)
             for entry in drawing_rels_entries:
                 with zf.open(entry, "r") as stream:
                     if not _is_empty_ooxml_root(stream, "Relationships"):
-                        lossy_features.add("drawings_or_shapes")
+                        lossy_details.setdefault("drawings_or_shapes", set()).add(entry)
             titles = _sheet_titles_by_xml_path(zf)
             sheet_entries = sorted(
                 name
@@ -365,11 +379,17 @@ def inspect_workbook_xml(xlsx_path: Path) -> dict[str, Any]:
                             elif ext_lst_depth > 0 and local == "ext":
                                 uri = (elem.attrib.get("uri") or "").strip().upper()
                                 if uri not in _SAFE_WORKSHEET_EXT_URIS:
-                                    lossy_features.add(
-                                        _LOSSY_WORKSHEET_EXT_URIS.get(uri, "worksheet_extensions")
+                                    category = _LOSSY_WORKSHEET_EXT_URIS.get(
+                                        uri, "worksheet_extensions"
+                                    )
+                                    uri_label = uri or "<missing-uri>"
+                                    lossy_details.setdefault(category, set()).add(
+                                        f"{entry}:{uri_label}"
                                     )
                             elif local == "sparklineGroups":
-                                lossy_features.add("sparklines")
+                                lossy_details.setdefault("sparklines", set()).add(
+                                    f"{entry}:sparklineGroups"
+                                )
                         else:
                             if local == "extLst" and ext_lst_depth > 0:
                                 ext_lst_depth -= 1
@@ -395,7 +415,11 @@ def inspect_workbook_xml(xlsx_path: Path) -> dict[str, Any]:
         return {
             "data_tables": locations,
             "uncached_formulas": uncached_formulas,
-            "lossy_features": sorted(lossy_features),
+            "lossy_features": sorted(lossy_details),
+            "lossy_feature_details": {
+                category: sorted(details)
+                for category, details in sorted(lossy_details.items())
+            },
         }
     except (zipfile.BadZipFile, ET.ParseError, KeyError, OSError) as exc:
         raise WorkbookLoadError(

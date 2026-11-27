@@ -327,6 +327,29 @@ def _fail(
     return exit_code
 
 
+def _format_lossy_feature_summary(
+    lossy_features: list[str],
+    lossy_feature_details: dict[str, list[str]],
+    *,
+    max_items: int = 5,
+) -> str:
+    """Format lossy feature categories with a concise preview of exact offending parts/URIs."""
+    features_str = ", ".join(lossy_features)
+    items: list[str] = []
+    seen: set[str] = set()
+    for category in sorted(lossy_feature_details):
+        for detail in lossy_feature_details[category]:
+            if detail not in seen:
+                seen.add(detail)
+                items.append(detail)
+    if not items:
+        return features_str
+    preview = ", ".join(items[:max_items])
+    if len(items) > max_items:
+        preview += f" (+{len(items) - max_items} more)"
+    return f"{features_str}; details: {preview}"
+
+
 def scan_workbook(xlsx_path: Path) -> dict:
     return scan_workbook_formulas(xlsx_path)
 
@@ -428,12 +451,14 @@ def main(argv: list[str] | None = None) -> int:
     warnings: list[str] = []
     data_table_locs: list[str] = []
     lossy_features: list[str] = []
+    lossy_feature_details: dict[str, list[str]] = {}
     pre_scan_uncached: int | None = None
     try:
         xml_info = inspect_workbook_xml(xlsx_path)
         data_table_locs = xml_info["data_tables"]
         pre_scan_uncached = xml_info["uncached_formulas"]
         lossy_features = xml_info.get("lossy_features", [])
+        lossy_feature_details = xml_info.get("lossy_feature_details", {})
     except WorkbookLoadError as exc:
         if is_in_place:
             return _fail(xlsx_path, str(exc), source_file=err_source_file)
@@ -449,6 +474,8 @@ def main(argv: list[str] | None = None) -> int:
             extra_dt: dict = {"data_tables": data_table_locs}
             if lossy_features:
                 extra_dt["lossy_features"] = lossy_features
+            if lossy_feature_details:
+                extra_dt["lossy_feature_details"] = lossy_feature_details
             return _fail(
                 xlsx_path,
                 (
@@ -474,27 +501,30 @@ def main(argv: list[str] | None = None) -> int:
             )
 
     if lossy_features:
-        features_str = ", ".join(lossy_features)
+        feature_summary = _format_lossy_feature_summary(lossy_features, lossy_feature_details)
         if is_in_place:
+            extra_lossy: dict = {"lossy_features": lossy_features}
+            if lossy_feature_details:
+                extra_lossy["lossy_feature_details"] = lossy_feature_details
             return _fail(
                 xlsx_path,
                 (
                     f"Refusing to overwrite '{xlsx_path.name}' in place because it contains "
-                    f"Excel feature(s) that LibreOffice re-export can drop or alter ({features_str}). "
+                    f"Excel feature(s) that LibreOffice re-export can drop or alter ({feature_summary}). "
                     "Use the default non-destructive check (--check-only) for safe read-only "
                     "auditing, or pass --output <new.xlsx> to preserve the original file."
                 ),
                 source_file=err_source_file,
-                extra={"lossy_features": lossy_features},
+                extra=extra_lossy,
             )
         if args.output:
             warnings.append(
                 f"Input workbook contains Excel feature(s) that LibreOffice re-export may drop or "
-                f"alter ({features_str}) in the --output copy (the original input file was left untouched)."
+                f"alter ({feature_summary}) in the --output copy (the original input file was left untouched)."
             )
         elif soffice is not None and is_check_only:
             warnings.append(
-                f"Input workbook contains Excel feature(s) ({features_str}) that LibreOffice "
+                f"Input workbook contains Excel feature(s) ({feature_summary}) that LibreOffice "
                 "re-export can drop or alter; audited in a temporary copy without modifying the input file."
             )
 
@@ -601,6 +631,8 @@ def main(argv: list[str] | None = None) -> int:
         result["data_tables"] = data_table_locs
     if lossy_features:
         result["lossy_features"] = lossy_features
+    if lossy_feature_details:
+        result["lossy_feature_details"] = lossy_feature_details
     if is_check_only:
         result["check_only"] = True
     if not _is_same_file(reported_file, xlsx_path):

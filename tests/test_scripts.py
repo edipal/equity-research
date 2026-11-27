@@ -1842,13 +1842,19 @@ class TestRecalcXlsx(unittest.TestCase):
             )
 
             self.assertEqual(xml_info["lossy_features"], [])
+            self.assertEqual(xml_info["lossy_feature_details"], {})
 
-            # Non-OOXML legacy .xls returns empty data_tables, lossy_features, and uncached_formulas=None
+            # Non-OOXML legacy .xls returns empty data_tables, lossy_features, lossy_feature_details, and uncached_formulas=None
             legacy_xls = Path(tmp) / "legacy.xls"
             legacy_xls.write_bytes(b"not-a-zip-legacy-xls")
             self.assertEqual(
                 xlsx_scan_mod.inspect_workbook_xml(legacy_xls),
-                {"data_tables": [], "uncached_formulas": None, "lossy_features": []},
+                {
+                    "data_tables": [],
+                    "uncached_formulas": None,
+                    "lossy_features": [],
+                    "lossy_feature_details": {},
+                },
             )
 
             # Corrupt .xlsx (non-zip bytes) MUST fail closed with WorkbookLoadError
@@ -2619,6 +2625,267 @@ class TestRecalcXlsx(unittest.TestCase):
             )
             with self.assertRaises(xlsx_scan_mod.WorkbookLoadError):
                 xlsx_scan_mod.inspect_workbook_xml(malformed_rels_path)
+
+    def test_excel_table_allows_double_inplace_while_query_backed_table_remains_flagged(self) -> None:
+        from openpyxl.worksheet.table import Table, TableStyleInfo
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # 1. Standard openpyxl Excel Table (xl/tables/table1.xml) with formulas passes
+            #    recalc_xlsx.py --in-place TWICE with real LibreOffice, preserving table intact.
+            table_path = Path(tmp) / "comps_table.xlsx"
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Comps"
+            ws.append(["Ticker", "Rev", "DoubleRev"])
+            ws.append(["AAA", 100, "=B2*2"])
+            ws.append(["BBB", 200, "=B3*2"])
+            ws.append(["CCC", 300, "=B4*2"])
+            tbl = Table(displayName="Comps", ref="A1:C4")
+            tbl.tableStyleInfo = TableStyleInfo(name="TableStyleMedium9", showRowStripes=True)
+            ws.add_table(tbl)
+            wb.save(table_path)
+            wb.close()
+
+            xml_before = xlsx_scan_mod.inspect_workbook_xml(table_path)
+            self.assertEqual(xml_before["lossy_features"], [])
+            self.assertEqual(xml_before["lossy_feature_details"], {})
+
+            if recalc_xlsx_mod.find_soffice() is not None:
+                for pass_num in (1, 2):
+                    with self.subTest(table_inplace_pass=pass_num):
+                        rc, payload = self._run_main([str(table_path), "30", "--in-place"])
+                        self.assertEqual(rc, 0, payload)
+                        self.assertEqual(payload["status"], "success", payload)
+                        self.assertEqual(payload["mode"], "in_place")
+                        self.assertTrue(payload["recalculated_with_libreoffice"])
+                        self.assertEqual(payload["total_errors"], 0)
+                        self.assertEqual(payload["uncached_formulas"], 0)
+                        self.assertNotIn("lossy_features", payload)
+                        self.assertNotIn("lossy_feature_details", payload)
+                        xml_after = xlsx_scan_mod.inspect_workbook_xml(table_path)
+                        self.assertEqual(xml_after["lossy_features"], [])
+                        self.assertEqual(xml_after["lossy_feature_details"], {})
+
+                with zipfile.ZipFile(table_path, "r") as zf:
+                    self.assertIn("xl/tables/table1.xml", zf.namelist())
+
+                wb_v = openpyxl.load_workbook(table_path, data_only=True)
+                try:
+                    ws_v = wb_v["Comps"]
+                    self.assertIn("Comps", ws_v.tables)
+                    self.assertEqual(ws_v.tables["Comps"].displayName, "Comps")
+                    self.assertEqual(ws_v.tables["Comps"].ref, "A1:C4")
+                    self.assertEqual([ws_v[f"C{r}"].value for r in (2, 3, 4)], [200, 400, 600])
+                finally:
+                    wb_v.close()
+
+            # 2. Query-backed table (xl/tables/table1.xml + xl/tables/_rels/table1.xml.rels +
+            #    xl/queryTables/queryTable1.xml + xl/connections.xml) STILL flags connections_or_power_query
+            #    without flagging xl/tables/ parts.
+            query_table_path = Path(tmp) / "query_backed_table.xlsx"
+            shutil.copyfile(table_path, query_table_path)
+            with zipfile.ZipFile(query_table_path, "r") as zin:
+                entries = {name: zin.read(name) for name in zin.namelist()}
+            entries["xl/tables/_rels/table1.xml.rels"] = (
+                b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>'
+            )
+            entries["xl/queryTables/queryTable1.xml"] = b"<queryTable/>"
+            entries["xl/connections.xml"] = b"<connections/>"
+            with zipfile.ZipFile(query_table_path, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+                for name, data in entries.items():
+                    zout.writestr(name, data)
+
+            xml_qt = xlsx_scan_mod.inspect_workbook_xml(query_table_path)
+            self.assertEqual(xml_qt["lossy_features"], ["connections_or_power_query"])
+            self.assertEqual(
+                xml_qt["lossy_feature_details"],
+                {
+                    "connections_or_power_query": [
+                        "xl/connections.xml",
+                        "xl/queryTables/queryTable1.xml",
+                    ]
+                },
+            )
+
+    def test_lossy_feature_details_exposed_in_refusal_and_warning_json_and_messages(self) -> None:
+        import xml.etree.ElementTree as ET
+
+        def _fake_popen(cmd, **kwargs):
+            outdir = Path(cmd[cmd.index("--outdir") + 1])
+            src_arg = Path(cmd[-1])
+            shutil.copyfile(src_arg, outdir / f"{src_arg.stem}.xlsx")
+            proc = mock.MagicMock()
+            proc.returncode = 0
+            proc.communicate.return_value = ("", "")
+            return proc
+
+        cases = [
+            (
+                "unsupported_part",
+                "unsupported_ooxml_parts",
+                {"xl/webExtensions/webExtension1.xml": b"<webextension/>"},
+                None,
+                {"unsupported_ooxml_parts": ["xl/webExtensions/webExtension1.xml"]},
+                "xl/webExtensions/webExtension1.xml",
+            ),
+            (
+                "x14_cf_ext",
+                "x14_conditional_formatting",
+                {},
+                "{78C0D931-6437-407d-A8EE-F0AAD7539E65}",
+                {
+                    "x14_conditional_formatting": [
+                        "xl/worksheets/sheet1.xml:{78C0D931-6437-407D-A8EE-F0AAD7539E65}"
+                    ]
+                },
+                "xl/worksheets/sheet1.xml:{78C0D931-6437-407D-A8EE-F0AAD7539E65}",
+            ),
+            (
+                "unknown_ext_uri",
+                "worksheet_extensions",
+                {},
+                "{DEADBEEF-0000-0000-0000-000000000000}",
+                {
+                    "worksheet_extensions": [
+                        "xl/worksheets/sheet1.xml:{DEADBEEF-0000-0000-0000-000000000000}"
+                    ]
+                },
+                "xl/worksheets/sheet1.xml:{DEADBEEF-0000-0000-0000-000000000000}",
+            ),
+            (
+                "blank_ext_uri",
+                "worksheet_extensions",
+                {},
+                "   ",
+                {"worksheet_extensions": ["xl/worksheets/sheet1.xml:<missing-uri>"]},
+                "xl/worksheets/sheet1.xml:<missing-uri>",
+            ),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            for label, expected_cat, extra_parts, ext_uri, expected_details, expected_token in cases:
+                with self.subTest(case=label):
+                    fpath = Path(tmp) / f"{label}.xlsx"
+                    out_path = Path(tmp) / f"{label}_out.xlsx"
+                    wb = openpyxl.Workbook()
+                    ws = wb.active
+                    ws["A1"] = 42
+                    wb.save(fpath)
+                    wb.close()
+
+                    with zipfile.ZipFile(fpath, "r") as zin:
+                        entries = {name: zin.read(name) for name in zin.namelist()}
+                    entries.update(extra_parts)
+                    if ext_uri is not None:
+                        ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                        ET.register_namespace("", ns)
+                        root = ET.fromstring(entries["xl/worksheets/sheet1.xml"])
+                        ext_lst = ET.SubElement(root, f"{{{ns}}}extLst")
+                        ET.SubElement(ext_lst, f"{{{ns}}}ext", {"uri": ext_uri})
+                        entries["xl/worksheets/sheet1.xml"] = ET.tostring(
+                            root, encoding="utf-8", xml_declaration=True
+                        )
+                    with zipfile.ZipFile(fpath, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+                        for name, data in entries.items():
+                            zout.writestr(name, data)
+
+                    xml_info = xlsx_scan_mod.inspect_workbook_xml(fpath)
+                    self.assertEqual(xml_info["lossy_features"], [expected_cat])
+                    self.assertEqual(xml_info["lossy_feature_details"], expected_details)
+
+                    # 1. --in-place refusal JSON & message include exact offending part/URI
+                    with (
+                        mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value="/usr/bin/soffice"),
+                        mock.patch.object(recalc_xlsx_mod.subprocess, "Popen") as mock_popen,
+                    ):
+                        rc_ip, payload_ip = self._run_main([str(fpath), "--in-place"])
+                    mock_popen.assert_not_called()
+                    self.assertEqual(rc_ip, 1, payload_ip)
+                    self.assertEqual(payload_ip["status"], "error")
+                    self.assertEqual(payload_ip["lossy_features"], [expected_cat])
+                    self.assertEqual(payload_ip["lossy_feature_details"], expected_details)
+                    self.assertIn(expected_token, payload_ip["message"])
+
+                    # 2. --check-only and --output warning JSON & warning text include exact offending part/URI
+                    with (
+                        mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value="/usr/bin/soffice"),
+                        mock.patch.object(recalc_xlsx_mod.subprocess, "Popen", side_effect=_fake_popen),
+                    ):
+                        rc_chk, payload_chk = self._run_main([str(fpath), "--check-only"])
+                        self.assertEqual(rc_chk, 0, payload_chk)
+                        self.assertEqual(payload_chk["lossy_feature_details"], expected_details)
+                        self.assertIn(expected_token, payload_chk.get("warning", ""))
+
+                        rc_out, payload_out = self._run_main([str(fpath), "--output", str(out_path)])
+                        self.assertEqual(rc_out, 0, payload_out)
+                        self.assertEqual(payload_out["lossy_feature_details"], expected_details)
+                        self.assertIn(expected_token, payload_out.get("warning", ""))
+
+            # 2b. <ext/> with completely omitted uri attribute is also reported as <missing-uri> on --in-place refusal
+            omitted_uri_path = Path(tmp) / "omitted_ext_uri.xlsx"
+            wb_o = openpyxl.Workbook()
+            wb_o.active["A1"] = 1
+            wb_o.save(omitted_uri_path)
+            wb_o.close()
+            with zipfile.ZipFile(omitted_uri_path, "r") as zin:
+                entries = {name: zin.read(name) for name in zin.namelist()}
+            ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+            ET.register_namespace("", ns)
+            root = ET.fromstring(entries["xl/worksheets/sheet1.xml"])
+            ext_lst = ET.SubElement(root, f"{{{ns}}}extLst")
+            ET.SubElement(ext_lst, f"{{{ns}}}ext")
+            entries["xl/worksheets/sheet1.xml"] = ET.tostring(
+                root, encoding="utf-8", xml_declaration=True
+            )
+            with zipfile.ZipFile(omitted_uri_path, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+                for name, data in entries.items():
+                    zout.writestr(name, data)
+            self.assertEqual(
+                xlsx_scan_mod.inspect_workbook_xml(omitted_uri_path)["lossy_feature_details"],
+                {"worksheet_extensions": ["xl/worksheets/sheet1.xml:<missing-uri>"]},
+            )
+            with (
+                mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value="/usr/bin/soffice"),
+                mock.patch.object(recalc_xlsx_mod.subprocess, "Popen") as mock_popen,
+            ):
+                rc_o, payload_o = self._run_main([str(omitted_uri_path), "--in-place"])
+            mock_popen.assert_not_called()
+            self.assertEqual(rc_o, 1, payload_o)
+            self.assertEqual(
+                payload_o["lossy_feature_details"],
+                {"worksheet_extensions": ["xl/worksheets/sheet1.xml:<missing-uri>"]},
+            )
+            self.assertIn("xl/worksheets/sheet1.xml:<missing-uri>", payload_o["message"])
+
+            # 3. Preview truncation caps human-readable text at 5 items while preserving full sorted details in JSON
+            many_path = Path(tmp) / "many_unsupported.xlsx"
+            wb_m = openpyxl.Workbook()
+            wb_m.active["A1"] = 1
+            wb_m.save(many_path)
+            wb_m.close()
+            with zipfile.ZipFile(many_path, "r") as zin:
+                entries = {name: zin.read(name) for name in zin.namelist()}
+            expected_parts = [f"xl/webExtensions/webExtension{i}.xml" for i in range(1, 8)]
+            for part in expected_parts:
+                entries[part] = b"<webextension/>"
+            with zipfile.ZipFile(many_path, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+                for name, data in entries.items():
+                    zout.writestr(name, data)
+
+            with (
+                mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value="/usr/bin/soffice"),
+                mock.patch.object(recalc_xlsx_mod.subprocess, "Popen") as mock_popen,
+            ):
+                rc_m, payload_m = self._run_main([str(many_path), "--in-place"])
+            mock_popen.assert_not_called()
+            self.assertEqual(rc_m, 1, payload_m)
+            self.assertEqual(
+                payload_m["lossy_feature_details"],
+                {"unsupported_ooxml_parts": expected_parts},
+            )
+            self.assertIn("(+2 more)", payload_m["message"])
+            self.assertIn("xl/webExtensions/webExtension1.xml", payload_m["message"])
+            self.assertNotIn("xl/webExtensions/webExtension7.xml", payload_m["message"])
 
 
 @unittest.skipIf(openpyxl is None, "openpyxl is required for DCF validation tests")
@@ -4992,6 +5259,52 @@ class TestValidateDcf(unittest.TestCase):
             self.assertFalse(
                 any("DCF!D2" in e and "DCF!C4" in e for e in res4["errors"]),
                 res4["errors"],
+            )
+
+    def test_custom_scenario_tag_pairs_with_matching_wacc_sheet_row(self) -> None:
+        def _build_upside_wb(path: Path, upside_tg: float, upside_wacc: float, base_wacc: float) -> None:
+            wb = openpyxl.Workbook()
+            ws_dcf = wb.active
+            ws_dcf.title = "DCF"
+            ws_dcf["A2"] = "Upside Case Terminal Growth"
+            ws_dcf["B2"] = upside_tg
+            ws_dcf["A3"] = "Base Case Terminal Growth"
+            ws_dcf["B3"] = 0.025
+            ws_dcf["A6"] = "PV of Terminal Value"
+            ws_dcf["B6"] = 600.0
+            ws_dcf["A7"] = "Enterprise Value"
+            ws_dcf["B7"] = 1000.0
+            ws_dcf["A10"] = "Sensitivity Analysis"
+
+            ws_wacc = wb.create_sheet("WACC")
+            ws_wacc["A2"] = "Upside Case WACC"
+            ws_wacc["B2"] = upside_wacc
+            ws_wacc["A3"] = "Base Case WACC"
+            ws_wacc["B3"] = base_wacc
+            wb.save(path)
+            wb.close()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # 1. Valid custom scenario: Upside TG (11%) < Upside WACC (12%) PASSES even when Base WACC (10%) < 11%
+            valid_path = Path(tmp) / "custom_upside_valid.xlsx"
+            _build_upside_wb(valid_path, upside_tg=0.11, upside_wacc=0.12, base_wacc=0.10)
+            res_ok = validate_dcf_mod.validate_dcf_model(str(valid_path))
+            self.assertEqual(res_ok["status"], "PASS", res_ok)
+            self.assertEqual(res_ok["error_count"], 0, res_ok["errors"])
+            self.assertIn("✓ Terminal growth (11.00% at DCF!B2) < WACC (12.00% at WACC!B2)", res_ok["info"])
+            self.assertIn("✓ Terminal growth (2.50% at DCF!B3) < WACC (10.00% at WACC!B3)", res_ok["info"])
+
+            # 2. Invalid custom scenario: Upside TG (12.5%) >= Upside WACC (12%) FAILS even when Base WACC (15%) > 12.5%
+            invalid_path = Path(tmp) / "custom_upside_invalid.xlsx"
+            _build_upside_wb(invalid_path, upside_tg=0.125, upside_wacc=0.12, base_wacc=0.15)
+            res_bad = validate_dcf_mod.validate_dcf_model(str(invalid_path))
+            self.assertEqual(res_bad["status"], "FAIL", res_bad)
+            self.assertTrue(
+                any(
+                    "Terminal growth (12.50% at DCF!B2) >= WACC (12.00% at WACC!B2)" in e
+                    for e in res_bad["errors"]
+                ),
+                res_bad["errors"],
             )
 
 
