@@ -1833,7 +1833,7 @@ class TestValidateDcf(unittest.TestCase):
                     results["info"],
                 )
 
-    def test_standalone_validate_dcf_outside_repo_emits_graceful_json_fail(self) -> None:
+    def test_standalone_validate_dcf_outside_repo_emits_graceful_json_error(self) -> None:
         with tempfile.TemporaryDirectory(prefix="standalone_dcf_") as tmp:
             isolated_dir = Path(tmp)
             isolated_script = isolated_dir / "validate_dcf.py"
@@ -1856,7 +1856,9 @@ class TestValidateDcf(unittest.TestCase):
             self.assertNotIn("Traceback", proc.stdout + proc.stderr)
 
             payload = json.loads(proc.stdout)
-            self.assertEqual(payload["status"], "FAIL", payload)
+            self.assertEqual(payload["status"], "ERROR", payload)
+            self.assertIn("validation_date", payload)
+            self.assertIn("xlsx_scan", payload.get("error", ""))
             self.assertGreaterEqual(payload["error_count"], 1, payload)
             self.assertEqual(payload["warning_count"], 0, payload)
             self.assertEqual(payload["warnings"], [], payload)
@@ -1869,7 +1871,8 @@ class TestValidateDcf(unittest.TestCase):
             # Programmatic guard when scan_workbook_formulas is unavailable
             with mock.patch.object(validate_dcf_mod, "scan_workbook_formulas", None):
                 prog_res = validate_dcf_mod.validate_dcf_model(str(sample_xlsx))
-            self.assertEqual(prog_res["status"], "FAIL", prog_res)
+            self.assertEqual(prog_res["status"], "ERROR", prog_res)
+            self.assertIn("xlsx_scan", prog_res.get("error", ""))
             self.assertEqual(prog_res["error_count"], 1, prog_res)
             self.assertTrue(any("xlsx_scan" in err for err in prog_res["errors"]), prog_res["errors"])
 

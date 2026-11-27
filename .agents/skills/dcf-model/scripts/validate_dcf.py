@@ -235,11 +235,13 @@ class DCFModelValidator:
         from datetime import datetime
 
         if scan_workbook_formulas is None:
-            self.errors.append(_XLSX_SCAN_IMPORT_ERROR or _MISSING_XLSX_SCAN_MESSAGE)
+            msg = _XLSX_SCAN_IMPORT_ERROR or _MISSING_XLSX_SCAN_MESSAGE
+            self.errors.append(msg)
             return {
                 'file': self.excel_path,
                 'validation_date': datetime.now().isoformat(),
-                'status': 'FAIL',
+                'status': 'ERROR',
+                'error': msg,
                 'error_count': len(self.errors),
                 'warning_count': len(self.warnings),
                 'errors': self.errors,
@@ -605,10 +607,15 @@ def main():
     output_file = sys.argv[2] if len(sys.argv) > 2 else None
 
     if scan_workbook_formulas is None:
+        from datetime import datetime
+
+        msg = _XLSX_SCAN_IMPORT_ERROR or _MISSING_XLSX_SCAN_MESSAGE
         results = {
             'file': excel_file,
-            'status': 'FAIL',
-            'errors': [_XLSX_SCAN_IMPORT_ERROR or _MISSING_XLSX_SCAN_MESSAGE],
+            'validation_date': datetime.now().isoformat(),
+            'status': 'ERROR',
+            'error': msg,
+            'errors': [msg],
             'warnings': [],
             'info': [],
             'error_count': 1,
@@ -628,7 +635,7 @@ def main():
 
         # Save to file if requested
         if output_file:
-            with open(output_file, 'w') as f:
+            with open(output_file, 'w', encoding='utf-8') as f:
                 json.dump(results, f, indent=2)
 
         # Exit with error code if validation failed
