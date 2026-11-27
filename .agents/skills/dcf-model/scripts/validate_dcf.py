@@ -365,15 +365,17 @@ def _lookup_sheet_grid(
     grids_by_sheet: dict[str, Optional[dict[int, dict[int, tuple[Any, str]]]]],
     sheet_title: str,
 ) -> tuple[str, Optional[dict[int, dict[int, tuple[Any, str]]]]]:
-    """Look up a sheet grid by exact title first, falling back to case-insensitive match."""
-    grid = grids_by_sheet.get(sheet_title)
-    if grid is not None:
-        return sheet_title, grid
-    target_lower = sheet_title.lower()
-    for canon_title, candidate_grid in grids_by_sheet.items():
-        if canon_title.lower() == target_lower and candidate_grid is not None:
-            return canon_title, candidate_grid
-    return sheet_title, None
+    """Look up a sheet grid by exact, unescaped-apostrophe, or case-insensitive title match."""
+    unescaped_title = sheet_title.replace("''", "'")
+    for candidate_key in (sheet_title, unescaped_title):
+        grid = grids_by_sheet.get(candidate_key)
+        if grid is not None:
+            return candidate_key, grid
+    for target_lower in (sheet_title.lower(), unescaped_title.lower()):
+        for canon_title, candidate_grid in grids_by_sheet.items():
+            if canon_title.lower() == target_lower and candidate_grid is not None:
+                return canon_title, candidate_grid
+    return unescaped_title, None
 
 
 def _resolve_named_metric(
@@ -407,7 +409,7 @@ def _find_invalid_named_metric(
     aliases: tuple[str, ...],
     grids_by_sheet: dict[str, Optional[dict[int, dict[int, tuple[Any, str]]]]],
 ) -> Optional[tuple[Any, str]]:
-    """Return (raw_value, 'Sheet!Coord') if an explicitly named cell holds a non-numeric value."""
+    """Return (raw_value, 'Sheet!Coord') if an explicitly named cell is empty or non-numeric."""
     for alias in aliases:
         target = defined_names_lower.get(alias)
         if target is None:
@@ -418,7 +420,9 @@ def _find_invalid_named_metric(
             continue
         cell_entry = grid.get(row_idx, {}).get(col_idx)
         if cell_entry is None:
-            continue
+            from openpyxl.utils import get_column_letter
+
+            return (None, f"{canon_title}!{get_column_letter(col_idx)}{row_idx}")
         val, coord = cell_entry
         if not _is_number(val):
             return (val, f"{canon_title}!{coord}")
@@ -444,6 +448,8 @@ class DCFModelValidator:
             raise IsADirectoryError(f"Not a file: {excel_path}")
 
         self._scan: Optional[dict[str, Any]] = None
+        self.uncached_formulas: int = 0
+        self._formula_error_coords: set[str] = set()
         self.sheet_names: list[str] = []
         self._dcf_grid: Optional[dict[int, dict[int, tuple[Any, str]]]] = None
         self._wacc_grid: Optional[dict[int, dict[int, tuple[Any, str]]]] = None
@@ -461,6 +467,9 @@ class DCFModelValidator:
                 capture_sheet_grids=True,
                 capture_defined_names=True,
             )
+            self.uncached_formulas = int(self._scan.get('uncached_formulas', 0))
+            for bucket in self._scan.get('error_summary', {}).values():
+                self._formula_error_coords.update(bucket.get('locations', ()))
             self.sheet_names = list(self._scan.get('sheetnames', []))
             sheet_grids: dict[str, dict[int, dict[int, tuple[Any, str]]]] = self._scan.get(
                 'sheet_grids', {}
@@ -595,9 +604,11 @@ class DCFModelValidator:
         total_errors = scan['total_errors']
         total_formulas = scan['total_formulas']
         uncached_formulas = scan['uncached_formulas']
+        self.uncached_formulas = int(uncached_formulas)
 
         for err_tok, bucket in scan['error_summary'].items():
             for location in bucket['locations']:
+                self._formula_error_coords.add(location)
                 self.errors.append(f"{err_tok} at {location}")
 
         if uncached_formulas > 0:
@@ -615,14 +626,28 @@ class DCFModelValidator:
         else:
             self.info.append(f"Total formula errors: {total_errors}")
 
+    def _all_scenario_tg_named(self) -> bool:
+        return all(
+            s in self._named_scenario_tg or s in self._invalid_named_scenario_tg
+            for s in SCENARIO_NAMES
+        )
+
+    def _all_scenario_wacc_named(self) -> bool:
+        return all(
+            s in self._named_scenario_wacc or s in self._invalid_named_scenario_wacc
+            for s in SCENARIO_NAMES
+        )
+
+    def _has_named_wacc_coverage(self) -> bool:
+        return (
+            'wacc' in self._named_metrics
+            or 'wacc' in self._invalid_named_metrics
+            or self._all_scenario_wacc_named()
+        )
+
     def check_dcf_logic(self):
         """Validate DCF-specific logic and calculations (single rate-row extraction when fallback needed)."""
-        all_scenario_tg_named = all(s in self._named_scenario_tg for s in SCENARIO_NAMES)
-        has_named_wacc_coverage = (
-            'wacc' in self._named_metrics
-            or all(s in self._named_scenario_wacc for s in SCENARIO_NAMES)
-        )
-        use_named_rates_only = all_scenario_tg_named and has_named_wacc_coverage
+        use_named_rates_only = self._all_scenario_tg_named() and self._has_named_wacc_coverage()
 
         dcf_tg_rows: list[tuple[int, int, Optional[str], list[tuple[int, float, str]]]] = []
         dcf_wacc_rows: list[tuple[int, int, Optional[str], list[tuple[int, float, str]]]] = []
@@ -806,12 +831,10 @@ class DCFModelValidator:
                 # Missing DCF sheet is already recorded as an error in check_sheet_structure()
                 return
 
-            all_scenario_tg_named = all(s in self._named_scenario_tg for s in SCENARIO_NAMES)
-            all_scenario_wacc_named = all(s in self._named_scenario_wacc for s in SCENARIO_NAMES)
+            all_scenario_tg_named = self._all_scenario_tg_named()
+            all_scenario_wacc_named = self._all_scenario_wacc_named()
             if use_named_rates_only is None:
-                use_named_rates_only = all_scenario_tg_named and (
-                    'wacc' in self._named_metrics or all_scenario_wacc_named
-                )
+                use_named_rates_only = all_scenario_tg_named and self._has_named_wacc_coverage()
 
             if use_named_rates_only:
                 tg_rows = []
@@ -851,7 +874,7 @@ class DCFModelValidator:
                         seen_wacc_coords.add(w_coord)
                         all_wacc_entries.append((w_val, w_coord))
 
-            # Report any explicitly named terminal growth cells containing non-numeric values
+            # Report any explicitly named terminal growth cells that are empty or non-numeric
             seen_invalid_tg_coords: set[str] = set()
             invalid_tg_items: list[tuple[str, Any, str]] = []
             for scenario in SCENARIO_NAMES:
@@ -865,7 +888,15 @@ class DCFModelValidator:
                 if coord in seen_invalid_tg_coords:
                     continue
                 seen_invalid_tg_coords.add(coord)
-                if not (isinstance(raw_val, str) and raw_val in EXCEL_ERRORS):
+                if isinstance(raw_val, str) and raw_val in EXCEL_ERRORS:
+                    continue
+                if raw_val is None:
+                    if self.uncached_formulas == 0 and coord not in self._formula_error_coords:
+                        self.errors.append(
+                            f"CRITICAL: Named terminal growth ({label} at {coord}) is empty — "
+                            "enter a valid terminal growth rate."
+                        )
+                else:
                     self.errors.append(
                         f"CRITICAL: Named terminal growth ({label} at {coord}) has non-numeric value ({raw_val!r})."
                     )
@@ -910,6 +941,10 @@ class DCFModelValidator:
                 stg = self._named_scenario_tg.get(scenario)
                 if stg is None:
                     continue
+                if scenario in self._invalid_named_scenario_wacc:
+                    # This scenario's own WACC_<Scenario> is invalid/empty and already handled
+                    # in _check_wacc_range(); avoid mis-pairing against another scenario's WACC.
+                    continue
                 sw = self._named_scenario_wacc.get(scenario)
                 if sw is not None:
                     w_val, w_coord = sw[0], sw[1]
@@ -922,8 +957,10 @@ class DCFModelValidator:
                 _add_pair(stg[0], stg[1], w_val, w_coord)
 
             # 2. Active named TerminalGrowth (always paired with active DCF_WACC when defined)
-            if named_tg is not None and (
-                named_wacc is not None or not (all_scenario_tg_named and all_scenario_wacc_named)
+            if (
+                named_tg is not None
+                and 'wacc' not in self._invalid_named_metrics
+                and (named_wacc is not None or not (all_scenario_tg_named and all_scenario_wacc_named))
             ):
                 ntg_val, ntg_coord, _, _, _ = named_tg
                 if ntg_coord not in {p[1] for p in pairs}:
@@ -939,9 +976,10 @@ class DCFModelValidator:
 
             # 3. Label-scan fallback only when full scenario named-range coverage is absent
             if use_named_rates_only:
-                self.info.append(
-                    "✓ Validated scenario Terminal Growth and WACC via workbook named ranges"
-                )
+                if not has_invalid_named_tg and not has_invalid_named_wacc:
+                    self.info.append(
+                        "✓ Validated scenario Terminal Growth and WACC via workbook named ranges"
+                    )
             else:
                 self.info.append(
                     "Using label-scan fallback for rate validation "
@@ -990,8 +1028,8 @@ class DCFModelValidator:
                         f"CRITICAL: Terminal growth ({tg_val:.2%} at {tg_coord}) is <= -100% — "
                         "verify decimal entry (e.g., enter -0.02 for -2%)."
                     )
-                elif w_val <= 0:
-                    # Non-positive WACC is flagged as CRITICAL in _check_wacc_range();
+                elif w_val <= 0 or w_val >= 1.0:
+                    # Non-positive or >= 100% WACC is flagged as CRITICAL in _check_wacc_range();
                     # avoid emitting a misleading pass checkmark against an invalid discount rate.
                     continue
                 elif len(pairs) == 1:
@@ -1017,12 +1055,7 @@ class DCFModelValidator:
                 return
 
             if use_named_rates_only is None:
-                use_named_rates_only = all(
-                    s in self._named_scenario_tg for s in SCENARIO_NAMES
-                ) and (
-                    'wacc' in self._named_metrics
-                    or all(s in self._named_scenario_wacc for s in SCENARIO_NAMES)
-                )
+                use_named_rates_only = self._all_scenario_tg_named() and self._has_named_wacc_coverage()
 
             seen_rounded: set[float] = set()
             wacc_entries: list[tuple[float, str]] = []
@@ -1080,7 +1113,15 @@ class DCFModelValidator:
                 if coord in seen_invalid_wacc_coords:
                     continue
                 seen_invalid_wacc_coords.add(coord)
-                if not (isinstance(raw_val, str) and raw_val in EXCEL_ERRORS):
+                if isinstance(raw_val, str) and raw_val in EXCEL_ERRORS:
+                    continue
+                if raw_val is None:
+                    if self.uncached_formulas == 0 and coord not in self._formula_error_coords:
+                        self.errors.append(
+                            f"CRITICAL: Named WACC ({label} at {coord}) is empty — "
+                            "enter a valid discount rate."
+                        )
+                else:
                     self.errors.append(
                         f"CRITICAL: Named WACC ({label} at {coord}) has non-numeric value ({raw_val!r})."
                     )
@@ -1121,16 +1162,28 @@ class DCFModelValidator:
             if invalid_tv is not None or invalid_ev is not None:
                 if invalid_tv is not None:
                     raw_val, coord = invalid_tv
-                    self.warnings.append(
-                        f"Named PV_TerminalValue at {coord} has non-numeric value ({raw_val!r}) — "
-                        "skipping TV % of EV ratio check."
-                    )
+                    if raw_val is None:
+                        self.warnings.append(
+                            f"Named PV_TerminalValue at {coord} is empty or uncached — "
+                            "skipping TV % of EV ratio check."
+                        )
+                    else:
+                        self.warnings.append(
+                            f"Named PV_TerminalValue at {coord} has non-numeric value ({raw_val!r}) — "
+                            "skipping TV % of EV ratio check."
+                        )
                 if invalid_ev is not None:
                     raw_val, coord = invalid_ev
-                    self.warnings.append(
-                        f"Named EnterpriseValue at {coord} has non-numeric value ({raw_val!r}) — "
-                        "skipping TV % of EV ratio check."
-                    )
+                    if raw_val is None:
+                        self.warnings.append(
+                            f"Named EnterpriseValue at {coord} is empty or uncached — "
+                            "skipping TV % of EV ratio check."
+                        )
+                    else:
+                        self.warnings.append(
+                            f"Named EnterpriseValue at {coord} has non-numeric value ({raw_val!r}) — "
+                            "skipping TV % of EV ratio check."
+                        )
                 return
 
             named_tv = self._named_metrics.get('pv_terminal_value')

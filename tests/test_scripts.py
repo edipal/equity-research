@@ -3789,6 +3789,10 @@ class TestValidateDcf(unittest.TestCase):
                 any("WACC (105.00% at WACC!B3) is >= 100%" in e for e in res_high["errors"]),
                 res_high["errors"],
             )
+            self.assertFalse(
+                any("105.00%" in i for i in res_high["info"]),
+                f"Should not emit pass checkmark against >= 100% WACC: {res_high['info']}",
+            )
 
             # 3. Extreme negative TerminalGrowth_Bull (-2.5 = -250%) -> FAIL
             p_neg_tg = Path(tmp) / "neg_tg.xlsx"
@@ -3820,6 +3824,10 @@ class TestValidateDcf(unittest.TestCase):
                     self.assertTrue(
                         any("non-numeric value" in e and "WACC!B3" in e for e in res_bw["errors"]),
                         res_bw["errors"],
+                    )
+                    self.assertFalse(
+                        any("DCF!B3" in i for i in res_bw["info"]),
+                        f"Should not cross-pair Bull TG against another scenario's WACC: {res_bw['info']}",
                     )
 
             # 5. Non-positive or non-numeric named PV_TerminalValue / EnterpriseValue (including partial naming)
@@ -3901,6 +3909,231 @@ class TestValidateDcf(unittest.TestCase):
                 {"WACC": {10: {4: (0.095, "D10")}}},
             )
             self.assertEqual(direct, (0.095, "WACC!D10", "WACC", 10, 4))
+
+    def test_defined_name_escaped_apostrophe_sheet_title_resolves_and_catches_invalid_rate(self) -> None:
+        from openpyxl.utils import quote_sheetname
+        from openpyxl.workbook.defined_name import DefinedName
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "apostrophe_sheet_defined_names.xlsx"
+            wb = openpyxl.Workbook()
+            ws_dcf = wb.active
+            ws_dcf.title = "DCF"
+            ws_dcf["A1"] = "Row 1"
+            ws_dcf["B2"] = 0.02
+            ws_dcf["B3"] = 0.025
+            ws_dcf["B4"] = 600.0
+            ws_dcf["B5"] = 1000.0
+            ws_dcf["A10"] = "Sensitivity Analysis"
+
+            ws_wacc = wb.create_sheet("WACC")
+            ws_wacc["D10"] = 0.095
+
+            ws_apostrophe = wb.create_sheet("Company's Model")
+            ws_apostrophe["C7"] = 0.03
+
+            # Verify openpyxl's own escaping rule produces doubled apostrophes
+            self.assertEqual(quote_sheetname("Company's Model"), "'Company''s Model'")
+
+            # Reference "Company's Model" using OOXML doubled-apostrophe escaping AND lowercase
+            wb.defined_names["DCF_WACC"] = DefinedName("DCF_WACC", attr_text="WACC!$D$10")
+            wb.defined_names["TerminalGrowth_Bear"] = DefinedName("TerminalGrowth_Bear", attr_text="DCF!$B$2")
+            wb.defined_names["TerminalGrowth_Base"] = DefinedName("TerminalGrowth_Base", attr_text="DCF!$B$3")
+            wb.defined_names["TerminalGrowth_Bull"] = DefinedName(
+                "TerminalGrowth_Bull", attr_text="'company''s model'!$C$7"
+            )
+            wb.defined_names["PV_TerminalValue"] = DefinedName("PV_TerminalValue", attr_text="DCF!$B$4")
+            wb.defined_names["EnterpriseValue"] = DefinedName("EnterpriseValue", attr_text="DCF!$B$5")
+            wb.save(path)
+            wb.close()
+
+            # 1. scan_workbook_formulas unescapes '' -> ' and captures "Company's Model" grid
+            scan = xlsx_scan_mod.scan_workbook_formulas(
+                path, capture_sheet_grids=True, capture_defined_names=True
+            )
+            self.assertEqual(scan["defined_names"]["TerminalGrowth_Bull"], ("Company's Model", 7, 3))
+            self.assertIn("Company's Model", scan["sheet_grids"])
+            self.assertEqual(scan["sheet_grids"]["Company's Model"][7][3], (0.03, "C7"))
+
+            # 2. Valid rate on "Company's Model" resolves and passes cleanly
+            res_ok = validate_dcf_mod.validate_dcf_model(str(path))
+            self.assertEqual(res_ok["status"], "PASS", res_ok)
+            self.assertEqual(res_ok["error_count"], 0, res_ok["errors"])
+            self.assertEqual(res_ok["warning_count"], 0, res_ok["warnings"])
+
+            # 3. Invalid TerminalGrowth_Bull = 0.99 (99% >= WACC 9.5%) on "Company's Model" MUST FAIL
+            wb_bad = openpyxl.load_workbook(path)
+            wb_bad["Company's Model"]["C7"] = 0.99
+            wb_bad.save(path)
+            wb_bad.close()
+
+            res_bad = validate_dcf_mod.validate_dcf_model(str(path))
+            self.assertEqual(res_bad["status"], "FAIL", res_bad)
+            self.assertTrue(
+                any(
+                    "Terminal growth (99.00% at Company's Model!C7) >= WACC (9.50% at WACC!D10)" in e
+                    for e in res_bad["errors"]
+                ),
+                res_bad["errors"],
+            )
+
+            # 4. Defense-in-depth check on _lookup_sheet_grid / _resolve_named_metric / _find_invalid_named_metric
+            direct_val = validate_dcf_mod._resolve_named_metric(
+                {"terminalgrowth_bull": ("company''s model", 7, 3)},
+                validate_dcf_mod.NAMED_SCENARIO_TG_ALIASES["bull"],
+                {"Company's Model": {7: {3: (0.03, "C7")}}},
+            )
+            self.assertEqual(direct_val, (0.03, "Company's Model!C7", "Company's Model", 7, 3))
+
+            direct_empty = validate_dcf_mod._find_invalid_named_metric(
+                {"terminalgrowth_bull": ("company''s model", 7, 3)},
+                validate_dcf_mod.NAMED_SCENARIO_TG_ALIASES["bull"],
+                {"Company's Model": {}},
+            )
+            self.assertEqual(direct_empty, (None, "Company's Model!C7"))
+
+    def test_cleared_empty_named_cells_caught_without_mis_pairing_or_uncached_noise(self) -> None:
+        from openpyxl.workbook.defined_name import DefinedName
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # 1. Cleared TerminalGrowth_Bull (None) on recalculated skeleton (Case = 2) -> FAIL with explicit empty error
+            if recalc_xlsx_mod.find_soffice() is not None:
+                skel_path = Path(tmp) / "skeleton_cleared_bull_tg.xlsx"
+                build_proc = subprocess.run(
+                    [sys.executable, str(BUILD_DCF_SKELETON_PATH), "--output", str(skel_path), "--case", "2"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(build_proc.returncode, 0, build_proc.stdout + build_proc.stderr)
+
+                # First check unrecalculated skeleton (uncached_formulas > 0): must FAIL on uncached formulas
+                # WITHOUT emitting spurious "is empty" errors for formula-driven named cells
+                res_uncached = validate_dcf_mod.validate_dcf_model(str(skel_path))
+                self.assertEqual(res_uncached["status"], "FAIL", res_uncached)
+                self.assertTrue(
+                    any("Uncached formula values detected" in e for e in res_uncached["errors"]),
+                    res_uncached["errors"],
+                )
+                self.assertFalse(
+                    any("is empty" in e for e in res_uncached["errors"]),
+                    f"Spurious empty-named-cell error on uncached workbook: {res_uncached['errors']}",
+                )
+
+                # Clear DCF!C57 (TerminalGrowth_Bull) and recalculate with LibreOffice
+                wb_clr = openpyxl.load_workbook(skel_path)
+                wb_clr["DCF"]["C57"] = None
+                wb_clr.save(skel_path)
+                wb_clr.close()
+
+                recalc_proc = subprocess.run(
+                    [sys.executable, str(RECALC_XLSX_PATH), str(skel_path), "30", "--in-place"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(recalc_proc.returncode, 0, recalc_proc.stdout + recalc_proc.stderr)
+
+                res_clr = validate_dcf_mod.validate_dcf_model(str(skel_path))
+                self.assertEqual(res_clr["status"], "FAIL", res_clr)
+                self.assertTrue(
+                    any(
+                        "Named terminal growth (Bull at DCF!C57) is empty" in e
+                        for e in res_clr["errors"]
+                    ),
+                    res_clr["errors"],
+                )
+
+            # 2. Cleared PV_TerminalValue (None) alongside valid EnterpriseValue (1000) and Exit Multiple TV (2500)
+            #    must warn cleanly and NEVER mis-pair Exit Multiple TV (250.0% of EV)
+            p_empty_tv = Path(tmp) / "empty_pv_tv.xlsx"
+            wb_tv = openpyxl.Workbook()
+            ws_dcf = wb_tv.active
+            ws_dcf.title = "DCF"
+            ws_dcf["A1"] = "Bear TG"
+            ws_dcf["B1"] = 0.02
+            ws_dcf["A2"] = "Base TG"
+            ws_dcf["B2"] = 0.025
+            ws_dcf["A3"] = "Bull TG"
+            ws_dcf["B3"] = 0.03
+            ws_dcf["A4"] = "PV of Terminal Value"
+            ws_dcf["B4"] = None
+            ws_dcf["A5"] = "Enterprise Value"
+            ws_dcf["B5"] = 1000.0
+            ws_dcf["A8"] = "PV of Exit Multiple TV"
+            ws_dcf["B8"] = 2500.0
+            ws_dcf["A12"] = "Sensitivity Analysis"
+
+            ws_wacc = wb_tv.create_sheet("WACC")
+            ws_wacc["A1"] = "Bear WACC"
+            ws_wacc["B1"] = 0.11
+            ws_wacc["A2"] = "Base WACC"
+            ws_wacc["B2"] = 0.09
+            ws_wacc["A3"] = "Bull WACC"
+            ws_wacc["B3"] = 0.08
+
+            wb_tv.defined_names["TerminalGrowth_Bear"] = DefinedName("TerminalGrowth_Bear", attr_text="DCF!$B$1")
+            wb_tv.defined_names["TerminalGrowth_Base"] = DefinedName("TerminalGrowth_Base", attr_text="DCF!$B$2")
+            wb_tv.defined_names["TerminalGrowth_Bull"] = DefinedName("TerminalGrowth_Bull", attr_text="DCF!$B$3")
+            wb_tv.defined_names["WACC_Bear"] = DefinedName("WACC_Bear", attr_text="WACC!$B$1")
+            wb_tv.defined_names["WACC_Base"] = DefinedName("WACC_Base", attr_text="WACC!$B$2")
+            wb_tv.defined_names["WACC_Bull"] = DefinedName("WACC_Bull", attr_text="WACC!$B$3")
+            wb_tv.defined_names["PV_TerminalValue"] = DefinedName("PV_TerminalValue", attr_text="DCF!$B$4")
+            wb_tv.defined_names["EnterpriseValue"] = DefinedName("EnterpriseValue", attr_text="DCF!$B$5")
+            wb_tv.save(p_empty_tv)
+            wb_tv.close()
+
+            res_tv = validate_dcf_mod.validate_dcf_model(str(p_empty_tv))
+            self.assertEqual(res_tv["status"], "PASS", res_tv)
+            self.assertTrue(
+                any(
+                    "Named PV_TerminalValue at DCF!B4 is empty or uncached" in w
+                    for w in res_tv["warnings"]
+                ),
+                res_tv["warnings"],
+            )
+            self.assertFalse(
+                any("typically should be 50-70%" in w or "250.0%" in w for w in res_tv["warnings"]),
+                f"Bogus Exit Multiple TV mis-pairing warning emitted: {res_tv['warnings']}",
+            )
+
+            # 3. Cleared WACC_Bull (None) -> FAIL with explicit empty WACC error and no cross-scenario pairing
+            p_empty_wacc = Path(tmp) / "empty_wacc_bull.xlsx"
+            shutil.copyfile(p_empty_tv, p_empty_wacc)
+            wb_ew = openpyxl.load_workbook(p_empty_wacc)
+            wb_ew["DCF"]["B4"] = 600.0
+            wb_ew["WACC"]["B3"] = None
+            wb_ew.save(p_empty_wacc)
+            wb_ew.close()
+
+            res_ew = validate_dcf_mod.validate_dcf_model(str(p_empty_wacc))
+            self.assertEqual(res_ew["status"], "FAIL", res_ew)
+            self.assertTrue(
+                any("Named WACC (Bull at WACC!B3) is empty" in e for e in res_ew["errors"]),
+                res_ew["errors"],
+            )
+            self.assertFalse(
+                any("DCF!B3" in i for i in res_ew["info"]),
+                f"Should not cross-pair Bull TG against another scenario's WACC: {res_ew['info']}",
+            )
+
+            # 4. Named cell targeting nonexistent sheet (grid is None) -> no crash; formula error -> no duplicate
+            p_missing_and_err = Path(tmp) / "missing_sheet_and_err.xlsx"
+            shutil.copyfile(p_empty_tv, p_missing_and_err)
+            wb_me = openpyxl.load_workbook(p_missing_and_err)
+            wb_me["DCF"]["B4"] = 600.0
+            wb_me["DCF"]["B3"] = "#DIV/0!"
+            wb_me.defined_names["DCF_WACC"] = DefinedName("DCF_WACC", attr_text="'Deleted Sheet'!$A$1")
+            wb_me.save(p_missing_and_err)
+            wb_me.close()
+
+            res_me = validate_dcf_mod.validate_dcf_model(str(p_missing_and_err))
+            self.assertEqual(res_me["status"], "FAIL", res_me)
+            self.assertTrue(any("#DIV/0! at DCF!B3" in e for e in res_me["errors"]), res_me["errors"])
+            self.assertFalse(
+                any("DCF!B3" in e and ("non-numeric" in e or "is empty" in e) for e in res_me["errors"]),
+                f"Duplicate non-numeric/empty error emitted for formula error cell: {res_me['errors']}",
+            )
 
 
 @unittest.skipIf(openpyxl is None, "openpyxl is required for DCF skeleton tests")

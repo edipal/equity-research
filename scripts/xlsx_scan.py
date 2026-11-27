@@ -360,7 +360,12 @@ def scan_workbook_formulas(
                         r_idx, c_idx = coordinate_to_tuple(ref_clean)
                     except Exception:
                         continue
-                    canon_title = title_by_lower.get(sheet_title.lower(), sheet_title)
+                    unescaped_title = sheet_title.replace("''", "'")
+                    canon_title = (
+                        title_by_lower.get(unescaped_title.lower())
+                        or title_by_lower.get(sheet_title.lower())
+                        or unescaped_title
+                    )
                     defined_names_map[dn_name] = (canon_title, r_idx, c_idx)
                     extra_grid_sheets_lower.add(canon_title.lower())
                     break
