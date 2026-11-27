@@ -10,6 +10,10 @@ matplotlib>=3.8.0
 seaborn>=0.13.0
 Pillow>=10.2.0
 
+# Harness validation & PDF QA
+pyyaml>=6.0
+pypdf>=4.0.0
+
 # Public market & filing data helpers
 requests>=2.31.0
 yfinance>=0.2.40

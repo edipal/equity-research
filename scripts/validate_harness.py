@@ -11,6 +11,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 try:
     import yaml  # type: ignore
@@ -23,6 +24,7 @@ KEBAB_RE = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 VALID_TRIGGERS = {"always_on", "model_decision", "glob", "manual"}
 VALID_MODELS = {"inherit", "flash", "pro"}
 VALID_CMD_POLICIES = {"off", "auto", "eager", "sandbox"}
+ALLOWED_RULE_KEYS = {"trigger", "description", "globs", "glob"}
 ALLOWED_AGENT_KEYS = {
     "name",
     "description",
@@ -64,6 +66,38 @@ MD_LINK_RE = re.compile(r"(?<!!)\[[^\]]+\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 CODE_SPAN_RE = re.compile(r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)")
 
 
+def _strip_inline_comment(raw_val: str) -> str:
+    """Strip YAML inline comments (# preceded by whitespace outside quotes) consistently with PyYAML."""
+    in_single = False
+    in_double = False
+    escaped = False
+    for idx, ch in enumerate(raw_val):
+        if escaped:
+            escaped = False
+            continue
+        if in_double:
+            if ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_double = False
+            continue
+        if in_single:
+            if ch == "'":
+                # YAML escapes single quotes inside single-quoted scalars via ''
+                if idx + 1 < len(raw_val) and raw_val[idx + 1] == "'":
+                    escaped = True
+                else:
+                    in_single = False
+            continue
+        if ch == '"':
+            in_double = True
+        elif ch == "'":
+            in_single = True
+        elif ch == "#" and (idx == 0 or raw_val[idx - 1] in (" ", "\t")):
+            return raw_val[:idx].rstrip()
+    return raw_val.rstrip()
+
+
 def _strip_matching_quotes(raw_val: str, rel_path: str, line_no: int, errors: list[str]) -> str:
     if len(raw_val) >= 1 and raw_val[0] in ("'", '"'):
         quote = raw_val[0]
@@ -75,6 +109,7 @@ def _strip_matching_quotes(raw_val: str, rel_path: str, line_no: int, errors: li
 
 
 def _parse_scalar_fallback(raw_val: str, rel_path: str, line_no: int, errors: list[str]) -> Any:
+    raw_val = _strip_inline_comment(raw_val).strip()
     if not raw_val:
         return ""
     if raw_val[0] in ("'", '"'):
@@ -121,7 +156,7 @@ def _parse_yaml_fallback(raw_fm: str, rel_path: str) -> tuple[dict[str, Any], li
                 errors.append(f"{rel_path}: frontmatter line {idx}: invalid key syntax ({line.strip()!r})")
                 continue
             key = key_match.group(1).strip()
-            raw_val = key_match.group(2).strip()
+            raw_val = _strip_inline_comment(key_match.group(2).strip()).strip()
             if raw_val in ("|", ">", "|-", ">-"):
                 data[key] = ""
             elif raw_val == "":
@@ -145,8 +180,9 @@ def _parse_yaml_fallback(raw_fm: str, rel_path: str) -> tuple[dict[str, Any], li
                         f"{rel_path}: frontmatter line {idx}: invalid continuation inside list"
                     )
                 else:
+                    cleaned_cont = _strip_inline_comment(stripped).strip()
                     prev = str(data[current_key])
-                    data[current_key] = f"{prev} {stripped}".strip() if prev else stripped
+                    data[current_key] = f"{prev} {cleaned_cont}".strip() if prev else cleaned_cont
 
     return data, errors
 
@@ -206,6 +242,7 @@ def _iter_markdown_links(text: str) -> list[tuple[int, str]]:
 def validate_markdown_links(root: Path) -> list[str]:
     """Validate relative markdown links in AGENTS.md, README.md, research/README.md, docs/*.md, and .agents/."""
     errors: list[str] = []
+    root_resolved = root.resolve()
     md_files: list[Path] = []
     for top_file in ("AGENTS.md", "README.md", "research/README.md"):
         p = root / top_file
@@ -232,10 +269,22 @@ def validate_markdown_links(root: Path) -> list[str]:
                 or any(tok in target for tok in ("<", ">", "[", "]", "{", "}", "..."))
             ):
                 continue
-            path_part = target.split("#", 1)[0].split("?", 1)[0]
+            path_part = unquote(target.split("#", 1)[0].split("?", 1)[0])
             if not path_part:
                 continue
+            if path_part.startswith("/") or Path(path_part).is_absolute():
+                errors.append(
+                    f"{rel_md}:{line_no}: absolute filesystem path not allowed in markdown link '{raw_target}'"
+                )
+                continue
             resolved = (md_path.parent / path_part).resolve()
+            try:
+                resolved.relative_to(root_resolved)
+            except ValueError:
+                errors.append(
+                    f"{rel_md}:{line_no}: markdown link escapes repository root '{raw_target}'"
+                )
+                continue
             if not resolved.exists():
                 errors.append(f"{rel_md}:{line_no}: broken relative link '{raw_target}'")
     return errors
@@ -274,15 +323,26 @@ def validate_harness(root: Path = ROOT) -> tuple[list[str], list[str], dict[str,
             )
         fm, body, fm_errs = parse_frontmatter(rf, root=root)
         errors.extend(fm_errs)
-        trigger = fm.get("trigger", "")
-        if trigger not in VALID_TRIGGERS:
+        unknown_rule_keys = sorted(set(fm.keys()) - ALLOWED_RULE_KEYS)
+        if unknown_rule_keys:
             errors.append(
-                f"{rf.relative_to(root)}: invalid trigger '{trigger}' (expected one of {sorted(VALID_TRIGGERS)})"
+                f"{rf.relative_to(root)}: unsupported rule frontmatter key(s): {', '.join(unknown_rule_keys)}"
             )
+        raw_trigger = fm.get("trigger", "")
+        if not isinstance(raw_trigger, str) or raw_trigger not in VALID_TRIGGERS:
+            errors.append(
+                f"{rf.relative_to(root)}: invalid trigger {raw_trigger!r} "
+                f"(expected one of {sorted(VALID_TRIGGERS)})"
+            )
+            trigger = ""
+        else:
+            trigger = raw_trigger
         if trigger == "always_on":
             always_on_bytes += rf_size
-        if trigger == "model_decision" and not fm.get("description"):
-            errors.append(f"{rf.relative_to(root)}: model_decision rule requires 'description'")
+        if trigger == "model_decision":
+            desc = fm.get("description")
+            if not isinstance(desc, str) or not desc.strip():
+                errors.append(f"{rf.relative_to(root)}: model_decision rule requires 'description'")
         if trigger == "glob":
             globs = fm.get("globs") if "globs" in fm else fm.get("glob")
             if not globs:
@@ -290,6 +350,10 @@ def validate_harness(root: Path = ROOT) -> tuple[list[str], list[str], dict[str,
             elif isinstance(globs, list):
                 errors.append(
                     f"{rf.relative_to(root)}: 'globs' must be a comma-separated string, not a YAML array"
+                )
+            elif not isinstance(globs, str):
+                errors.append(
+                    f"{rf.relative_to(root)}: 'globs' must be a string, got {type(globs).__name__}"
                 )
         if not body:
             errors.append(f"{rf.relative_to(root)}: empty rule body")
@@ -312,11 +376,13 @@ def validate_harness(root: Path = ROOT) -> tuple[list[str], list[str], dict[str,
             continue
         fm, body, fm_errs = parse_frontmatter(skill_md, root=root)
         errors.extend(fm_errs)
-        name = str(fm.get("name", "")) if fm.get("name") is not None else ""
-        desc = str(fm.get("description", "")) if fm.get("description") is not None else ""
+        raw_name = fm.get("name", "")
+        raw_desc = fm.get("description", "")
+        name = raw_name if isinstance(raw_name, str) else ""
+        desc = raw_desc if isinstance(raw_desc, str) else ""
         if not name or not KEBAB_RE.match(name) or len(name) > 64:
             errors.append(
-                f"{skill_md.relative_to(root)}: invalid skill name '{name}' "
+                f"{skill_md.relative_to(root)}: invalid skill name '{raw_name}' "
                 "(must start with a lowercase letter and use kebab-case)"
             )
         if name and name != sd.name:
@@ -341,21 +407,28 @@ def validate_harness(root: Path = ROOT) -> tuple[list[str], list[str], dict[str,
             errors.append(
                 f"{af.relative_to(root)}: unsupported custom agent frontmatter key(s): {', '.join(unknown_keys)}"
             )
-        name = str(fm.get("name", "")) if fm.get("name") is not None else ""
+        raw_name = fm.get("name", "")
+        name = raw_name if isinstance(raw_name, str) else ""
         if not name or not KEBAB_RE.match(name):
-            errors.append(f"{af.relative_to(root)}: invalid agent name '{name}'")
+            errors.append(f"{af.relative_to(root)}: invalid agent name '{raw_name}'")
         if name and name != af.stem:
             errors.append(f"{af.relative_to(root)}: agent name '{name}' != filename stem '{af.stem}'")
-        if not fm.get("description"):
+        raw_desc = fm.get("description")
+        if not isinstance(raw_desc, str) or not raw_desc.strip():
             errors.append(f"{af.relative_to(root)}: missing description")
-        model = str(fm.get("model", "inherit"))
-        if model not in VALID_MODELS:
+        for bool_key in ("mainAgent", "subagent"):
+            if bool_key in fm and not isinstance(fm[bool_key], bool):
+                errors.append(
+                    f"{af.relative_to(root)}: '{bool_key}' must be a boolean (true/false), got {fm[bool_key]!r}"
+                )
+        raw_model = fm.get("model", "inherit")
+        if not isinstance(raw_model, str) or raw_model not in VALID_MODELS:
             errors.append(
-                f"{af.relative_to(root)}: invalid model '{model}' (expected one of {sorted(VALID_MODELS)})"
+                f"{af.relative_to(root)}: invalid model '{raw_model}' (expected one of {sorted(VALID_MODELS)})"
             )
-        policy = str(fm.get("commandExecutionPolicy", "sandbox"))
-        if policy not in VALID_CMD_POLICIES:
-            errors.append(f"{af.relative_to(root)}: invalid commandExecutionPolicy '{policy}'")
+        raw_policy = fm.get("commandExecutionPolicy", "sandbox")
+        if not isinstance(raw_policy, str) or raw_policy not in VALID_CMD_POLICIES:
+            errors.append(f"{af.relative_to(root)}: invalid commandExecutionPolicy '{raw_policy}'")
         if not body:
             errors.append(f"{af.relative_to(root)}: empty agent system prompt")
 
@@ -378,8 +451,14 @@ def validate_harness(root: Path = ROOT) -> tuple[list[str], list[str], dict[str,
     if mcp_example.exists():
         try:
             parsed = json.loads(mcp_example.read_text(encoding="utf-8"))
-            if "mcpServers" not in parsed or not isinstance(parsed["mcpServers"], dict):
-                errors.append("config/mcp_config.example.json missing 'mcpServers' object")
+            if (
+                not isinstance(parsed, dict)
+                or "mcpServers" not in parsed
+                or not isinstance(parsed["mcpServers"], dict)
+            ):
+                errors.append(
+                    "config/mcp_config.example.json must be a JSON object containing a 'mcpServers' object"
+                )
             else:
                 for srv_name, srv_cfg in parsed["mcpServers"].items():
                     if not isinstance(srv_cfg, dict):
@@ -387,11 +466,19 @@ def validate_harness(root: Path = ROOT) -> tuple[list[str], list[str], dict[str,
                             f"config/mcp_config.example.json: server '{srv_name}' must be a JSON object"
                         )
                         continue
-                    has_endpoint = any(
+                    has_remote = any(
                         isinstance(srv_cfg.get(k), str) and srv_cfg.get(k).strip()
-                        for k in ("serverUrl", "url", "command")
+                        for k in ("serverUrl", "url")
                     )
-                    if not has_endpoint:
+                    has_local = isinstance(srv_cfg.get("command"), str) and bool(
+                        srv_cfg.get("command").strip()
+                    )
+                    if has_remote and has_local:
+                        errors.append(
+                            f"config/mcp_config.example.json: server '{srv_name}' must not specify both "
+                            "'command' and 'serverUrl'/'url'"
+                        )
+                    elif not has_remote and not has_local:
                         errors.append(
                             f"config/mcp_config.example.json: server '{srv_name}' must define 'serverUrl', 'url', or 'command'"
                         )

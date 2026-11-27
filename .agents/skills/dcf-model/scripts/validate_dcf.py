@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/financial-analysis/skills/dcf-model/scripts/validate_dcf.py), Apache-2.0; modified for Google Antigravity.
 """
 DCF Model Validation Script
 Validates Excel DCF models for formula errors and common DCF mistakes
@@ -15,6 +16,31 @@ STRING_LITERAL_RE = re.compile(r'"(?:""|[^"])*"')
 SENSITIVITY_VS_RE = re.compile(r'\bvs\.?\b')
 OF_EV_RE = re.compile(r'\bof\s+ev\b')
 EBIT_RE = re.compile(r'\bebit\b')
+WACC_TOKEN_RE = re.compile(r'\bwacc\b')
+WACC_EXCLUDE_WORDS_RE = re.compile(
+    r'\b('
+    r'weight|weights|weighting|factor|factors|table|tables|sensitivity|'
+    r'vs|versus|spread|change|delta|assumption|assumptions|input|inputs|'
+    r'target|beta|debt|equity|build|calculation|summary|schedule|note|notes|header|section'
+    r')\b'
+)
+GENUINE_WACC_CORES = frozenset({
+    'wacc',
+    'weighted average cost of capital',
+    'discount rate',
+    'base wacc',
+    'base case wacc',
+    'bear wacc',
+    'bear case wacc',
+    'bull wacc',
+    'bull case wacc',
+    'calculated wacc',
+    'active wacc',
+    'effective wacc',
+    'blended wacc',
+    'implied wacc',
+    'model wacc',
+})
 RATIO_OR_MULTIPLE_TOKENS = (
     '%',
     '/',
@@ -45,12 +71,18 @@ def _extract_formula_text(value) -> Optional[str]:
     return None
 
 
+SENSITIVITY_AXIS_RE = re.compile(
+    r'\bwacc\s*(?:[/\\×]|by)\s*(?:terminal\s*)?(?:growth|g)\b'
+    r'|\b(?:terminal\s*)?(?:growth|g)\s*(?:[/\\×]|by)\s*wacc\b'
+)
+
+
 def _is_sensitivity_header(text: str) -> bool:
-    """Return True if a label belongs to a sensitivity table header rather than a model assumption."""
+    """Return True if a label belongs to a sensitivity table header rather than a model note or assumption."""
     low = text.lower()
     if 'sensitivity' in low:
         return True
-    if 'wacc' in low and 'growth' in low:
+    if SENSITIVITY_AXIS_RE.search(low):
         return True
     if SENSITIVITY_VS_RE.search(low) and any(
         kw in low for kw in ('wacc', 'growth', 'margin', 'beta', 'multiple', 'discount')
@@ -60,15 +92,36 @@ def _is_sensitivity_header(text: str) -> bool:
 
 
 def _is_wacc_label(text: str) -> bool:
-    low = text.lower()
-    if _is_sensitivity_header(low):
+    """Match genuine WACC value labels while excluding weights, factors, headers, and sensitivity rows."""
+    low = ' '.join(text.lower().strip().split())
+    if not low or _is_sensitivity_header(low):
         return False
-    return 'wacc' in low or 'weighted average cost of capital' in low
+
+    is_full_phrase = 'weighted average cost of capital' in low
+    has_wacc_token = bool(WACC_TOKEN_RE.search(low))
+    if not is_full_phrase and not has_wacc_token:
+        return False
+
+    # Exclude non-WACC labels such as "Equity weight in WACC", "Debt weight in WACC",
+    # "WACC discount factor", "WACC Build", "WACC Spread", etc.
+    # Note: word boundary \bweight\b does NOT match "weighted" in "weighted average cost of capital".
+    if WACC_EXCLUDE_WORDS_RE.search(low):
+        return False
+
+    # Strip parenthetical qualifiers like "(%)", "(WACC)", "(Discount Rate)" and trailing colon
+    core = re.sub(r'\s*\([^)]*\)', '', low).rstrip(':').strip()
+    if core in GENUINE_WACC_CORES:
+        return True
+    if is_full_phrase and len(core.split()) <= 7:
+        return True
+    return False
 
 
 def _is_terminal_growth_label(text: str) -> bool:
-    low = text.lower()
-    if _is_sensitivity_header(low):
+    low = ' '.join(text.lower().strip().split())
+    if not low or _is_sensitivity_header(low):
+        return False
+    if any(kw in low for kw in ('spread', 'table', 'note', 'check')):
         return False
     return 'terminal' in low and 'growth' in low
 
@@ -165,7 +218,7 @@ class DCFModelValidator:
 
         for sheet in required_sheets:
             if sheet not in sheet_names:
-                self.warnings.append(f"Recommended sheet missing: {sheet}")
+                self.errors.append(f"Required sheet missing: {sheet}")
             else:
                 self.info.append(f"Found sheet: {sheet}")
 
@@ -304,7 +357,7 @@ class DCFModelValidator:
         try:
             dcf_sheet = self._get_worksheet(self.workbook_values, 'DCF')
             if dcf_sheet is None:
-                self.warnings.append("DCF sheet not found")
+                # Missing DCF sheet is already recorded as an error in check_sheet_structure()
                 return
             tg_rows, wacc_rows = self._extract_rate_rows(dcf_sheet)
 
@@ -314,8 +367,11 @@ class DCFModelValidator:
                 if wacc_sheet is not None:
                     _, wacc_rows = self._extract_rate_rows(wacc_sheet)
 
+            if not tg_rows:
+                self.errors.append("Could not locate terminal growth rate on DCF sheet")
+            if not wacc_rows:
+                self.errors.append("Could not locate WACC value on DCF or WACC sheet")
             if not tg_rows or not wacc_rows:
-                self.warnings.append("Could not locate terminal growth and WACC values")
                 return
 
             pairs = []
@@ -354,48 +410,50 @@ class DCFModelValidator:
                         f"✓ Terminal growth ({tg_val:.2%} at {tg_coord}) < WACC ({w_val:.2%} at {w_coord})"
                     )
 
-        except KeyError:
-            self.warnings.append("DCF sheet not found")
         except Exception as e:
-            self.warnings.append(f"Could not validate terminal growth vs WACC: {str(e)}")
+            self.errors.append(f"Could not validate terminal growth vs WACC: {str(e)}")
 
     def _check_wacc_range(self):
-        """Check if WACC is in reasonable range"""
+        """Check if WACC is in reasonable range across both WACC and DCF sheets (deduplicated)."""
         try:
-            wacc_sheet = (
-                self._get_worksheet(self.workbook_values, 'WACC')
-                or self._get_worksheet(self.workbook_values, 'DCF')
-            )
-            if wacc_sheet is None:
-                self.warnings.append("WACC and DCF sheets not found")
+            wacc_sheet = self._get_worksheet(self.workbook_values, 'WACC')
+            dcf_sheet = self._get_worksheet(self.workbook_values, 'DCF')
+            sheets_to_check = [s for s in (wacc_sheet, dcf_sheet) if s is not None]
+            if not sheets_to_check:
+                # Missing sheets already recorded as errors in check_sheet_structure()
                 return
-            _, wacc_rows = self._extract_rate_rows(wacc_sheet, max_row=100, max_col=20)
-            wacc_values = []
-            for _, entries in wacc_rows:
-                for _, val, _ in entries:
-                    if val not in wacc_values:
-                        wacc_values.append(val)
 
-            if wacc_values:
-                for wacc in wacc_values:
+            seen_rounded: set[float] = set()
+            wacc_entries: list[tuple[float, str]] = []
+            for sheet in sheets_to_check:
+                _, wacc_rows = self._extract_rate_rows(sheet, max_row=150, max_col=20)
+                for _, entries in wacc_rows:
+                    for _, val, coord in entries:
+                        key = round(val, 8)
+                        if key not in seen_rounded:
+                            seen_rounded.add(key)
+                            wacc_entries.append((val, coord))
+
+            if wacc_entries:
+                for wacc, coord in wacc_entries:
                     if wacc < 0.05 or wacc > 0.20:
                         self.warnings.append(
-                            f"WACC ({wacc:.2%}) is outside typical range (5%-20%). Verify calculation."
+                            f"WACC ({wacc:.2%} at {coord}) is outside typical range (5%-20%). Verify calculation."
                         )
                     else:
                         self.info.append(f"✓ WACC ({wacc:.2%}) in reasonable range")
             else:
-                self.warnings.append("Could not locate WACC value")
+                self.errors.append("Could not locate WACC value for range check")
 
         except Exception as e:
-            self.warnings.append(f"Could not validate WACC range: {str(e)}")
+            self.errors.append(f"Could not validate WACC range: {str(e)}")
 
     def _check_terminal_value_proportion(self):
         """Check if terminal value is reasonable proportion of enterprise value"""
         try:
             dcf_sheet = self._get_worksheet(self.workbook_values, 'DCF')
             if dcf_sheet is None:
-                self.warnings.append("DCF sheet not found")
+                # Missing DCF sheet already recorded as error in check_sheet_structure()
                 return
 
             terminal_value = None
@@ -419,7 +477,7 @@ class DCFModelValidator:
                             and 'value' in cell_str
                             and ('pv' in cell_str or 'present value' in cell_str)
                         ):
-                            for offset in range(1, 5):
+                            for offset in range(1, 6):
                                 adjacent = dcf_sheet.cell(cell.row, cell.column + offset).value
                                 if _is_number(adjacent) and adjacent > 0:
                                     terminal_value = float(adjacent)
@@ -430,7 +488,7 @@ class DCFModelValidator:
                             and 'value' in cell_str
                             and 'terminal' not in cell_str
                         ):
-                            for offset in range(1, 5):
+                            for offset in range(1, 6):
                                 adjacent = dcf_sheet.cell(cell.row, cell.column + offset).value
                                 if _is_number(adjacent) and adjacent > 0:
                                     enterprise_value = float(adjacent)
@@ -454,10 +512,12 @@ class DCFModelValidator:
                 else:
                     self.info.append(f"✓ Terminal value is {proportion:.1%} of EV")
             else:
-                self.warnings.append("Could not locate terminal value and enterprise value")
+                self.errors.append(
+                    "Could not locate PV of Terminal Value and Enterprise Value on DCF sheet"
+                )
 
         except Exception as e:
-            self.warnings.append(f"Could not validate terminal value proportion: {str(e)}")
+            self.errors.append(f"Could not validate terminal value proportion: {str(e)}")
 
 
 def validate_dcf_model(excel_path: str) -> dict:
@@ -479,7 +539,8 @@ def main():
     if len(sys.argv) < 2:
         print("Usage: python validate_dcf.py <excel_file> [output.json]")
         print("\nValidates DCF model for:")
-        print("  - Formula errors (#REF!, #DIV/0!, etc.)")
+        print("  - Required DCF and WACC sheets")
+        print("  - Formula errors (#REF!, #DIV/0!, etc.) and uncached formulas")
         print("  - Terminal growth < WACC (critical)")
         print("  - WACC in reasonable range (5-20%)")
         print("  - Terminal value proportion of EV (40-80%)")
