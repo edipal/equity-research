@@ -449,7 +449,7 @@ def _build_dcf_sheet(ws, wb: openpyxl.Workbook, default_case: int = 2) -> None:
     ws.cell(row=ROW_TAX_RATE, column=4, value="Linked from WACC worksheet").font = FONT_NOTE
 
     # Section 2: Vertically Stacked Scenario Assumption Blocks (Bear / Base / Bull)
-    # Fixed stride of 12 rows per block so Active Case uses a single clean INDEX(range, (INT($B$4)-1)*12 + offset)
+    # Fixed stride of 12 rows per block so Active Case uses a single clean INDEX(range, (INT(Case)-1)*12 + offset)
     # Bear header: row 24, col header: row 25, metrics: rows 26..34 (9 rows), blank: row 35
     # Base header: row 36, col header: row 37, metrics: rows 38..46 (9 rows), blank: row 47
     # Bull header: row 48, col header: row 49, metrics: rows 50..58 (9 rows), blank: row 59
@@ -546,7 +546,7 @@ def _build_dcf_sheet(ws, wb: openpyxl.Workbook, default_case: int = 2) -> None:
                 )
                 ws.cell(row=row, column=8, value="Scalar terminal assumption").font = FONT_NOTE
 
-    # Section 3: Active Case Consolidation Block driven by INDEX(..., INT($B$4)) (Rows 60-70)
+    # Section 3: Active Case Consolidation Block driven by INDEX(..., INT(Case)) (Rows 60-70)
     ACTIVE_HEADER_ROW = 60
     ACTIVE_START_ROW = 62  # rows 62..70 map 1:1 to metric_order
     _style_banner(ws, ACTIVE_HEADER_ROW, 8, "3. ACTIVE CASE ASSUMPTIONS (DRIVEN BY INDEX / CASE SELECTOR)")
@@ -562,14 +562,14 @@ def _build_dcf_sheet(ws, wb: openpyxl.Workbook, default_case: int = 2) -> None:
                 col_ltr = get_column_letter(col)
                 formula = (
                     f"=INDEX({col_ltr}${FIRST_METRIC_ROW}:{col_ltr}${LAST_METRIC_ROW},"
-                    f"(INT($B$4)-1)*{BLOCK_STRIDE}+{offset + 1})"
+                    f"(INT(Case)-1)*{BLOCK_STRIDE}+{offset + 1})"
                 )
                 _write_formula_cell(ws, row, col, formula, fmt)
             ws.cell(row=row, column=8, value="INDEX over stacked Bear/Base/Bull blocks").font = FONT_NOTE
         else:
             formula = (
                 f"=INDEX(C${FIRST_METRIC_ROW}:C${LAST_METRIC_ROW},"
-                f"(INT($B$4)-1)*{BLOCK_STRIDE}+{offset + 1})"
+                f"(INT(Case)-1)*{BLOCK_STRIDE}+{offset + 1})"
             )
             _write_formula_cell(ws, row, 3, formula, fmt, bold=True)
             ws.cell(row=row, column=8, value="INDEX scalar terminal driver").font = FONT_NOTE
@@ -830,8 +830,15 @@ def _build_dcf_sheet(ws, wb: openpyxl.Workbook, default_case: int = 2) -> None:
     _write_formula_cell(ws, ROW_EV, 3, f"=C{ROW_SUM_PV_FCF}+C{ROW_PV_TV}", FMT_CURRENCY_M, bold=True, border=BORDER_SUBTOTAL)
 
     # Standard workbook-level named ranges for downstream QA, charts, and report assembly
+    TG_OFFSET = 7  # 0-based index of "Terminal Growth Rate" in metric_order
+    ROW_TG_BEAR = scenario_specs[0][0] + 2 + TG_OFFSET  # 33
+    ROW_TG_BASE = scenario_specs[1][0] + 2 + TG_OFFSET  # 45
+    ROW_TG_BULL = scenario_specs[2][0] + 2 + TG_OFFSET  # 57
     wb.defined_names["DCF_WACC"] = DefinedName("DCF_WACC", attr_text=f"WACC!$C${WACC_OUTPUT_ROW}")
     wb.defined_names["TerminalGrowth"] = DefinedName("TerminalGrowth", attr_text=f"DCF!$C${ROW_ACT_TG}")
+    wb.defined_names["TerminalGrowth_Bear"] = DefinedName("TerminalGrowth_Bear", attr_text=f"DCF!$C${ROW_TG_BEAR}")
+    wb.defined_names["TerminalGrowth_Base"] = DefinedName("TerminalGrowth_Base", attr_text=f"DCF!$C${ROW_TG_BASE}")
+    wb.defined_names["TerminalGrowth_Bull"] = DefinedName("TerminalGrowth_Bull", attr_text=f"DCF!$C${ROW_TG_BULL}")
     wb.defined_names["PV_TerminalValue"] = DefinedName("PV_TerminalValue", attr_text=f"DCF!$C${ROW_PV_TV}")
     wb.defined_names["EnterpriseValue"] = DefinedName("EnterpriseValue", attr_text=f"DCF!$C${ROW_EV}")
 

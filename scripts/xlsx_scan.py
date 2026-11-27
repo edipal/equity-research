@@ -32,9 +32,17 @@ def is_data_table_formula(val) -> bool:
     return type(val).__name__ == "DataTableFormula" or getattr(val, "t", None) == "dataTable"
 
 
-def extract_formula_text(val_f) -> str | None:
-    """Extract formula text from standard strings, ArrayFormula, and DataTableFormula objects."""
+def extract_formula_text(val_f: Any, data_type: str | None = None) -> str | None:
+    """Extract formula text from standard strings, ArrayFormula, and DataTableFormula objects.
+
+    When *data_type* is supplied (e.g. ``cell.data_type`` from openpyxl), plain string values
+    starting with ``"="`` are only treated as formulas when ``data_type == "f"``, preventing
+    text cells (``data_type`` in ``("s", "str", "inlineStr", ...)``) from being misclassified
+    as formulas.
+    """
     if isinstance(val_f, str):
+        if data_type is not None and data_type != "f":
+            return None
         return val_f if val_f.startswith("=") else None
     if type(val_f).__name__ == "ArrayFormula":
         text = getattr(val_f, "text", None)
@@ -48,7 +56,11 @@ def extract_formula_text(val_f) -> str | None:
     return None
 
 
-def detect_cell_error(cell_v, val_f) -> str | None:
+def detect_cell_error(
+    cell_v,
+    val_f,
+    formula_data_type: str | None = None,
+) -> str | None:
     """Return Excel error token for a cell without false-positiving on prose, text cells, or quoted literals.
 
     Checks cached error values first:
@@ -56,7 +68,8 @@ def detect_cell_error(cell_v, val_f) -> str | None:
     - For formula cells (``formula_text is not None``), a cached string matching an exact
       Excel error token is also flagged.
     - Plain non-formula text cells (``formula_text is None`` and ``data_type != "e"``)
-      containing literal strings such as ``"#N/A"`` are NOT flagged as formula errors.
+      containing literal strings such as ``"#N/A"`` or ``"== Notes: old link was #REF! =="``
+      are NOT flagged as formula errors.
 
     When the cached result is not an error, only scans stripped formula text for ``#REF!``
     (a broken reference is always a static formula error, whereas ``#N/A`` or other error
@@ -64,7 +77,7 @@ def detect_cell_error(cell_v, val_f) -> str | None:
     evaluated cached value is non-error).
     """
     val_v = cell_v.value if cell_v is not None else None
-    formula_text = extract_formula_text(val_f)
+    formula_text = extract_formula_text(val_f, data_type=formula_data_type)
 
     # 1. Cached error value (Excel error data_type, or exact error token cached on a formula cell)
     if getattr(cell_v, "data_type", None) == "e":
@@ -131,8 +144,41 @@ def _sheet_titles_by_xml_path(zf: zipfile.ZipFile) -> dict[str, str]:
     return mapping
 
 
+def _detect_manifest_lossy_features(namelist: list[str]) -> set[str]:
+    """Identify Excel features in the OOXML archive manifest that LibreOffice re-export can drop or alter.
+
+    Legacy comment VML files (``xl/drawings/commentsDrawing*.vml`` and
+    ``xl/drawings/vmlDrawing*.vml``) are intentionally excluded from ``drawings_or_shapes``
+    so workbooks with standard blue-input source cell comments still support ``--in-place``.
+    """
+    features: set[str] = set()
+    for name in namelist:
+        low = name.lower()
+        if (
+            low.startswith("xl/charts/") and not low.startswith("xl/charts/_rels/")
+        ) or (
+            low.startswith("xl/chartsheets/") and not low.startswith("xl/chartsheets/_rels/")
+        ):
+            features.add("charts")
+        elif low.startswith(("xl/pivottables/", "xl/pivotcache/")):
+            features.add("pivot_tables")
+        elif low.startswith(("xl/slicers/", "xl/timelines/")):
+            features.add("slicers_or_timelines")
+        elif (
+            low.startswith("xl/drawings/")
+            and not low.startswith("xl/drawings/_rels/")
+            and low.endswith(".xml")
+        ):
+            features.add("drawings_or_shapes")
+        elif low == "xl/vbaproject.bin" or low.endswith("/vbaproject.bin"):
+            features.add("vba_macros")
+        elif low.startswith(("xl/ctrlprops/", "xl/activex/")):
+            features.add("form_or_activex_controls")
+    return features
+
+
 def inspect_workbook_xml(xlsx_path: Path) -> dict[str, Any]:
-    """Inspect OOXML worksheets in a single low-memory streaming XML pass.
+    """Inspect OOXML worksheets and archive manifest in a single low-memory streaming XML pass.
 
     Returns a dictionary with:
         - ``"data_tables"``: list of Excel What-If data table locations (``Sheet!ref``).
@@ -142,19 +188,25 @@ def inspect_workbook_xml(xlsx_path: Path) -> dict[str, Any]:
           OOXML output, while conservatively counting malformed ``t="str"``/``t="e"``
           formula cells with no ``<v>`` element as uncached), or ``None`` for non-OOXML
           legacy formats such as ``.xls``.
+        - ``"lossy_features"``: sorted list of Excel-only feature categories detected in
+          the archive/XML that LibreOffice re-export can drop or alter (``charts``,
+          ``drawings_or_shapes``, ``form_or_activex_controls``, ``pivot_tables``,
+          ``slicers_or_timelines``, ``sparklines``, ``vba_macros``).
 
     Fails closed by raising ``WorkbookLoadError`` on corrupt OOXML archives or malformed XML.
     """
     if xlsx_path.suffix.lower() not in OOXML_ZIP_SUFFIXES:
-        return {"data_tables": [], "uncached_formulas": None}
+        return {"data_tables": [], "uncached_formulas": None, "lossy_features": []}
     try:
         locations: list[str] = []
         uncached_formulas = 0
         with zipfile.ZipFile(xlsx_path, "r") as zf:
+            namelist = zf.namelist()
+            lossy_features = _detect_manifest_lossy_features(namelist)
             titles = _sheet_titles_by_xml_path(zf)
             sheet_entries = sorted(
                 name
-                for name in zf.namelist()
+                for name in namelist
                 if name.startswith("xl/worksheets/") and name.endswith(".xml")
             )
             for entry in sheet_entries:
@@ -181,6 +233,8 @@ def inspect_workbook_xml(xlsx_path: Path) -> dict[str, Any]:
                                 if elem.attrib.get("t") == "dataTable":
                                     ref = elem.attrib.get("ref") or current_cell_ref or "dataTable"
                                     locations.append(f"{sheet_label}!{ref}")
+                            elif local == "sparklineGroups":
+                                lossy_features.add("sparklines")
                         else:
                             if in_cell and local == "v":
                                 if not cell_has_v:
@@ -204,6 +258,7 @@ def inspect_workbook_xml(xlsx_path: Path) -> dict[str, Any]:
         return {
             "data_tables": locations,
             "uncached_formulas": uncached_formulas,
+            "lossy_features": sorted(lossy_features),
         }
     except (zipfile.BadZipFile, ET.ParseError, KeyError, OSError) as exc:
         raise WorkbookLoadError(
@@ -220,15 +275,37 @@ def workbook_has_data_tables(xlsx_path: Path) -> list[str]:
     return inspect_workbook_xml(xlsx_path)["data_tables"]
 
 
-def scan_workbook_formulas(xlsx_path: Path) -> dict:
+_DEFAULT_CAPTURED_GRID_SHEETS = frozenset({"dcf", "wacc", "sensitivity"})
+
+
+def scan_workbook_formulas(
+    xlsx_path: Path,
+    *,
+    capture_sheet_grids: bool = False,
+    capture_defined_names: bool = False,
+) -> dict[str, Any]:
     """Scan all worksheets in lockstep using openpyxl read_only=True streaming mode.
 
     Returns a dictionary with:
         total_formulas, uncached_formulas, data_table_formulas, total_errors, error_summary.
+
+    When *capture_sheet_grids* is True, also includes ``sheetnames`` (worksheet titles only,
+    excluding chartsheets) and ``sheet_grids`` (sparse ``row -> col -> (value, coord)`` maps
+    for DCF / WACC / Sensitivity worksheets and any sheet targeted by captured defined names)
+    collected during the same single streaming pass.
+
+    When *capture_defined_names* is True, also includes ``defined_names`` mapping workbook
+    defined name strings to resolved single-cell ``(sheet_name, row, col)`` tuples.
     """
-    import openpyxl
-    from openpyxl.utils import get_column_letter
-    from openpyxl.utils.exceptions import InvalidFileException
+    try:
+        import openpyxl
+        from openpyxl.utils import get_column_letter
+        from openpyxl.utils.cell import coordinate_to_tuple
+        from openpyxl.utils.exceptions import InvalidFileException
+    except ImportError as exc:
+        raise WorkbookLoadError(
+            f"openpyxl is required: {exc}. Install with `pip install -r requirements.txt`."
+        ) from exc
 
     wb_formulas = None
     wb_values = None
@@ -256,9 +333,36 @@ def scan_workbook_formulas(xlsx_path: Path) -> dict:
     data_table_formulas = 0
     error_summary: dict[str, dict] = {}
     total_errors = 0
+    sheetnames: list[str] = []
+    sheet_grids: dict[str, dict[int, dict[int, tuple[Any, str]]]] = {}
+    defined_names_map: dict[str, tuple[str, int, int]] = {}
 
     try:
         ws_v_by_title = {ws.title: ws for ws in wb_values.worksheets}
+        if capture_sheet_grids or capture_defined_names:
+            sheetnames = [ws.title for ws in wb_values.worksheets]
+
+        extra_grid_sheets_lower: set[str] = set()
+        if capture_defined_names:
+            for dn_name, dn in wb_values.defined_names.items():
+                try:
+                    destinations = list(dn.destinations)
+                except Exception:
+                    continue
+                for sheet_title, ref in destinations:
+                    if not ref or ":" in ref:
+                        continue
+                    ref_clean = ref.replace("$", "").strip()
+                    try:
+                        r_idx, c_idx = coordinate_to_tuple(ref_clean)
+                    except Exception:
+                        continue
+                    defined_names_map[dn_name] = (sheet_title, r_idx, c_idx)
+                    extra_grid_sheets_lower.add(sheet_title.lower())
+                    break
+
+        target_grid_sheets_lower = _DEFAULT_CAPTURED_GRID_SHEETS | extra_grid_sheets_lower
+
         for ws_f in wb_formulas.worksheets:
             sheet_name = ws_f.title
             ws_v = ws_v_by_title.get(sheet_name)
@@ -269,16 +373,25 @@ def scan_workbook_formulas(xlsx_path: Path) -> dict:
             ws_f.reset_dimensions()
             ws_v.reset_dimensions()
 
+            capture_this_grid = (
+                capture_sheet_grids and sheet_name.lower() in target_grid_sheets_lower
+            )
+            current_grid: dict[int, dict[int, tuple[Any, str]]] | None = (
+                {} if capture_this_grid else None
+            )
+
             for row_idx, (row_f, row_v) in enumerate(
                 itertools.zip_longest(ws_f.iter_rows(), ws_v.iter_rows(), fillvalue=()),
                 start=1,
             ):
+                row_map: dict[int, tuple[Any, str]] | None = {} if capture_this_grid else None
                 for col_idx, (cell_f, cell_v) in enumerate(
                     itertools.zip_longest(row_f, row_v, fillvalue=None),
                     start=1,
                 ):
                     val_f = cell_f.value if cell_f is not None else None
-                    formula_text = extract_formula_text(val_f)
+                    data_type_f = getattr(cell_f, "data_type", None) if cell_f is not None else None
+                    formula_text = extract_formula_text(val_f, data_type=data_type_f)
                     if formula_text is not None:
                         total_formulas += 1
                         if is_data_table_formula(val_f):
@@ -286,7 +399,7 @@ def scan_workbook_formulas(xlsx_path: Path) -> dict:
                         if is_uncached_formula(cell_v, formula_text):
                             uncached_formulas += 1
 
-                    err = detect_cell_error(cell_v, val_f)
+                    err = detect_cell_error(cell_v, val_f, formula_data_type=data_type_f)
                     if err is not None:
                         coord = (
                             getattr(cell_f, "coordinate", None)
@@ -297,6 +410,19 @@ def scan_workbook_formulas(xlsx_path: Path) -> dict:
                         bucket = error_summary.setdefault(err, {"count": 0, "locations": []})
                         bucket["count"] += 1
                         bucket["locations"].append(f"{sheet_name}!{coord}")
+
+                    if row_map is not None and cell_v is not None and cell_v.value is not None:
+                        coord_v = (
+                            getattr(cell_v, "coordinate", None)
+                            or f"{get_column_letter(col_idx)}{row_idx}"
+                        )
+                        row_map[col_idx] = (cell_v.value, coord_v)
+
+                if current_grid is not None and row_map:
+                    current_grid[row_idx] = row_map
+
+            if current_grid is not None:
+                sheet_grids[sheet_name] = current_grid
     except (
         zipfile.BadZipFile,
         ET.ParseError,
@@ -311,10 +437,16 @@ def scan_workbook_formulas(xlsx_path: Path) -> dict:
         wb_formulas.close()
         wb_values.close()
 
-    return {
+    result: dict[str, Any] = {
         "total_formulas": total_formulas,
         "uncached_formulas": uncached_formulas,
         "data_table_formulas": data_table_formulas,
         "total_errors": total_errors,
         "error_summary": error_summary,
     }
+    if capture_sheet_grids:
+        result["sheetnames"] = sheetnames
+        result["sheet_grids"] = sheet_grids
+    if capture_defined_names:
+        result["defined_names"] = defined_names_map
+    return result

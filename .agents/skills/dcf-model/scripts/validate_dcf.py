@@ -58,7 +58,6 @@ def _missing_xlsx_scan_result(excel_path: str) -> dict:
         'info': [],
     }
 
-SENSITIVITY_VS_RE = re.compile(r'\bvs\.?\b')
 OF_EV_RE = re.compile(r'\bof\s+ev\b')
 EBIT_RE = re.compile(r'\bebit\b')
 WACC_TOKEN_RE = re.compile(r'\bwacc\b')
@@ -160,30 +159,75 @@ NAMED_TG_ALIASES = ('terminalgrowth', 'terminal_growth', 'dcf_terminalgrowth')
 NAMED_PV_TV_ALIASES = ('pv_terminalvalue', 'pv_tv', 'dcf_pv_tv')
 NAMED_EV_ALIASES = ('enterprisevalue', 'dcf_ev', 'implied_ev')
 
+SCENARIO_NAMES = ('bear', 'base', 'bull')
+NAMED_SCENARIO_TG_ALIASES = {
+    'bear': ('terminalgrowth_bear', 'terminal_growth_bear', 'dcf_terminalgrowth_bear'),
+    'base': ('terminalgrowth_base', 'terminal_growth_base', 'dcf_terminalgrowth_base'),
+    'bull': ('terminalgrowth_bull', 'terminal_growth_bull', 'dcf_terminalgrowth_bull'),
+}
+NAMED_SCENARIO_WACC_ALIASES = {
+    'bear': ('wacc_bear', 'dcf_wacc_bear'),
+    'base': ('wacc_base', 'dcf_wacc_base'),
+    'bull': ('wacc_bull', 'dcf_wacc_bull'),
+}
+
 
 def _is_number(value) -> bool:
     """Return True for numeric values while excluding Python booleans."""
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-SENSITIVITY_AXIS_RE = re.compile(
-    r'\bwacc\s*(?:[/\\×]|by)\s*(?:terminal\s*)?(?:growth|g)\b'
-    r'|\b(?:terminal\s*)?(?:growth|g)\s*(?:[/\\×]|by)\s*wacc\b'
+_SENS_AXIS_TERM = (
+    r'(?:'
+    r'wacc'
+    r'|discount\s+rate'
+    r'|(?:terminal|perpetuity)\s+(?:growth(?:\s+rate)?|g)'
+    r'|(?:exit|terminal)\s+(?:ev\s*/\s*ebitda\s+|ebitda\s+)?multiple'
+    r')'
+)
+_SENS_SEP = r'(?:\s*(?:vs\.?|versus|[/\\×]|by)\s*|\s+x\s+)'
+SENSITIVITY_PAIR_RE = re.compile(
+    rf'\b{_SENS_AXIS_TERM}\b{_SENS_SEP}\b{_SENS_AXIS_TERM}\b'
+    rf'|\b(?:wacc|discount\s+rate)\b{_SENS_SEP}\bg\b'
+    rf'|\bg\b{_SENS_SEP}\b(?:wacc|discount\s+rate)\b'
 )
 
 
 def _is_sensitivity_header(text: str) -> bool:
-    """Return True if a label belongs to a sensitivity table header rather than a model note or assumption."""
-    low = text.lower()
+    """Return True only for genuine sensitivity table banners or two-variable valuation axis headers."""
+    low = ' '.join(text.lower().strip().split())
+    if not low:
+        return False
     if 'sensitivity' in low:
         return True
-    if SENSITIVITY_AXIS_RE.search(low):
-        return True
-    if SENSITIVITY_VS_RE.search(low) and any(
-        kw in low for kw in ('wacc', 'growth', 'margin', 'beta', 'multiple', 'discount')
-    ):
+    if SENSITIVITY_PAIR_RE.search(low):
         return True
     return False
+
+
+def _primary_row_text(row_map: dict[int, tuple[Any, str]]) -> Optional[str]:
+    """Return the leftmost non-empty string cell in a sparse row map, or None."""
+    for col_idx in sorted(row_map):
+        val, _ = row_map[col_idx]
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    return None
+
+
+def _is_sensitivity_stop_row(primary_text: Optional[str], row_has_numeric: bool) -> bool:
+    """Return True when the row's primary label marks the start of an inline sensitivity table.
+
+    Checks only the primary (leftmost non-empty string) cell so commentary notes in right-hand
+    columns (e.g., ``DCF!H39 = "Margin vs. peer median"``) can never trigger an early stop.
+    Requires either no numeric data on the row (a section banner) or an explicit two-variable
+    sensitivity grid corner header (e.g., ``"WACC vs Terminal Growth"`` or ``"WACC \\ Terminal g"``)
+    that may sit on the same row as numeric axis percentages.
+    """
+    if not primary_text or not _is_sensitivity_header(primary_text):
+        return False
+    if not row_has_numeric:
+        return True
+    return bool(SENSITIVITY_PAIR_RE.search(' '.join(primary_text.lower().split())))
 
 
 def _detect_scenario_block_header(label: str, row_has_numeric: bool = False) -> Optional[str]:
@@ -314,62 +358,29 @@ def _is_ev_label(text: str) -> bool:
     )
 
 
-def _load_sheet_grid(ws) -> dict[int, dict[int, tuple[Any, str]]]:
-    """Stream the full used range of a read_only worksheet into a sparse row -> col map.
-
-    Only non-empty cells are stored so large sheets remain lightweight without truncating
-    rows beyond 250 or columns beyond Z.
-    """
-    from openpyxl.utils import get_column_letter
-
-    ws.reset_dimensions()
-    grid: dict[int, dict[int, tuple[Any, str]]] = {}
-    for row_idx, row in enumerate(ws.iter_rows(), start=1):
-        row_map: dict[int, tuple[Any, str]] = {}
-        for col_idx, cell in enumerate(row, start=1):
-            val = cell.value
-            if val is not None:
-                coord = getattr(cell, 'coordinate', None) or f"{get_column_letter(col_idx)}{row_idx}"
-                row_map[col_idx] = (val, coord)
-        if row_map:
-            grid[row_idx] = row_map
-    return grid
-
-
 def _resolve_named_metric(
-    defined_names_lower: dict[str, Any],
+    defined_names_lower: dict[str, tuple[str, int, int]],
     aliases: tuple[str, ...],
     grids_by_sheet: dict[str, Optional[dict[int, dict[int, tuple[Any, str]]]]],
     value_predicate,
 ) -> Optional[tuple[float, str, str, int, int]]:
-    """Resolve the first matching workbook-level named range pointing to a numeric cell on DCF or WACC."""
-    from openpyxl.utils.cell import coordinate_to_tuple
-
+    """Resolve the first matching workbook-level named range pointing to a numeric cell."""
     for alias in aliases:
-        dn = defined_names_lower.get(alias)
-        if dn is None:
+        target = defined_names_lower.get(alias)
+        if target is None:
             continue
-        try:
-            destinations = list(dn.destinations)
-        except Exception:
+        sheet_title, row_idx, col_idx = target
+        grid = grids_by_sheet.get(sheet_title)
+        if grid is None:
             continue
-        for sheet_title, ref in destinations:
-            grid = grids_by_sheet.get(sheet_title)
-            if grid is None or not ref or ':' in ref:
-                continue
-            ref_clean = ref.replace('$', '').strip()
-            try:
-                row_idx, col_idx = coordinate_to_tuple(ref_clean)
-            except Exception:
-                continue
-            cell_entry = grid.get(row_idx, {}).get(col_idx)
-            if cell_entry is None:
-                continue
-            val, coord = cell_entry
-            if _is_number(val):
-                fval = float(val)
-                if value_predicate(fval):
-                    return (fval, f"{sheet_title}!{coord}", sheet_title, row_idx, col_idx)
+        cell_entry = grid.get(row_idx, {}).get(col_idx)
+        if cell_entry is None:
+            continue
+        val, coord = cell_entry
+        if _is_number(val):
+            fval = float(val)
+            if value_predicate(fval):
+                return (fval, f"{sheet_title}!{coord}", sheet_title, row_idx, col_idx)
     return None
 
 
@@ -391,28 +402,32 @@ class DCFModelValidator:
         if not path_obj.is_file():
             raise IsADirectoryError(f"Not a file: {excel_path}")
 
-        # Single lightweight read_only=True pass over the full used range for DCF & WACC sheets
-        # plus workbook-level defined_names resolution.
-        wb_values = openpyxl.load_workbook(excel_path, data_only=True, read_only=True)
-        try:
-            self.sheet_names: list[str] = [ws.title for ws in wb_values.worksheets]
-            ws_by_title = {ws.title: ws for ws in wb_values.worksheets}
-            self._dcf_grid: Optional[dict[int, dict[int, tuple[Any, str]]]] = (
-                _load_sheet_grid(ws_by_title['DCF'])
-                if 'DCF' in ws_by_title
-                else None
-            )
-            self._wacc_grid: Optional[dict[int, dict[int, tuple[Any, str]]]] = (
-                _load_sheet_grid(ws_by_title['WACC'])
-                if 'WACC' in ws_by_title
-                else None
-            )
+        self._scan: Optional[dict[str, Any]] = None
+        self.sheet_names: list[str] = []
+        self._dcf_grid: Optional[dict[int, dict[int, tuple[Any, str]]]] = None
+        self._wacc_grid: Optional[dict[int, dict[int, tuple[Any, str]]]] = None
+        self._named_metrics: dict[str, tuple[float, str, str, int, int]] = {}
+        self._named_scenario_tg: dict[str, tuple[float, str, str, int, int]] = {}
+        self._named_scenario_wacc: dict[str, tuple[float, str, str, int, int]] = {}
 
-            defined_names_lower = {
-                name.lower(): dn for name, dn in wb_values.defined_names.items()
-            }
-            grids_by_sheet = {'DCF': self._dcf_grid, 'WACC': self._wacc_grid}
-            self._named_metrics: dict[str, tuple[float, str, str, int, int]] = {}
+        if scan_workbook_formulas is not None:
+            # Single lockstep read_only=True pass collecting formulas, errors, sheet grids, and defined names
+            self._scan = scan_workbook_formulas(
+                path_obj,
+                capture_sheet_grids=True,
+                capture_defined_names=True,
+            )
+            self.sheet_names = list(self._scan.get('sheetnames', []))
+            sheet_grids: dict[str, dict[int, dict[int, tuple[Any, str]]]] = self._scan.get(
+                'sheet_grids', {}
+            )
+            self._dcf_grid = sheet_grids.get('DCF')
+            self._wacc_grid = sheet_grids.get('WACC')
+
+            raw_defined_names: dict[str, tuple[str, int, int]] = self._scan.get('defined_names', {})
+            defined_names_lower = {name.lower(): target for name, target in raw_defined_names.items()}
+            grids_by_sheet: dict[str, Optional[dict[int, dict[int, tuple[Any, str]]]]] = dict(sheet_grids)
+
             metric_specs = (
                 ('wacc', NAMED_WACC_ALIASES, lambda v: 0 < v < 1),
                 ('terminal_growth', NAMED_TG_ALIASES, lambda v: -1 < v < 1),
@@ -425,8 +440,25 @@ class DCFModelValidator:
                 )
                 if resolved is not None:
                     self._named_metrics[key] = resolved
-        finally:
-            wb_values.close()
+
+            for scenario in SCENARIO_NAMES:
+                resolved_tg = _resolve_named_metric(
+                    defined_names_lower,
+                    NAMED_SCENARIO_TG_ALIASES[scenario],
+                    grids_by_sheet,
+                    lambda v: -1 < v < 1,
+                )
+                if resolved_tg is not None:
+                    self._named_scenario_tg[scenario] = resolved_tg
+
+                resolved_wacc = _resolve_named_metric(
+                    defined_names_lower,
+                    NAMED_SCENARIO_WACC_ALIASES[scenario],
+                    grids_by_sheet,
+                    lambda v: 0 < v < 1,
+                )
+                if resolved_wacc is not None:
+                    self._named_scenario_wacc[scenario] = resolved_wacc
 
         self.errors: list[str] = []
         self.warnings: list[str] = []
@@ -477,11 +509,11 @@ class DCFModelValidator:
         has_inline_sensitivity = False
         if not has_sensitivity_sheet and self._dcf_grid is not None:
             for row_idx in sorted(self._dcf_grid):
-                for val, _ in self._dcf_grid[row_idx].values():
-                    if isinstance(val, str) and _is_sensitivity_header(val):
-                        has_inline_sensitivity = True
-                        break
-                if has_inline_sensitivity:
+                row_map = self._dcf_grid[row_idx]
+                primary_text = _primary_row_text(row_map)
+                row_has_numeric = any(_is_number(val) for val, _ in row_map.values())
+                if _is_sensitivity_stop_row(primary_text, row_has_numeric):
+                    has_inline_sensitivity = True
                     break
 
         if has_sensitivity_sheet:
@@ -494,9 +526,9 @@ class DCFModelValidator:
             )
 
     def check_formula_errors(self) -> None:
-        """Check for Excel formula errors and uncached formulas in all worksheets using read_only=True."""
+        """Check for Excel formula errors and uncached formulas using the single-pass workbook scan."""
         assert scan_workbook_formulas is not None
-        scan = scan_workbook_formulas(Path(self.excel_path))
+        scan = self._scan if self._scan is not None else scan_workbook_formulas(Path(self.excel_path))
         total_errors = scan['total_errors']
         total_formulas = scan['total_formulas']
         uncached_formulas = scan['uncached_formulas']
@@ -521,9 +553,35 @@ class DCFModelValidator:
             self.info.append(f"Total formula errors: {total_errors}")
 
     def check_dcf_logic(self):
-        """Validate DCF-specific logic and calculations"""
-        self._check_terminal_growth_vs_wacc()
-        self._check_wacc_range()
+        """Validate DCF-specific logic and calculations (single rate-row extraction when fallback needed)."""
+        all_scenario_tg_named = all(s in self._named_scenario_tg for s in SCENARIO_NAMES)
+        has_named_wacc_coverage = (
+            'wacc' in self._named_metrics
+            or all(s in self._named_scenario_wacc for s in SCENARIO_NAMES)
+        )
+        use_named_rates_only = all_scenario_tg_named and has_named_wacc_coverage
+
+        dcf_tg_rows: list[tuple[int, int, Optional[str], list[tuple[int, float, str]]]] = []
+        dcf_wacc_rows: list[tuple[int, int, Optional[str], list[tuple[int, float, str]]]] = []
+        wacc_sheet_wacc_rows: list[tuple[int, int, Optional[str], list[tuple[int, float, str]]]] = []
+
+        if not use_named_rates_only:
+            if self._dcf_grid is not None:
+                dcf_tg_rows, dcf_wacc_rows = self._extract_rate_rows('DCF', self._dcf_grid)
+            if self._wacc_grid is not None:
+                _, wacc_sheet_wacc_rows = self._extract_rate_rows('WACC', self._wacc_grid)
+
+        self._check_terminal_growth_vs_wacc(
+            dcf_tg_rows=dcf_tg_rows,
+            dcf_wacc_rows=dcf_wacc_rows,
+            wacc_sheet_wacc_rows=wacc_sheet_wacc_rows,
+            use_named_rates_only=use_named_rates_only,
+        )
+        self._check_wacc_range(
+            dcf_wacc_rows=dcf_wacc_rows,
+            wacc_sheet_wacc_rows=wacc_sheet_wacc_rows,
+            use_named_rates_only=use_named_rates_only,
+        )
         self._check_terminal_value_proportion()
 
     @staticmethod
@@ -596,7 +654,8 @@ class DCFModelValidator:
                 if isinstance(val, str) and val.strip()
             ]
             row_has_numeric = any(_is_number(val) for val, _ in row_map.values())
-            if any(_is_sensitivity_header(t) for t in row_texts):
+            primary_text = _primary_row_text(row_map)
+            if _is_sensitivity_stop_row(primary_text, row_has_numeric):
                 if tg_rows or wacc_rows:
                     break
                 continue
@@ -671,35 +730,65 @@ class DCFModelValidator:
                 pairs.append((tg_val, tg_coord, w_val, w_coord))
         return pairs
 
-    def _check_terminal_growth_vs_wacc(self):
+    def _check_terminal_growth_vs_wacc(
+        self,
+        dcf_tg_rows=None,
+        dcf_wacc_rows=None,
+        wacc_sheet_wacc_rows=None,
+        use_named_rates_only: Optional[bool] = None,
+    ):
         """Critical check: Terminal growth must be less than WACC across all scenarios."""
         try:
             if self._dcf_grid is None:
                 # Missing DCF sheet is already recorded as an error in check_sheet_structure()
                 return
 
-            tg_rows, wacc_rows = self._extract_rate_rows('DCF', self._dcf_grid)
-            wacc_sheet_rows = (
-                self._extract_rate_rows('WACC', self._wacc_grid)[1]
-                if self._wacc_grid is not None
-                else []
-            )
+            all_scenario_tg_named = all(s in self._named_scenario_tg for s in SCENARIO_NAMES)
+            all_scenario_wacc_named = all(s in self._named_scenario_wacc for s in SCENARIO_NAMES)
+            if use_named_rates_only is None:
+                use_named_rates_only = all_scenario_tg_named and (
+                    'wacc' in self._named_metrics or all_scenario_wacc_named
+                )
+
+            if use_named_rates_only:
+                tg_rows = []
+                wacc_rows = []
+                wacc_sheet_rows = []
+            else:
+                if dcf_tg_rows is None or dcf_wacc_rows is None:
+                    tg_rows, wacc_rows = self._extract_rate_rows('DCF', self._dcf_grid)
+                else:
+                    tg_rows, wacc_rows = dcf_tg_rows, dcf_wacc_rows
+                if wacc_sheet_wacc_rows is None:
+                    wacc_sheet_rows = (
+                        self._extract_rate_rows('WACC', self._wacc_grid)[1]
+                        if self._wacc_grid is not None
+                        else []
+                    )
+                else:
+                    wacc_sheet_rows = wacc_sheet_wacc_rows
+
             named_tg = self._named_metrics.get('terminal_growth')
             named_wacc = self._named_metrics.get('wacc')
 
-            # Collect all discovered WACCs (DCF, WACC sheet, and named range)
+            # Collect all discovered WACCs (named global/per-scenario + label-scan fallback)
             all_wacc_entries: list[tuple[float, str]] = []
             seen_wacc_coords: set[str] = set()
             if named_wacc is not None:
                 all_wacc_entries.append((named_wacc[0], named_wacc[1]))
                 seen_wacc_coords.add(named_wacc[1])
+            for scenario in SCENARIO_NAMES:
+                sw = self._named_scenario_wacc.get(scenario)
+                if sw is not None and sw[1] not in seen_wacc_coords:
+                    seen_wacc_coords.add(sw[1])
+                    all_wacc_entries.append((sw[0], sw[1]))
             for _, _, _, entries in wacc_rows + wacc_sheet_rows:
                 for _, w_val, w_coord in entries:
                     if w_coord not in seen_wacc_coords:
                         seen_wacc_coords.add(w_coord)
                         all_wacc_entries.append((w_val, w_coord))
 
-            has_any_tg = bool(tg_rows) or named_tg is not None
+            has_any_tg = bool(self._named_scenario_tg) or named_tg is not None or bool(tg_rows)
             has_any_wacc = bool(all_wacc_entries)
             if not has_any_tg:
                 self.errors.append("Could not locate terminal growth rate on DCF sheet")
@@ -730,37 +819,28 @@ class DCFModelValidator:
                     seen_pairs.add(key)
                     pairs.append((tg_val, tg_coord, w_val, w_coord))
 
-            for tg_row_idx, tg_block_id, tg_tag, tg_entries in tg_rows:
-                same_block_waccs = [wr for wr in wacc_rows if wr[1] == tg_block_id]
-                same_tag_waccs = (
-                    [wr for wr in wacc_rows if wr[2] == tg_tag]
-                    if (not same_block_waccs and tg_tag is not None)
-                    else []
-                )
-                if same_block_waccs:
-                    closest = min(same_block_waccs, key=lambda wr: abs(tg_row_idx - wr[0]))
-                    for pair in self._pair_entries_by_column(tg_entries, closest[3]):
-                        _add_pair(*pair)
-                elif same_tag_waccs:
-                    closest = min(same_tag_waccs, key=lambda wr: abs(tg_row_idx - wr[0]))
-                    for pair in self._pair_entries_by_column(tg_entries, closest[3]):
-                        _add_pair(*pair)
+            # 1. Per-scenario named ranges (TerminalGrowth_Bear/Base/Bull vs WACC_Bear/Base/Bull or DCF_WACC)
+            for scenario in SCENARIO_NAMES:
+                stg = self._named_scenario_tg.get(scenario)
+                if stg is None:
+                    continue
+                sw = self._named_scenario_wacc.get(scenario)
+                if sw is not None:
+                    w_val, w_coord = sw[0], sw[1]
+                elif named_wacc is not None:
+                    w_val, w_coord = named_wacc[0], named_wacc[1]
                 elif single_global_wacc is not None:
                     w_val, w_coord = single_global_wacc
-                    for _, tg_val, tg_coord in tg_entries:
-                        _add_pair(tg_val, tg_coord, w_val, w_coord)
                 else:
-                    # Multiple distinct scenario WACCs exist and this TG row has no WACC
-                    # in its own scenario block; use the conservative minimum WACC.
                     w_val, w_coord = min_wacc
-                    for _, tg_val, tg_coord in tg_entries:
-                        _add_pair(tg_val, tg_coord, w_val, w_coord)
+                _add_pair(stg[0], stg[1], w_val, w_coord)
 
-            # Ensure named TerminalGrowth is always validated even with non-standard row labels
-            if named_tg is not None:
+            # 2. Active named TerminalGrowth (always paired with active DCF_WACC when defined)
+            if named_tg is not None and (
+                named_wacc is not None or not (all_scenario_tg_named and all_scenario_wacc_named)
+            ):
                 ntg_val, ntg_coord, _, _, _ = named_tg
-                already_checked_tg = {p[1] for p in pairs}
-                if ntg_coord not in already_checked_tg:
+                if ntg_coord not in {p[1] for p in pairs}:
                     if named_wacc is not None:
                         w_val, w_coord = named_wacc[0], named_wacc[1]
                     elif single_global_wacc is not None:
@@ -768,6 +848,49 @@ class DCFModelValidator:
                     else:
                         w_val, w_coord = min_wacc
                     _add_pair(ntg_val, ntg_coord, w_val, w_coord)
+
+            named_tg_coords = {p[1] for p in pairs}
+
+            # 3. Label-scan fallback only when full scenario named-range coverage is absent
+            if use_named_rates_only:
+                self.info.append(
+                    "✓ Validated scenario Terminal Growth and WACC via workbook named ranges"
+                )
+            else:
+                self.info.append(
+                    "Using label-scan fallback for rate validation "
+                    "(define DCF_WACC and TerminalGrowth_Bear/Base/Bull named ranges for exact cell binding)"
+                )
+                for tg_row_idx, tg_block_id, tg_tag, tg_entries in tg_rows:
+                    unchecked_entries = [
+                        entry for entry in tg_entries if entry[2] not in named_tg_coords
+                    ]
+                    if not unchecked_entries:
+                        continue
+                    same_block_waccs = [wr for wr in wacc_rows if wr[1] == tg_block_id]
+                    same_tag_waccs = (
+                        [wr for wr in wacc_rows if wr[2] == tg_tag]
+                        if (not same_block_waccs and tg_tag is not None)
+                        else []
+                    )
+                    if same_block_waccs:
+                        closest = min(same_block_waccs, key=lambda wr: abs(tg_row_idx - wr[0]))
+                        for pair in self._pair_entries_by_column(unchecked_entries, closest[3]):
+                            _add_pair(*pair)
+                    elif same_tag_waccs:
+                        closest = min(same_tag_waccs, key=lambda wr: abs(tg_row_idx - wr[0]))
+                        for pair in self._pair_entries_by_column(unchecked_entries, closest[3]):
+                            _add_pair(*pair)
+                    elif single_global_wacc is not None:
+                        w_val, w_coord = single_global_wacc
+                        for _, tg_val, tg_coord in unchecked_entries:
+                            _add_pair(tg_val, tg_coord, w_val, w_coord)
+                    else:
+                        # Multiple distinct scenario WACCs exist and this TG row has no WACC
+                        # in its own scenario block; use the conservative minimum WACC.
+                        w_val, w_coord = min_wacc
+                        for _, tg_val, tg_coord in unchecked_entries:
+                            _add_pair(tg_val, tg_coord, w_val, w_coord)
 
             for tg_val, tg_coord, w_val, w_coord in pairs:
                 if tg_val >= w_val:
@@ -786,17 +909,25 @@ class DCFModelValidator:
         except Exception as e:
             self.errors.append(f"Could not validate terminal growth vs WACC: {str(e)}")
 
-    def _check_wacc_range(self):
+    def _check_wacc_range(
+        self,
+        dcf_wacc_rows=None,
+        wacc_sheet_wacc_rows=None,
+        use_named_rates_only: Optional[bool] = None,
+    ):
         """Check if WACC is in reasonable range across named ranges and both WACC and DCF sheets."""
         try:
-            sheets_to_check = [
-                (title, grid)
-                for title, grid in (('WACC', self._wacc_grid), ('DCF', self._dcf_grid))
-                if grid is not None
-            ]
-            if not sheets_to_check:
+            if self._wacc_grid is None and self._dcf_grid is None:
                 # Missing sheets already recorded as errors in check_sheet_structure()
                 return
+
+            if use_named_rates_only is None:
+                use_named_rates_only = all(
+                    s in self._named_scenario_tg for s in SCENARIO_NAMES
+                ) and (
+                    'wacc' in self._named_metrics
+                    or all(s in self._named_scenario_wacc for s in SCENARIO_NAMES)
+                )
 
             seen_rounded: set[float] = set()
             wacc_entries: list[tuple[float, str]] = []
@@ -807,9 +938,34 @@ class DCFModelValidator:
                 seen_rounded.add(key)
                 wacc_entries.append((named_wacc[0], named_wacc[1]))
 
-            for title, grid in sheets_to_check:
-                _, wacc_rows = self._extract_rate_rows(title, grid)
-                for _, _, _, entries in wacc_rows:
+            for scenario in SCENARIO_NAMES:
+                sw = self._named_scenario_wacc.get(scenario)
+                if sw is not None:
+                    key = round(sw[0], 8)
+                    if key not in seen_rounded:
+                        seen_rounded.add(key)
+                        wacc_entries.append((sw[0], sw[1]))
+
+            if not use_named_rates_only:
+                if wacc_sheet_wacc_rows is None:
+                    wacc_sheet_rows = (
+                        self._extract_rate_rows('WACC', self._wacc_grid)[1]
+                        if self._wacc_grid is not None
+                        else []
+                    )
+                else:
+                    wacc_sheet_rows = wacc_sheet_wacc_rows
+
+                if dcf_wacc_rows is None:
+                    dcf_rows = (
+                        self._extract_rate_rows('DCF', self._dcf_grid)[1]
+                        if self._dcf_grid is not None
+                        else []
+                    )
+                else:
+                    dcf_rows = dcf_wacc_rows
+
+                for _, _, _, entries in wacc_sheet_rows + dcf_rows:
                     for _, val, coord in entries:
                         key = round(val, 8)
                         if key not in seen_rounded:
@@ -840,19 +996,21 @@ class DCFModelValidator:
             named_tv = self._named_metrics.get('pv_terminal_value')
             named_ev = self._named_metrics.get('enterprise_value')
             terminal_value: Optional[float] = named_tv[0] if named_tv is not None else None
+            tv_row: Optional[int] = (
+                named_tv[3] if (named_tv is not None and named_tv[2] == 'DCF') else None
+            )
             enterprise_value: Optional[float] = named_ev[0] if named_ev is not None else None
 
             if terminal_value is None or enterprise_value is None:
+                pv_tv_candidates: list[tuple[int, float]] = []
+                ev_candidates: list[tuple[int, float]] = []
+
                 for row_idx in sorted(self._dcf_grid):
                     row_map = self._dcf_grid[row_idx]
-                    row_texts = [
-                        val.lower()
-                        for col_idx in sorted(row_map)
-                        for val, _ in (row_map[col_idx],)
-                        if isinstance(val, str) and val.strip()
-                    ]
-                    if any(_is_sensitivity_header(t) for t in row_texts):
-                        if terminal_value is not None or enterprise_value is not None:
+                    row_has_numeric = any(_is_number(val) for val, _ in row_map.values())
+                    primary_text = _primary_row_text(row_map)
+                    if _is_sensitivity_stop_row(primary_text, row_has_numeric):
+                        if pv_tv_candidates or ev_candidates or named_tv is not None or named_ev is not None:
                             break
                         continue
 
@@ -860,21 +1018,33 @@ class DCFModelValidator:
                         val, _ = row_map[col_idx]
                         if not (val and isinstance(val, str)):
                             continue
-                        if terminal_value is None and _is_pv_tv_label(val):
+                        if _is_pv_tv_label(val):
                             for offset in range(1, 6):
                                 adj = row_map.get(col_idx + offset)
                                 if adj is not None and _is_number(adj[0]) and adj[0] > 0:
-                                    terminal_value = float(adj[0])
+                                    pv_tv_candidates.append((row_idx, float(adj[0])))
                                     break
-                        elif enterprise_value is None and _is_ev_label(val):
+                        elif _is_ev_label(val):
                             for offset in range(1, 6):
                                 adj = row_map.get(col_idx + offset)
                                 if adj is not None and _is_number(adj[0]) and adj[0] > 0:
-                                    enterprise_value = float(adj[0])
+                                    ev_candidates.append((row_idx, float(adj[0])))
                                     break
 
-                    if terminal_value is not None and enterprise_value is not None:
-                        break
+                if terminal_value is None and pv_tv_candidates:
+                    tv_row, terminal_value = pv_tv_candidates[0]
+
+                if enterprise_value is None and ev_candidates:
+                    if tv_row is not None:
+                        after_tv = [c for c in ev_candidates if c[0] >= tv_row]
+                        if after_tv:
+                            enterprise_value = after_tv[0][1]
+                        else:
+                            preceding = [c for c in ev_candidates if 0 < tv_row - c[0] <= 15]
+                            if preceding:
+                                enterprise_value = min(preceding, key=lambda c: tv_row - c[0])[1]
+                    else:
+                        enterprise_value = ev_candidates[0][1]
 
             if terminal_value is not None and enterprise_value is not None and enterprise_value > 0:
                 proportion = terminal_value / enterprise_value

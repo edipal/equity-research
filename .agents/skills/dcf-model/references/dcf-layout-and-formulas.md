@@ -44,8 +44,12 @@ python3 .agents/skills/dcf-model/scripts/build_dcf_skeleton.py \
   - `Case` → `DCF!$B$4` (Active scenario selector: `1` = Bear, `2` = Base, `3` = Bull)
   - `DCF_WACC` → `WACC!$C$30` (Weighted Average Cost of Capital output)
   - `TerminalGrowth` → `DCF!$C$69` (Active Case Terminal Growth Rate)
+  - `TerminalGrowth_Bear` → `DCF!$C$33` (Bear Case Terminal Growth Rate)
+  - `TerminalGrowth_Base` → `DCF!$C$45` (Base Case Terminal Growth Rate)
+  - `TerminalGrowth_Bull` → `DCF!$C$57` (Bull Case Terminal Growth Rate)
   - `PV_TerminalValue` → `DCF!$C$99` (PV of Perpetuity Terminal Value)
   - `EnterpriseValue` → `DCF!$C$100` (Implied Enterprise Value)
+  - *(Optional for multi-WACC models: `WACC_Bear`, `WACC_Base`, `WACC_Bull` — automatically resolved and paired per scenario by `validate_dcf.py` when defined.)*
 
 ### Section 1 — Market Data & Valuation Inputs (Rows 6–22)
 - `C8` Current Share Price, `C9` Basic Shares Outstanding
@@ -76,14 +80,14 @@ Each block MUST include: (1) section banner, (2) column header row showing the e
 9. Exit EV/EBITDA Multiple (`x`, scalar in col `C`)
 
 ### Section 3 — Active Case Consolidation Block (Rows 60–70)
-Pull the active scenario dynamically using `INDEX` over the vertical stacked blocks with `INT($B$4)` guarding against fractional values — **zero nested `IF` statements** in projection rows:
+Pull the active scenario dynamically using `INDEX` over the vertical stacked blocks with `INT(Case)` guarding against fractional values — **zero nested `IF` statements** in projection rows:
 
 ```excel
 # Annual driver (offset k in 1..7, column col in C..G):
-=INDEX(C$26:C$58,(INT($B$4)-1)*12+k)
+=INDEX(C$26:C$58,(INT(Case)-1)*12+k)
 
 # Scalar terminal driver (offset k in 8..9, column C):
-=INDEX(C$26:C$58,(INT($B$4)-1)*12+k)
+=INDEX(C$26:C$58,(INT(Case)-1)*12+k)
 ```
 
 Row assignments in `build_dcf_skeleton.py`:
