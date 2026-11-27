@@ -15,6 +15,7 @@ import posixpath
 import re
 import zipfile
 from pathlib import Path
+from typing import Any
 from xml.etree import ElementTree as ET
 
 EXCEL_ERRORS = ("#REF!", "#DIV/0!", "#VALUE!", "#NAME?", "#N/A", "#NUM!", "#NULL!")
@@ -130,17 +131,22 @@ def _sheet_titles_by_xml_path(zf: zipfile.ZipFile) -> dict[str, str]:
     return mapping
 
 
-def workbook_has_data_tables(xlsx_path: Path) -> list[str]:
-    """Return list of Excel What-If data table locations (<f t="dataTable">) in an OOXML workbook.
+def inspect_workbook_xml(xlsx_path: Path) -> dict[str, Any]:
+    """Inspect OOXML worksheets in a single O(1)-memory streaming XML pass.
 
-    Uses streaming XML inspection inside the zip archive so it works in O(1) memory
-    without invoking LibreOffice or loading full openpyxl worksheet DOMs.
-    Fails closed by raising WorkbookLoadError on corrupt archives or malformed XML.
+    Returns a dictionary with:
+        - ``"data_tables"``: list of Excel What-If data table locations (``Sheet!ref``).
+        - ``"uncached_formulas"``: exact count of formula ``<c>`` cells lacking a cached
+          value (matching openpyxl / ``is_uncached_formula()`` semantics), or ``None`` for
+          non-OOXML legacy formats such as ``.xls``.
+
+    Fails closed by raising ``WorkbookLoadError`` on corrupt OOXML archives or malformed XML.
     """
     if xlsx_path.suffix.lower() not in OOXML_ZIP_SUFFIXES:
-        return []
+        return {"data_tables": [], "uncached_formulas": None}
     try:
         locations: list[str] = []
+        uncached_formulas = 0
         with zipfile.ZipFile(xlsx_path, "r") as zf:
             titles = _sheet_titles_by_xml_path(zf)
             sheet_entries = sorted(
@@ -151,24 +157,64 @@ def workbook_has_data_tables(xlsx_path: Path) -> list[str]:
             for entry in sheet_entries:
                 sheet_label = titles.get(entry, Path(entry).stem)
                 with zf.open(entry, "r") as stream:
+                    in_cell = False
                     current_cell_ref: str | None = None
+                    current_cell_type = ""
+                    cell_has_formula = False
+                    cell_has_v = False
+                    cell_v_text: str | None = None
                     for event, elem in ET.iterparse(stream, events=("start", "end")):
                         local = _local_tag(elem.tag)
                         if event == "start":
                             if local == "c":
+                                in_cell = True
                                 current_cell_ref = elem.attrib.get("r")
-                            elif local == "f" and elem.attrib.get("t") == "dataTable":
-                                ref = elem.attrib.get("ref") or current_cell_ref or "dataTable"
-                                locations.append(f"{sheet_label}!{ref}")
+                                current_cell_type = elem.attrib.get("t", "")
+                                cell_has_formula = False
+                                cell_has_v = False
+                                cell_v_text = None
+                            elif in_cell and local == "f":
+                                cell_has_formula = True
+                                if elem.attrib.get("t") == "dataTable":
+                                    ref = elem.attrib.get("ref") or current_cell_ref or "dataTable"
+                                    locations.append(f"{sheet_label}!{ref}")
                         else:
-                            if local == "c":
+                            if in_cell and local == "v":
+                                if not cell_has_v:
+                                    cell_has_v = True
+                                    cell_v_text = elem.text
+                            elif local == "c":
+                                if cell_has_formula:
+                                    if cell_has_v and cell_v_text not in (None, ""):
+                                        pass  # cached value present
+                                    elif current_cell_type in ("str", "s") and cell_has_v:
+                                        pass  # cached empty string ""
+                                    else:
+                                        uncached_formulas += 1
+                                in_cell = False
                                 current_cell_ref = None
+                                current_cell_type = ""
+                                cell_has_formula = False
+                                cell_has_v = False
+                                cell_v_text = None
                             elem.clear()
-        return locations
+        return {
+            "data_tables": locations,
+            "uncached_formulas": uncached_formulas,
+        }
     except (zipfile.BadZipFile, ET.ParseError, KeyError, OSError) as exc:
         raise WorkbookLoadError(
-            f"Failed to inspect workbook '{xlsx_path}' for What-If data tables: {exc}"
+            f"Failed to inspect workbook '{xlsx_path}' XML (What-If data tables / uncached formulas): {exc}"
         ) from exc
+
+
+def workbook_has_data_tables(xlsx_path: Path) -> list[str]:
+    """Return list of Excel What-If data table locations (<f t="dataTable">) in an OOXML workbook.
+
+    Thin wrapper around ``inspect_workbook_xml`` so existing callers share the same
+    fail-closed streaming XML inspection.
+    """
+    return inspect_workbook_xml(xlsx_path)["data_tables"]
 
 
 def scan_workbook_formulas(xlsx_path: Path) -> dict:

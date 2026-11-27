@@ -1493,7 +1493,7 @@ class TestRecalcXlsx(unittest.TestCase):
                 mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value=None),
                 mock.patch.object(
                     recalc_xlsx_mod,
-                    "workbook_has_data_tables",
+                    "inspect_workbook_xml",
                     side_effect=recalc_xlsx_mod.WorkbookLoadError("unparseable custom sheet XML"),
                 ),
             ):
@@ -1750,6 +1750,155 @@ class TestRecalcXlsx(unittest.TestCase):
         ):
             with self.assertRaises(recalc_xlsx_mod.WorkbookLoadError):
                 recalc_xlsx_mod.scan_workbook(Path("dummy.xlsx"))
+
+    def test_inspect_workbook_xml_matches_scan_workbook_formulas_across_formula_types(self) -> None:
+        import xml.etree.ElementTree as ET
+        from openpyxl.worksheet.formula import ArrayFormula, DataTableFormula
+
+        ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+        ET.register_namespace("", ns)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "mixed_formulas.xlsx"
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Model"
+            ws["A1"] = 10
+            ws["A2"] = 20
+            ws["A3"] = 30
+            # Normal uncached formula
+            ws["B1"] = "=A1*2"
+            # Cached numeric formula (injected below)
+            ws["B2"] = "=A2*2"
+            # Cached empty-string formula (<c t="str"><f>...</f><v></v></c>)
+            ws["B3"] = '=IF(A1>0,"","Alert")'
+            # Cached error formula (<c t="e"><f>1/0</f><v>#DIV/0!</v></c>)
+            ws["B4"] = "=1/0"
+            # Shared formulas: C1 master (uncached), C2 follower (uncached), C3 follower (cached)
+            ws["C1"] = "=A1+1"
+            ws["C2"] = "=A2+1"
+            ws["C3"] = "=A3+1"
+            # ArrayFormula (uncached)
+            ws["D1"] = ArrayFormula("D1:D1", "=A1*3")
+            # DataTableFormula (uncached)
+            ws["E1"] = DataTableFormula(ref="E1:F2", dt2D=True, r1="A1", r2="A2")
+            wb.save(path)
+            wb.close()
+
+            with zipfile.ZipFile(path, "r") as zin:
+                entries = {name: zin.read(name) for name in zin.namelist()}
+            root = ET.fromstring(entries["xl/worksheets/sheet1.xml"])
+            for cell in root.iter(f"{{{ns}}}c"):
+                ref = cell.attrib.get("r")
+                f_el = cell.find(f"{{{ns}}}f")
+                v_el = cell.find(f"{{{ns}}}v")
+                if ref == "B2":
+                    cell.attrib.pop("t", None)
+                    if v_el is None:
+                        v_el = ET.SubElement(cell, f"{{{ns}}}v")
+                    v_el.text = "40"
+                elif ref == "B3":
+                    cell.attrib["t"] = "str"
+                    if v_el is None:
+                        v_el = ET.SubElement(cell, f"{{{ns}}}v")
+                    v_el.text = ""
+                elif ref == "B4":
+                    cell.attrib["t"] = "e"
+                    if v_el is None:
+                        v_el = ET.SubElement(cell, f"{{{ns}}}v")
+                    v_el.text = "#DIV/0!"
+                elif ref == "C1" and f_el is not None:
+                    f_el.attrib["t"] = "shared"
+                    f_el.attrib["ref"] = "C1:C3"
+                    f_el.attrib["si"] = "0"
+                elif ref == "C2" and f_el is not None:
+                    f_el.attrib["t"] = "shared"
+                    f_el.attrib["si"] = "0"
+                    f_el.text = None
+                elif ref == "C3" and f_el is not None:
+                    f_el.attrib["t"] = "shared"
+                    f_el.attrib["si"] = "0"
+                    f_el.text = None
+                    cell.attrib.pop("t", None)
+                    if v_el is None:
+                        v_el = ET.SubElement(cell, f"{{{ns}}}v")
+                    v_el.text = "31"
+
+            entries["xl/worksheets/sheet1.xml"] = ET.tostring(
+                root, encoding="utf-8", xml_declaration=True
+            )
+            with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+                for name, data in entries.items():
+                    zout.writestr(name, data)
+
+            xml_info = xlsx_scan_mod.inspect_workbook_xml(path)
+            scan_info = xlsx_scan_mod.scan_workbook_formulas(path)
+
+            # Uncached formulas: B1 (normal), C1 (shared master), C2 (shared follower), D1 (array), E1 (dataTable) = 5
+            # Cached formulas: B2 (numeric 40), B3 (cached ""), B4 (cached #DIV/0!), C3 (shared follower 31) = 4
+            self.assertEqual(xml_info["uncached_formulas"], 5, xml_info)
+            self.assertEqual(xml_info["uncached_formulas"], scan_info["uncached_formulas"])
+            self.assertEqual(xml_info["data_tables"], ["Model!E1:F2"])
+            self.assertEqual(
+                xlsx_scan_mod.workbook_has_data_tables(path),
+                xml_info["data_tables"],
+            )
+
+            # Non-OOXML legacy .xls returns empty data_tables and uncached_formulas=None
+            legacy_xls = Path(tmp) / "legacy.xls"
+            legacy_xls.write_bytes(b"not-a-zip-legacy-xls")
+            self.assertEqual(
+                xlsx_scan_mod.inspect_workbook_xml(legacy_xls),
+                {"data_tables": [], "uncached_formulas": None},
+            )
+
+            # Corrupt .xlsx (non-zip bytes) MUST fail closed with WorkbookLoadError
+            corrupt_xlsx = Path(tmp) / "corrupt.xlsx"
+            corrupt_xlsx.write_bytes(b"not-a-zip-archive")
+            with self.assertRaises(xlsx_scan_mod.WorkbookLoadError):
+                xlsx_scan_mod.inspect_workbook_xml(corrupt_xlsx)
+
+    @unittest.skipIf(
+        recalc_xlsx_mod.find_soffice() is None,
+        "LibreOffice (soffice) is required for single-scan check-only regression test",
+    )
+    def test_check_only_with_libreoffice_calls_scan_workbook_once_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "single_scan_check.xlsx"
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Model"
+            ws["A1"] = 10
+            ws["A2"] = "=A1*5"
+            ws["A3"] = "=A2+7"
+            wb.save(path)
+            wb.close()
+
+            orig_bytes = path.read_bytes()
+            real_scan = recalc_xlsx_mod.scan_workbook
+
+            for flags in ([], ["--check-only"]):
+                with self.subTest(flags=flags):
+                    with mock.patch.object(
+                        recalc_xlsx_mod, "scan_workbook", wraps=real_scan
+                    ) as spy_scan:
+                        rc, payload = self._run_main([str(path), "30", *flags])
+
+                    self.assertEqual(rc, 0, payload)
+                    self.assertEqual(payload["status"], "success")
+                    self.assertTrue(payload["recalculated_with_libreoffice"])
+                    self.assertFalse(payload["modified_file"])
+                    self.assertEqual(payload["uncached_formulas"], 0)
+                    self.assertEqual(payload["on_disk_uncached_formulas"], 2)
+                    self.assertIn(
+                        "Input file on disk still has 2 uncached formula(s)",
+                        payload.get("warning", ""),
+                    )
+                    # Must call scan_workbook() EXACTLY ONCE (on LibreOffice temp copy, NEVER on input path)
+                    self.assertEqual(spy_scan.call_count, 1)
+                    scanned_target = spy_scan.call_args[0][0]
+                    self.assertNotEqual(Path(scanned_target).resolve(), path.resolve())
+                    self.assertEqual(path.read_bytes(), orig_bytes)
 
 
 @unittest.skipIf(openpyxl is None, "openpyxl is required for DCF validation tests")
@@ -2538,6 +2687,188 @@ class TestValidateDcf(unittest.TestCase):
                 any("Terminal growth (11.00% at DCF!AB266) >= WACC (9.00% at DCF!AB265)" in e for e in res_bad["errors"]),
                 res_bad["errors"],
             )
+
+    def test_detect_scenario_block_header_accepts_banners_and_rejects_ordinary_phrases(self) -> None:
+        detect = validate_dcf_mod._detect_scenario_block_header
+
+        positive_cases = [
+            ("BEAR CASE", "bear"),
+            ("BASE CASE", "base"),
+            ("BULL CASE", "bull"),
+            ("2A. BEAR CASE ASSUMPTIONS (Case = 1)", "bear"),
+            ("2B. BASE CASE ASSUMPTIONS (Case = 2)", "base"),
+            ("2C. BULL CASE ASSUMPTIONS (Case = 3)", "bull"),
+            ("3. ACTIVE CASE ASSUMPTIONS (DRIVEN BY INDEX / CASE SELECTOR)", "active"),
+            ("Active Case", "active"),
+            ("Bear Scenario", "bear"),
+            ("Upside Case", "upside"),
+            ("Downside Case", "downside"),
+            ("Worst Case", "worst"),
+            ("Best Case", "best"),
+            ("Scenario 1: Bear", "bear"),
+            ("SECTION 2: BEAR CASE", "bear"),
+            ("Bear", "bear"),
+            ("Base", "base"),
+            ("Bull", "bull"),
+            ("Upside", "upside"),
+            ("Downside", "downside"),
+        ]
+        for label, expected in positive_cases:
+            with self.subTest(positive=label):
+                self.assertEqual(detect(label, row_has_numeric=False), expected)
+
+        negative_cases = [
+            "LTM / Base Year Revenue (FY2025A)",
+            "Revenue CAGR vs. base year",
+            "Growth vs base",
+            "Delta from base",
+            "% of base",
+            "Base Period Cash Flow",
+            "Base Rate",
+            "Base Revenue",
+            "Base Margin",
+            "Base Value",
+            "Base Price",
+            "Use Case",
+            "Business Case",
+            "Best Practice",
+            "Case Selector",
+            "Active Scenario Selector (1=Bear, 2=Base, 3=Bull)",
+        ]
+        for label in negative_cases:
+            with self.subTest(negative=label):
+                self.assertIsNone(detect(label, row_has_numeric=False))
+                self.assertIsNone(detect(label, row_has_numeric=True))
+
+        # Any row carrying unrelated numeric data MUST NOT act as a scenario block banner
+        self.assertIsNone(detect("BASE CASE", row_has_numeric=True))
+        self.assertIsNone(detect("Base", row_has_numeric=True))
+
+    def test_base_year_label_does_not_split_bull_scenario_block(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            # 1. Section-header per-scenario model: intervening "Revenue CAGR vs. base year"
+            #    inside Bull Case MUST NOT start a 'base' block or hide Bull g (6.5%) >= WACC (6.0%).
+            path = Path(tmp) / "base_year_intervening.xlsx"
+            wb = openpyxl.Workbook()
+            ws_dcf = wb.active
+            ws_dcf.title = "DCF"
+
+            ws_dcf["A2"] = "BASE CASE"
+            ws_dcf["A3"] = "WACC"
+            ws_dcf["B3"] = 0.09
+            ws_dcf["A4"] = "Terminal Growth Rate"
+            ws_dcf["B4"] = 0.025
+
+            ws_dcf["A6"] = "BULL CASE"
+            ws_dcf["A7"] = "WACC"
+            ws_dcf["B7"] = 0.06
+            ws_dcf["A8"] = "Revenue CAGR vs. base year"
+            ws_dcf["B8"] = 0.12
+            ws_dcf["A9"] = "Terminal Growth Rate"
+            ws_dcf["B9"] = 0.065  # INVALID: 6.50% >= Bull WACC 6.00%
+
+            ws_dcf["A12"] = "PV of Terminal Value"
+            ws_dcf["B12"] = 600.0
+            ws_dcf["A13"] = "Enterprise Value"
+            ws_dcf["B13"] = 1000.0
+            ws_dcf["A16"] = "Sensitivity Analysis"
+
+            ws_wacc = wb.create_sheet("WACC")
+            ws_wacc["A3"] = "WEIGHTED AVERAGE COST OF CAPITAL"
+            ws_wacc["B3"] = 0.09
+            wb.save(path)
+            wb.close()
+
+            res = validate_dcf_mod.validate_dcf_model(str(path))
+            self.assertEqual(res["status"], "FAIL", res)
+            self.assertTrue(
+                any(
+                    "Terminal growth (6.50% at DCF!B9) >= WACC (6.00% at DCF!B7)" in e
+                    for e in res["errors"]
+                ),
+                res["errors"],
+            )
+
+            # 2. Explicit per-row labels ("Bull WACC" -> "Revenue CAGR vs. base year" -> "Terminal Growth Rate")
+            #    MUST also keep the Bull block intact and catch 6.50% >= 6.00%.
+            path_inline = Path(tmp) / "base_year_inline_bull.xlsx"
+            wb2 = openpyxl.Workbook()
+            ws_dcf2 = wb2.active
+            ws_dcf2.title = "DCF"
+            ws_dcf2["A2"] = "Base WACC"
+            ws_dcf2["B2"] = 0.09
+            ws_dcf2["A3"] = "Base Terminal Growth"
+            ws_dcf2["B3"] = 0.025
+            ws_dcf2["A4"] = "Bull WACC"
+            ws_dcf2["B4"] = 0.06
+            ws_dcf2["A5"] = "Revenue CAGR vs. base year"
+            ws_dcf2["B5"] = 0.12
+            ws_dcf2["A6"] = "Terminal Growth Rate"
+            ws_dcf2["B6"] = 0.065  # INVALID vs Bull WACC 6.0%
+            ws_dcf2["A10"] = "PV of Terminal Value"
+            ws_dcf2["B10"] = 600.0
+            ws_dcf2["A11"] = "Enterprise Value"
+            ws_dcf2["B11"] = 1000.0
+            ws_dcf2["A14"] = "Sensitivity Analysis"
+
+            ws_wacc2 = wb2.create_sheet("WACC")
+            ws_wacc2["A3"] = "WEIGHTED AVERAGE COST OF CAPITAL"
+            ws_wacc2["B3"] = 0.09
+            wb2.save(path_inline)
+            wb2.close()
+
+            res2 = validate_dcf_mod.validate_dcf_model(str(path_inline))
+            self.assertEqual(res2["status"], "FAIL", res2)
+            self.assertTrue(
+                any(
+                    "Terminal growth (6.50% at DCF!B6) >= WACC (6.00% at DCF!B4)" in e
+                    for e in res2["errors"]
+                ),
+                res2["errors"],
+            )
+
+    @unittest.skipIf(
+        recalc_xlsx_mod.find_soffice() is None,
+        "LibreOffice (soffice) is required to evaluate build_dcf_skeleton.py",
+    )
+    def test_dcf_skeleton_base_year_revenue_does_not_tag_global_wacc_as_base(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            model_path = Path(tmp) / "skeleton_tag_check.xlsx"
+            build_proc = subprocess.run(
+                [sys.executable, str(BUILD_DCF_SKELETON_PATH), "--output", str(model_path)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(build_proc.returncode, 0, build_proc.stdout + build_proc.stderr)
+
+            recalc_proc = subprocess.run(
+                [sys.executable, str(RECALC_XLSX_PATH), str(model_path), "30", "--in-place"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(recalc_proc.returncode, 0, recalc_proc.stdout + recalc_proc.stderr)
+
+            validator = validate_dcf_mod.DCFModelValidator(str(model_path))
+            assert validator._dcf_grid is not None
+            tg_rows, wacc_rows = validator._extract_rate_rows("DCF", validator._dcf_grid)
+
+            # Row 21 ("Discount Rate (WACC)") sits immediately after Row 20 ("LTM / Base Year Revenue (FY2025A)")
+            # and MUST remain global (scenario_tag=None), NOT tagged as 'base'.
+            row21_waccs = [entry for entry in wacc_rows if entry[0] == 21]
+            self.assertEqual(len(row21_waccs), 1, f"Expected DCF!A21 WACC row, got: {wacc_rows}")
+            self.assertIsNone(
+                row21_waccs[0][2],
+                f"Global WACC row DCF!A21 was wrongly tagged: {row21_waccs[0]}",
+            )
+
+            # Verify Bear/Base/Bull/Active scenario tags on Terminal Growth rows remain accurate
+            tg_tags_by_row = {row_idx: tag for row_idx, _, tag, _ in tg_rows}
+            self.assertEqual(tg_tags_by_row.get(33), "bear")
+            self.assertEqual(tg_tags_by_row.get(45), "base")
+            self.assertEqual(tg_tags_by_row.get(57), "bull")
+            self.assertEqual(tg_tags_by_row.get(69), "active")
 
 
 @unittest.skipIf(openpyxl is None, "openpyxl is required for DCF skeleton tests")

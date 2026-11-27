@@ -79,6 +79,12 @@ GENUINE_WACC_CORES = frozenset({
     'bear case wacc',
     'bull wacc',
     'bull case wacc',
+    'upside wacc',
+    'upside case wacc',
+    'downside wacc',
+    'downside case wacc',
+    'worst case wacc',
+    'best case wacc',
     'calculated wacc',
     'active wacc',
     'effective wacc',
@@ -108,7 +114,44 @@ PV_TV_EXPLICIT_RE = re.compile(
 )
 EV_SHORT_RE = re.compile(r'\b(?:implied|total|dcf)\s+ev\b')
 SCENARIO_TAG_RE = re.compile(r'\b(bear|base|bull|upside|downside|worst|best)\b')
-SCENARIO_BOUNDARY_RE = re.compile(r'\b(bear|base|bull|upside|downside|worst|best|case|scenario)\b')
+NON_SCENARIO_PHRASE_RE = re.compile(
+    r'\b('
+    r'base\s+(?:year|period|rate|revenue|sales|margin|value|price|cost|costs|fee|salary|ebitda|fcf|earnings|eps|growth|line|number|amount|figure|metric)'
+    r'|(?:vs\.?|versus|from|of|to|above|below|over|relative\s+to|installed|customer|user|client|subscriber|revenue|cost|asset|tax|share|capital|deposit|earnings)\s+base'
+    r'|(?:use|business|edge|test|legal|court|special)\s+case'
+    r'|best\s+(?:practice|practices|estimate|estimates|in[\s-]class|effort|efforts)'
+    r'|(?:case|scenario)\s+(?:selector|switch|toggle|picker|dropdown|input|driver)'
+    r')\b'
+)
+SCENARIO_HEADER_PREFIX_RE = re.compile(
+    r'^(?:'
+    r'(?:section|part|tab|block|schedule)\s+[a-z0-9]+(?:\.[a-z0-9]+)?'
+    r'|(?:scenario|case)(?:\s+[a-z0-9]+)?'
+    r'|[0-9]+[a-z]?(?:\.[0-9]+[a-z]?)?'
+    r'|[a-z]\)'
+    r')\s*[:.\-\u2013\u2014)]\s*'
+)
+_SCENARIO_HEADER_SUFFIX = (
+    r'(?:\s+(?:assumptions?|inputs?|drivers?|projections?|model|summary|valuation|'
+    r'overview|analysis|estimates?|forecasts?|parameters?|outputs?|block|section))?'
+)
+SCENARIO_HEADER_RE = re.compile(
+    r'^(bear|base|bull|upside|downside|worst|best)'
+    r'(?:'
+    r'[\s-]+(?:case|scenario)(?:\s+scenario)?'
+    + _SCENARIO_HEADER_SUFFIX
+    + r'(?:\s*[:\-\u2013\u2014]\s*[^|]{1,40})?'
+    r'|\s+(?:assumptions?|inputs?|drivers?|projections?|model|summary|valuation|overview|estimates?|forecasts?|parameters?|outputs?|block|section)'
+    r')?$'
+)
+ACTIVE_SCENARIO_HEADER_RE = re.compile(
+    r'^active[\s-]+(?:case|scenario)'
+    + _SCENARIO_HEADER_SUFFIX
+    + r'(?:\s*[:\-\u2013\u2014]\s*[^|]{1,40})?$'
+)
+GENERIC_SCENARIO_HEADER_RE = re.compile(
+    r'^(?:scenario|case)\s+([a-z0-9]+)' + _SCENARIO_HEADER_SUFFIX + r'$'
+)
 
 NAMED_WACC_ALIASES = ('dcf_wacc', 'wacc', 'wacc_rate')
 NAMED_TG_ALIASES = ('terminalgrowth', 'terminal_growth', 'dcf_terminalgrowth')
@@ -139,6 +182,52 @@ def _is_sensitivity_header(text: str) -> bool:
     ):
         return True
     return False
+
+
+def _detect_scenario_block_header(label: str, row_has_numeric: bool = False) -> Optional[str]:
+    """Detect whether a non-rate row label is a genuine scenario block boundary header.
+
+    Returns a canonical scenario tag (``'bear'``, ``'base'``, ``'bull'``, ``'upside'``,
+    ``'downside'``, ``'worst'``, ``'best'``, ``'active'``, or ``'scenario_<id>'``) only for
+    header/banner rows without unrelated numeric data. Explicitly rejects ordinary metric
+    and prose labels such as ``'LTM / Base Year Revenue'``, ``'Revenue CAGR vs. base year'``,
+    ``'Business Case'``, ``'Best Practice'``, or ``'Active Scenario Selector'``.
+    """
+    if row_has_numeric:
+        return None
+    low = ' '.join(label.lower().strip().split())
+    if not low or _is_sensitivity_header(low):
+        return None
+
+    core = re.sub(r'\s*\([^)]*\)', '', low).rstrip(':').strip()
+    if not core:
+        return None
+
+    if NON_SCENARIO_PHRASE_RE.search(core):
+        return None
+
+    stripped = core
+    for _ in range(2):
+        nxt = SCENARIO_HEADER_PREFIX_RE.sub('', stripped, count=1).strip()
+        if nxt == stripped or not nxt:
+            break
+        stripped = nxt
+
+    if NON_SCENARIO_PHRASE_RE.search(stripped):
+        return None
+
+    match = SCENARIO_HEADER_RE.match(stripped)
+    if match:
+        return match.group(1)
+
+    if ACTIVE_SCENARIO_HEADER_RE.match(stripped):
+        return 'active'
+
+    generic_match = GENERIC_SCENARIO_HEADER_RE.match(stripped)
+    if generic_match:
+        return f"scenario_{generic_match.group(1)}"
+
+    return None
 
 
 def _is_wacc_label(text: str) -> bool:
@@ -437,7 +526,8 @@ class DCFModelValidator:
 
     @staticmethod
     def _single_scenario_tag(text: str) -> Optional[str]:
-        tags = set(SCENARIO_TAG_RE.findall(text.lower()))
+        cleaned = NON_SCENARIO_PHRASE_RE.sub(' ', text.lower())
+        tags = set(SCENARIO_TAG_RE.findall(cleaned))
         if len(tags) == 1:
             return next(iter(tags))
         return None
@@ -503,6 +593,7 @@ class DCFModelValidator:
                 for val, _ in (row_map[col_idx],)
                 if isinstance(val, str) and val.strip()
             ]
+            row_has_numeric = any(_is_number(val) for val, _ in row_map.values())
             if any(_is_sensitivity_header(t) for t in row_texts):
                 if tg_rows or wacc_rows:
                     break
@@ -535,10 +626,14 @@ class DCFModelValidator:
                         row_matches.append(('wacc', val, entries))
 
             if not row_matches:
-                if any(SCENARIO_BOUNDARY_RE.search(t) for t in row_texts):
+                detected_tags = {
+                    tag
+                    for text in row_texts
+                    if (tag := _detect_scenario_block_header(text, row_has_numeric)) is not None
+                }
+                if detected_tags:
                     block_id += 1
-                    tags = set(SCENARIO_TAG_RE.findall(' '.join(row_texts)))
-                    block_tag = next(iter(tags)) if len(tags) == 1 else None
+                    block_tag = next(iter(detected_tags)) if len(detected_tags) == 1 else None
                 continue
 
             for kind, label_text, entries in row_matches:

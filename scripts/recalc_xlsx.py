@@ -37,8 +37,8 @@ if _SCRIPTS_DIR not in sys.path:
 from xlsx_scan import (  # noqa: E402
     OOXML_ZIP_SUFFIXES,
     WorkbookLoadError,
+    inspect_workbook_xml,
     scan_workbook_formulas,
-    workbook_has_data_tables,
 )
 
 REGISTRY_MODIFICATIONS_XCU = """<?xml version="1.0" encoding="UTF-8"?>
@@ -459,13 +459,18 @@ def main(argv: list[str] | None = None) -> int:
 
     is_in_place = dest_path is not None and _is_same_file(dest_path, xlsx_path)
 
-    # Protect Excel What-If data tables (<f t="dataTable">) from in-place LibreOffice corruption.
-    # Fail closed on corrupt OOXML zip/XML when an in-place overwrite is requested; in non-destructive
-    # read-only (--check-only / default) or separate --output modes, warn and let the audit proceed.
+    # Single streaming OOXML pass to (1) detect Excel What-If data tables (<f t="dataTable">)
+    # before any in-place LibreOffice overwrite and (2) count on-disk uncached formulas without
+    # re-opening the input workbook twice in openpyxl after LibreOffice runs in check-only mode.
+    # Fail closed on corrupt OOXML zip/XML when an in-place overwrite is requested; in
+    # non-destructive read-only (--check-only / default) or separate --output modes, warn and proceed.
     warnings: list[str] = []
     data_table_locs: list[str] = []
+    pre_scan_uncached: int | None = None
     try:
-        data_table_locs = workbook_has_data_tables(xlsx_path)
+        xml_info = inspect_workbook_xml(xlsx_path)
+        data_table_locs = xml_info["data_tables"]
+        pre_scan_uncached = xml_info["uncached_formulas"]
     except WorkbookLoadError as exc:
         if is_in_place:
             print(
@@ -480,7 +485,9 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
             return 1
-        warnings.append(f"Could not inspect input XML for Excel What-If data tables: {exc}")
+        warnings.append(
+            f"Could not inspect input XML for Excel What-If data tables or uncached formulas: {exc}"
+        )
 
     if data_table_locs:
         locs_preview = ", ".join(data_table_locs[:5])
@@ -611,17 +618,7 @@ def main(argv: list[str] | None = None) -> int:
 
     on_disk_uncached: int | None
     if is_check_only and recalculated:
-        if xlsx_path.suffix.lower() in OOXML_ZIP_SUFFIXES:
-            try:
-                disk_scan = scan_workbook(xlsx_path)
-                on_disk_uncached = disk_scan["uncached_formulas"]
-            except WorkbookLoadError as exc:
-                on_disk_uncached = None
-                warnings.append(
-                    f"Could not inspect input file on disk for uncached formulas: {exc}"
-                )
-        else:
-            on_disk_uncached = None
+        on_disk_uncached = pre_scan_uncached
     else:
         on_disk_uncached = scan["uncached_formulas"]
 
