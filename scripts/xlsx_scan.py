@@ -14,6 +14,7 @@ import itertools
 import posixpath
 import re
 import zipfile
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
@@ -144,21 +145,73 @@ def _sheet_titles_by_xml_path(zf: zipfile.ZipFile) -> dict[str, str]:
     return mapping
 
 
-def _detect_manifest_lossy_features(namelist: list[str]) -> set[str]:
-    """Identify Excel features in the OOXML archive manifest that LibreOffice re-export can drop or alter.
+_SAFE_EXACT_PARTS = frozenset({
+    "[content_types].xml",
+    "_rels/.rels",
+    "xl/workbook.xml",
+    "xl/_rels/workbook.xml.rels",
+    "xl/styles.xml",
+    "xl/sharedstrings.xml",
+    "xl/calcchain.xml",
+})
 
-    Legacy comment VML files (``xl/drawings/commentsDrawing*.vml`` and
-    ``xl/drawings/vmlDrawing*.vml``) are intentionally excluded from ``drawings_or_shapes``
-    so workbooks with standard blue-input source cell comments still support ``--in-place``.
+_SAFE_PREFIX_PARTS = (
+    "docprops/",
+    "xl/theme/",
+    "xl/printersettings/",
+)
+
+_SAFE_REGEX_PARTS = (
+    re.compile(r"^xl/worksheets/sheet[^/]+\.xml$"),
+    re.compile(r"^xl/worksheets/_rels/sheet[^/]+\.xml\.rels$"),
+    # Standard Excel / LibreOffice legacy cell notes (xl/comments1.xml) and openpyxl (xl/comments/comment1.xml)
+    re.compile(r"^xl/comments\d*\.xml$"),
+    re.compile(r"^xl/_rels/comments\d*\.xml\.rels$"),
+    re.compile(r"^xl/comments/comment\d*\.xml$"),
+    re.compile(r"^xl/comments/_rels/comment\d*\.xml\.rels$"),
+    # Legacy comment VML emitted by openpyxl / Excel / LibreOffice
+    re.compile(r"^xl/drawings/(?:vml|comments)drawing\d*\.vml$"),
+    re.compile(r"^xl/drawings/_rels/(?:vml|comments)drawing\d*\.vml\.rels$"),
+)
+
+# Verified-safe worksheet <extLst><ext uri="..."> URIs (empty: neither openpyxl nor
+# LibreOffice 24.2 emits worksheet <extLst> elements on clean workbooks).
+_SAFE_WORKSHEET_EXT_URIS: frozenset[str] = frozenset()
+
+_LOSSY_WORKSHEET_EXT_URIS: dict[str, str] = {
+    "{05C60535-1F16-4FD2-B633-F4F36F0B64E0}": "sparklines",
+    "{78C0D931-6437-407D-A8EE-F0AAD7539E65}": "x14_conditional_formatting",
+    "{CCE6A557-97BC-4B89-ADB6-D9C93CAAB3DF}": "x14_data_validation",
+    "{A8765BA9-456A-4DAB-B4F3-ACF838C121DE}": "slicers_or_timelines",
+    "{7E03D99C-DC04-49D9-9315-930204A7B6E9}": "slicers_or_timelines",
+}
+
+
+def _is_safe_ooxml_part(low: str) -> bool:
+    """Return True if a normalized lowercase OOXML zip member is known-safe for LibreOffice re-export."""
+    if low in _SAFE_EXACT_PARTS:
+        return True
+    if low.startswith(_SAFE_PREFIX_PARTS):
+        return True
+    return any(pattern.match(low) for pattern in _SAFE_REGEX_PARTS)
+
+
+def _detect_manifest_lossy_features(namelist: list[str]) -> set[str]:
+    """Identify non-allowlisted OOXML archive parts that LibreOffice re-export can drop or alter.
+
+    Uses an allowlist of known-safe core OOXML parts (worksheets, styles, sharedStrings,
+    calcChain, themes, docProps, printerSettings, and legacy comment XML/VML) so unknown
+    or newer Excel parts fail closed as ``unsupported_ooxml_parts`` instead of slipping past
+    a denylist.
     """
     features: set[str] = set()
     for name in namelist:
-        low = name.lower()
-        if (
-            low.startswith("xl/charts/") and not low.startswith("xl/charts/_rels/")
-        ) or (
-            low.startswith("xl/chartsheets/") and not low.startswith("xl/chartsheets/_rels/")
-        ):
+        if not name or name.endswith("/"):
+            continue
+        low = name.replace("\\", "/").lstrip("/").lower()
+        if not low or _is_safe_ooxml_part(low):
+            continue
+        if low.startswith(("xl/charts/", "xl/chartsheets/")):
             features.add("charts")
         elif low.startswith(("xl/pivottables/", "xl/pivotcache/")):
             features.add("pivot_tables")
@@ -166,16 +219,34 @@ def _detect_manifest_lossy_features(namelist: list[str]) -> set[str]:
             ("xl/slicers/", "xl/slicercaches/", "xl/timelines/", "xl/timelinecaches/")
         ):
             features.add("slicers_or_timelines")
-        elif (
-            low.startswith("xl/drawings/")
-            and not low.startswith("xl/drawings/_rels/")
-            and low.endswith(".xml")
-        ):
+        elif low.startswith("xl/drawings/"):
             features.add("drawings_or_shapes")
-        elif low == "xl/vbaproject.bin" or low.endswith("/vbaproject.bin"):
-            features.add("vba_macros")
         elif low.startswith(("xl/ctrlprops/", "xl/activex/")):
             features.add("form_or_activex_controls")
+        elif low.startswith(("xl/threadedcomments/", "xl/persons/")):
+            features.add("threaded_comments")
+        elif (
+            low in ("xl/connections.xml", "xl/_rels/connections.xml.rels")
+            or low.startswith(("xl/querytables/", "xl/model/", "customxml/"))
+        ):
+            features.add("connections_or_power_query")
+        elif low.startswith(("xl/media/", "xl/embeddings/")):
+            features.add("embedded_media_or_objects")
+        elif (
+            low in ("xl/metadata.xml", "xl/_rels/metadata.xml.rels")
+            or low.startswith("xl/richdata/")
+        ):
+            features.add("excel_metadata_or_rich_data")
+        elif low.startswith("xl/externallinks/"):
+            features.add("external_links")
+        elif (
+            low in ("xl/vbaproject.bin", "xl/vbadata.xml")
+            or low.endswith(("/vbaproject.bin", "/vbadata.xml"))
+            or low.startswith(("xl/vbaproject", "xl/vbadata", "xl/macrosheets/", "xl/dialogsheets/"))
+        ):
+            features.add("vba_macros")
+        else:
+            features.add("unsupported_ooxml_parts")
     return features
 
 
@@ -190,10 +261,14 @@ def inspect_workbook_xml(xlsx_path: Path) -> dict[str, Any]:
           OOXML output, while conservatively counting malformed ``t="str"``/``t="e"``
           formula cells with no ``<v>`` element as uncached), or ``None`` for non-OOXML
           legacy formats such as ``.xls``.
-        - ``"lossy_features"``: sorted list of Excel-only feature categories detected in
-          the archive/XML that LibreOffice re-export can drop or alter (``charts``,
-          ``drawings_or_shapes``, ``form_or_activex_controls``, ``pivot_tables``,
-          ``slicers_or_timelines``, ``sparklines``, ``vba_macros``).
+        - ``"lossy_features"``: sorted list of non-allowlisted OOXML parts and worksheet
+          ``<extLst>`` extension categories that LibreOffice re-export can drop or alter
+          (e.g., ``charts``, ``connections_or_power_query``, ``drawings_or_shapes``,
+          ``embedded_media_or_objects``, ``excel_metadata_or_rich_data``,
+          ``external_links``, ``form_or_activex_controls``, ``pivot_tables``,
+          ``slicers_or_timelines``, ``sparklines``, ``threaded_comments``,
+          ``unsupported_ooxml_parts``, ``vba_macros``, ``worksheet_extensions``,
+          ``x14_conditional_formatting``, ``x14_data_validation``).
 
     Fails closed by raising ``WorkbookLoadError`` on corrupt OOXML archives or malformed XML.
     """
@@ -209,12 +284,13 @@ def inspect_workbook_xml(xlsx_path: Path) -> dict[str, Any]:
             sheet_entries = sorted(
                 name
                 for name in namelist
-                if name.startswith("xl/worksheets/") and name.endswith(".xml")
+                if name.lower().startswith("xl/worksheets/") and name.lower().endswith(".xml")
             )
             for entry in sheet_entries:
                 sheet_label = titles.get(entry, Path(entry).stem)
                 with zf.open(entry, "r") as stream:
                     in_cell = False
+                    ext_lst_depth = 0
                     current_cell_ref: str | None = None
                     current_cell_type = ""
                     cell_has_formula = False
@@ -235,10 +311,20 @@ def inspect_workbook_xml(xlsx_path: Path) -> dict[str, Any]:
                                 if elem.attrib.get("t") == "dataTable":
                                     ref = elem.attrib.get("ref") or current_cell_ref or "dataTable"
                                     locations.append(f"{sheet_label}!{ref}")
+                            elif local == "extLst":
+                                ext_lst_depth += 1
+                            elif ext_lst_depth > 0 and local == "ext":
+                                uri = (elem.attrib.get("uri") or "").strip().upper()
+                                if uri not in _SAFE_WORKSHEET_EXT_URIS:
+                                    lossy_features.add(
+                                        _LOSSY_WORKSHEET_EXT_URIS.get(uri, "worksheet_extensions")
+                                    )
                             elif local == "sparklineGroups":
                                 lossy_features.add("sparklines")
                         else:
-                            if in_cell and local == "v":
+                            if local == "extLst" and ext_lst_depth > 0:
+                                ext_lst_depth -= 1
+                            elif in_cell and local == "v":
                                 if not cell_has_v:
                                     cell_has_v = True
                                     cell_v_text = elem.text
@@ -284,6 +370,7 @@ def scan_workbook_formulas(
     xlsx_path: Path,
     *,
     capture_sheet_grids: bool = False,
+    grid_sheet_names: Iterable[str] | None = _DEFAULT_CAPTURED_GRID_SHEETS,
     capture_defined_names: bool = False,
 ) -> dict[str, Any]:
     """Scan all worksheets in lockstep using openpyxl read_only=True streaming mode.
@@ -292,9 +379,11 @@ def scan_workbook_formulas(
         total_formulas, uncached_formulas, data_table_formulas, total_errors, error_summary.
 
     When *capture_sheet_grids* is True, also includes ``sheetnames`` (worksheet titles only,
-    excluding chartsheets) and ``sheet_grids`` (sparse ``row -> col -> (value, coord)`` maps
-    for DCF / WACC / Sensitivity worksheets and any sheet targeted by captured defined names)
-    collected during the same single streaming pass.
+    excluding chartsheets) and ``sheet_grids`` (sparse ``row -> col -> (value, coord)`` maps)
+    collected during the same single streaming pass. Full grids are captured only for sheets
+    matching *grid_sheet_names* (default: DCF / WACC / Sensitivity; pass ``None`` for all
+    sheets); non-target sheets referenced by captured single-cell defined names are
+    point-captured (storing only the targeted ``(row, col)`` cells, or ``{}`` when blank).
 
     When *capture_defined_names* is True, also includes ``defined_names`` mapping workbook
     defined name strings to resolved single-cell ``(sheet_name, row, col)`` tuples.
@@ -345,7 +434,10 @@ def scan_workbook_formulas(
         if capture_sheet_grids or capture_defined_names:
             sheetnames = [ws.title for ws in wb_values.worksheets]
 
-        extra_grid_sheets_lower: set[str] = set()
+        full_grid_sheets_lower: set[str] | None = (
+            None if grid_sheet_names is None else {name.lower() for name in grid_sheet_names}
+        )
+        named_coords_by_sheet_lower: dict[str, set[tuple[int, int]]] = {}
         if capture_defined_names:
             for dn_name, dn in wb_values.defined_names.items():
                 try:
@@ -367,10 +459,10 @@ def scan_workbook_formulas(
                         or unescaped_title
                     )
                     defined_names_map[dn_name] = (canon_title, r_idx, c_idx)
-                    extra_grid_sheets_lower.add(canon_title.lower())
+                    canon_lower = canon_title.lower()
+                    if full_grid_sheets_lower is not None and canon_lower not in full_grid_sheets_lower:
+                        named_coords_by_sheet_lower.setdefault(canon_lower, set()).add((r_idx, c_idx))
                     break
-
-        target_grid_sheets_lower = _DEFAULT_CAPTURED_GRID_SHEETS | extra_grid_sheets_lower
 
         for ws_f in wb_formulas.worksheets:
             sheet_name = ws_f.title
@@ -382,18 +474,39 @@ def scan_workbook_formulas(
             ws_f.reset_dimensions()
             ws_v.reset_dimensions()
 
-            capture_this_grid = (
-                capture_sheet_grids and sheet_name.lower() in target_grid_sheets_lower
+            sheet_lower = sheet_name.lower()
+            capture_full_grid = capture_sheet_grids and (
+                full_grid_sheets_lower is None or sheet_lower in full_grid_sheets_lower
             )
+            target_coords = (
+                named_coords_by_sheet_lower.get(sheet_lower)
+                if (capture_sheet_grids and not capture_full_grid)
+                else None
+            )
+            target_cols_by_row: dict[int, set[int]] | None = None
+            if target_coords is not None:
+                target_cols_by_row = {}
+                for r_i, c_i in target_coords:
+                    target_cols_by_row.setdefault(r_i, set()).add(c_i)
+
             current_grid: dict[int, dict[int, tuple[Any, str]]] | None = (
-                {} if capture_this_grid else None
+                {} if (capture_full_grid or target_coords is not None) else None
             )
 
             for row_idx, (row_f, row_v) in enumerate(
                 itertools.zip_longest(ws_f.iter_rows(), ws_v.iter_rows(), fillvalue=()),
                 start=1,
             ):
-                row_map: dict[int, tuple[Any, str]] | None = {} if capture_this_grid else None
+                if capture_full_grid:
+                    row_target_cols: set[int] | None = None
+                    row_map: dict[int, tuple[Any, str]] | None = {}
+                elif target_cols_by_row is not None and row_idx in target_cols_by_row:
+                    row_target_cols = target_cols_by_row[row_idx]
+                    row_map = {}
+                else:
+                    row_target_cols = None
+                    row_map = None
+
                 for col_idx, (cell_f, cell_v) in enumerate(
                     itertools.zip_longest(row_f, row_v, fillvalue=None),
                     start=1,
@@ -420,7 +533,12 @@ def scan_workbook_formulas(
                         bucket["count"] += 1
                         bucket["locations"].append(f"{sheet_name}!{coord}")
 
-                    if row_map is not None and cell_v is not None and cell_v.value is not None:
+                    if (
+                        row_map is not None
+                        and (row_target_cols is None or col_idx in row_target_cols)
+                        and cell_v is not None
+                        and cell_v.value is not None
+                    ):
                         coord_v = (
                             getattr(cell_v, "coordinate", None)
                             or f"{get_column_letter(col_idx)}{row_idx}"

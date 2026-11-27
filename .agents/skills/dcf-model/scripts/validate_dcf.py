@@ -363,17 +363,16 @@ def _lookup_sheet_grid(
     grids_by_sheet: dict[str, Optional[dict[int, dict[int, tuple[Any, str]]]]],
     sheet_title: str,
 ) -> tuple[str, Optional[dict[int, dict[int, tuple[Any, str]]]]]:
-    """Look up a sheet grid by exact, unescaped-apostrophe, or case-insensitive title match."""
-    unescaped_title = sheet_title.replace("''", "'")
-    for candidate_key in (sheet_title, unescaped_title):
-        grid = grids_by_sheet.get(candidate_key)
-        if grid is not None:
-            return candidate_key, grid
-    for target_lower in (sheet_title.lower(), unescaped_title.lower()):
-        for canon_title, candidate_grid in grids_by_sheet.items():
-            if canon_title.lower() == target_lower and candidate_grid is not None:
-                return canon_title, candidate_grid
-    return unescaped_title, None
+    """Look up a sheet grid by canonical title, falling back to unescaped/case-insensitive match."""
+    grid = grids_by_sheet.get(sheet_title)
+    if grid is not None:
+        return sheet_title, grid
+    unescaped = sheet_title.replace("''", "'")
+    targets = {sheet_title.lower(), unescaped.lower()}
+    for canon_title, candidate_grid in grids_by_sheet.items():
+        if candidate_grid is not None and canon_title.lower() in targets:
+            return canon_title, candidate_grid
+    return unescaped, None
 
 
 def _resolve_named_metric(
@@ -425,6 +424,18 @@ def _find_invalid_named_metric(
         if not _is_number(val):
             return (val, f"{canon_title}!{coord}")
     return None
+
+
+def _bind_named(
+    defined_names_lower: dict[str, tuple[str, int, int]],
+    aliases: tuple[str, ...],
+    grids_by_sheet: dict[str, Optional[dict[int, dict[int, tuple[Any, str]]]]],
+) -> tuple[Optional[tuple[float, str, str, int, int]], Optional[tuple[Any, str]]]:
+    """Resolve a named metric to a finite numeric entry or return its invalid diagnostic."""
+    resolved = _resolve_named_metric(defined_names_lower, aliases, grids_by_sheet)
+    if resolved is not None:
+        return resolved, None
+    return None, _find_invalid_named_metric(defined_names_lower, aliases, grids_by_sheet)
 
 
 class DCFModelValidator:
@@ -488,47 +499,34 @@ class DCFModelValidator:
                 ('pv_terminal_value', NAMED_PV_TV_ALIASES),
                 ('enterprise_value', NAMED_EV_ALIASES),
             )
-            for key, aliases in metric_specs:
-                resolved = _resolve_named_metric(defined_names_lower, aliases, grids_by_sheet)
+            def _store_named(
+                valid_store: dict[str, tuple[float, str, str, int, int]],
+                invalid_store: dict[str, tuple[Any, str]],
+                key: str,
+                aliases: tuple[str, ...],
+            ) -> None:
+                resolved, invalid = _bind_named(defined_names_lower, aliases, grids_by_sheet)
                 if resolved is not None:
-                    self._named_metrics[key] = resolved
-                else:
-                    invalid = _find_invalid_named_metric(defined_names_lower, aliases, grids_by_sheet)
-                    if invalid is not None:
-                        self._invalid_named_metrics[key] = invalid
+                    valid_store[key] = resolved
+                elif invalid is not None:
+                    invalid_store[key] = invalid
+
+            for key, aliases in metric_specs:
+                _store_named(self._named_metrics, self._invalid_named_metrics, key, aliases)
 
             for scenario in SCENARIO_NAMES:
-                resolved_tg = _resolve_named_metric(
-                    defined_names_lower,
+                _store_named(
+                    self._named_scenario_tg,
+                    self._invalid_named_scenario_tg,
+                    scenario,
                     NAMED_SCENARIO_TG_ALIASES[scenario],
-                    grids_by_sheet,
                 )
-                if resolved_tg is not None:
-                    self._named_scenario_tg[scenario] = resolved_tg
-                else:
-                    invalid_tg = _find_invalid_named_metric(
-                        defined_names_lower,
-                        NAMED_SCENARIO_TG_ALIASES[scenario],
-                        grids_by_sheet,
-                    )
-                    if invalid_tg is not None:
-                        self._invalid_named_scenario_tg[scenario] = invalid_tg
-
-                resolved_wacc = _resolve_named_metric(
-                    defined_names_lower,
+                _store_named(
+                    self._named_scenario_wacc,
+                    self._invalid_named_scenario_wacc,
+                    scenario,
                     NAMED_SCENARIO_WACC_ALIASES[scenario],
-                    grids_by_sheet,
                 )
-                if resolved_wacc is not None:
-                    self._named_scenario_wacc[scenario] = resolved_wacc
-                else:
-                    invalid_wacc = _find_invalid_named_metric(
-                        defined_names_lower,
-                        NAMED_SCENARIO_WACC_ALIASES[scenario],
-                        grids_by_sheet,
-                    )
-                    if invalid_wacc is not None:
-                        self._invalid_named_scenario_wacc[scenario] = invalid_wacc
 
         self.errors: list[str] = []
         self.warnings: list[str] = []
@@ -643,30 +641,94 @@ class DCFModelValidator:
             or self._all_scenario_wacc_named()
         )
 
-    def check_dcf_logic(self):
-        """Validate DCF-specific logic and calculations (single rate-row extraction when fallback needed)."""
-        use_named_rates_only = self._all_scenario_tg_named() and self._has_named_wacc_coverage()
+    def _report_invalid_named(
+        self,
+        items: list[tuple[str, Any, str]],
+        *,
+        severity: str,
+        empty_template: str,
+        non_numeric_template: str,
+        skip_empty_when_uncached: bool = True,
+    ) -> None:
+        """Emit deduplicated error/warning messages for empty or non-numeric named cells."""
+        target_list = self.errors if severity == 'error' else self.warnings
+        seen_coords: set[str] = set()
+        for label, raw_val, coord in items:
+            if coord in seen_coords:
+                continue
+            seen_coords.add(coord)
+            if coord in self._formula_error_coords:
+                continue
+            if raw_val is None:
+                if not skip_empty_when_uncached or self.uncached_formulas == 0:
+                    target_list.append(empty_template.format(label=label, coord=coord))
+            else:
+                target_list.append(
+                    non_numeric_template.format(label=label, coord=coord, raw_val=raw_val)
+                )
 
+    def _owned_named_tg_coords(self) -> set[str]:
+        """Return all canonical coordinates owned by valid or invalid TerminalGrowth named ranges."""
+        coords: set[str] = set()
+        if 'terminal_growth' in self._named_metrics:
+            coords.add(self._named_metrics['terminal_growth'][1])
+        if 'terminal_growth' in self._invalid_named_metrics:
+            coords.add(self._invalid_named_metrics['terminal_growth'][1])
+        for scenario in SCENARIO_NAMES:
+            if scenario in self._named_scenario_tg:
+                coords.add(self._named_scenario_tg[scenario][1])
+            if scenario in self._invalid_named_scenario_tg:
+                coords.add(self._invalid_named_scenario_tg[scenario][1])
+        return coords
+
+    def _owned_named_wacc_coords(self) -> set[str]:
+        """Return all canonical coordinates owned by valid or invalid WACC named ranges."""
+        coords: set[str] = set()
+        if 'wacc' in self._named_metrics:
+            coords.add(self._named_metrics['wacc'][1])
+        if 'wacc' in self._invalid_named_metrics:
+            coords.add(self._invalid_named_metrics['wacc'][1])
+        for scenario in SCENARIO_NAMES:
+            if scenario in self._named_scenario_wacc:
+                coords.add(self._named_scenario_wacc[scenario][1])
+            if scenario in self._invalid_named_scenario_wacc:
+                coords.add(self._invalid_named_scenario_wacc[scenario][1])
+        return coords
+
+    @staticmethod
+    def _filter_rows_excluding_coords(
+        rows: list[tuple[int, int, Optional[str], list[tuple[int, float, str]]]],
+        excluded_coords: set[str],
+    ) -> list[tuple[int, int, Optional[str], list[tuple[int, float, str]]]]:
+        """Filter extracted rate rows to drop any cell coordinates owned by excluded_coords."""
+        if not excluded_coords:
+            return rows
+        filtered: list[tuple[int, int, Optional[str], list[tuple[int, float, str]]]] = []
+        for row_idx, block_id, tag, entries in rows:
+            kept = [entry for entry in entries if entry[2] not in excluded_coords]
+            if kept:
+                filtered.append((row_idx, block_id, tag, kept))
+        return filtered
+
+    def check_dcf_logic(self):
+        """Validate DCF-specific logic by always merging workbook named ranges with label-scanned rates."""
         dcf_tg_rows: list[tuple[int, int, Optional[str], list[tuple[int, float, str]]]] = []
         dcf_wacc_rows: list[tuple[int, int, Optional[str], list[tuple[int, float, str]]]] = []
         wacc_sheet_wacc_rows: list[tuple[int, int, Optional[str], list[tuple[int, float, str]]]] = []
 
-        if not use_named_rates_only:
-            if self._dcf_grid is not None:
-                dcf_tg_rows, dcf_wacc_rows = self._extract_rate_rows('DCF', self._dcf_grid)
-            if self._wacc_grid is not None:
-                _, wacc_sheet_wacc_rows = self._extract_rate_rows('WACC', self._wacc_grid)
+        if self._dcf_grid is not None:
+            dcf_tg_rows, dcf_wacc_rows = self._extract_rate_rows('DCF', self._dcf_grid)
+        if self._wacc_grid is not None:
+            _, wacc_sheet_wacc_rows = self._extract_rate_rows('WACC', self._wacc_grid)
 
         self._check_terminal_growth_vs_wacc(
             dcf_tg_rows=dcf_tg_rows,
             dcf_wacc_rows=dcf_wacc_rows,
             wacc_sheet_wacc_rows=wacc_sheet_wacc_rows,
-            use_named_rates_only=use_named_rates_only,
         )
         self._check_wacc_range(
             dcf_wacc_rows=dcf_wacc_rows,
             wacc_sheet_wacc_rows=wacc_sheet_wacc_rows,
-            use_named_rates_only=use_named_rates_only,
         )
         self._check_terminal_value_proportion()
 
@@ -818,10 +880,9 @@ class DCFModelValidator:
 
     def _check_terminal_growth_vs_wacc(
         self,
-        dcf_tg_rows=None,
-        dcf_wacc_rows=None,
-        wacc_sheet_wacc_rows=None,
-        use_named_rates_only: Optional[bool] = None,
+        dcf_tg_rows: list[tuple[int, int, Optional[str], list[tuple[int, float, str]]]],
+        dcf_wacc_rows: list[tuple[int, int, Optional[str], list[tuple[int, float, str]]]],
+        wacc_sheet_wacc_rows: list[tuple[int, int, Optional[str], list[tuple[int, float, str]]]],
     ):
         """Critical check: Terminal growth must be less than WACC across all scenarios."""
         try:
@@ -831,31 +892,29 @@ class DCFModelValidator:
 
             all_scenario_tg_named = self._all_scenario_tg_named()
             all_scenario_wacc_named = self._all_scenario_wacc_named()
-            if use_named_rates_only is None:
-                use_named_rates_only = all_scenario_tg_named and self._has_named_wacc_coverage()
+            has_full_named_coverage = all_scenario_tg_named and self._has_named_wacc_coverage()
 
-            if use_named_rates_only:
-                tg_rows = []
-                wacc_rows = []
-                wacc_sheet_rows = []
-            else:
-                if dcf_tg_rows is None or dcf_wacc_rows is None:
-                    tg_rows, wacc_rows = self._extract_rate_rows('DCF', self._dcf_grid)
-                else:
-                    tg_rows, wacc_rows = dcf_tg_rows, dcf_wacc_rows
-                if wacc_sheet_wacc_rows is None:
-                    wacc_sheet_rows = (
-                        self._extract_rate_rows('WACC', self._wacc_grid)[1]
-                        if self._wacc_grid is not None
-                        else []
-                    )
-                else:
-                    wacc_sheet_rows = wacc_sheet_wacc_rows
+            owned_tg_coords = self._owned_named_tg_coords()
+            owned_wacc_coords = self._owned_named_wacc_coords()
+            invalid_wacc_coords: set[str] = {
+                coord for _, coord in self._invalid_named_scenario_wacc.values()
+            }
+            if 'wacc' in self._invalid_named_metrics:
+                invalid_wacc_coords.add(self._invalid_named_metrics['wacc'][1])
+
+            # Named ranges win on exact coordinates (including invalid/empty/non-numeric named coords)
+            unnamed_tg_rows = self._filter_rows_excluding_coords(dcf_tg_rows, owned_tg_coords)
+            unnamed_dcf_wacc_rows = self._filter_rows_excluding_coords(dcf_wacc_rows, owned_wacc_coords)
+            unnamed_wacc_sheet_rows = self._filter_rows_excluding_coords(
+                wacc_sheet_wacc_rows, owned_wacc_coords
+            )
+            # Keep valid named DCF WACCs available for same-block pairing of unnamed TG rows
+            valid_dcf_wacc_rows = self._filter_rows_excluding_coords(dcf_wacc_rows, invalid_wacc_coords)
 
             named_tg = self._named_metrics.get('terminal_growth')
             named_wacc = self._named_metrics.get('wacc')
 
-            # Collect all discovered WACCs (named global/per-scenario + label-scan fallback)
+            # Collect all discovered WACCs (named global/per-scenario + unnamed label-scanned rows)
             all_wacc_entries: list[tuple[float, str]] = []
             seen_wacc_coords: set[str] = set()
             if named_wacc is not None:
@@ -866,14 +925,46 @@ class DCFModelValidator:
                 if sw is not None and sw[1] not in seen_wacc_coords:
                     seen_wacc_coords.add(sw[1])
                     all_wacc_entries.append((sw[0], sw[1]))
-            for _, _, _, entries in wacc_rows + wacc_sheet_rows:
+            for _, _, _, entries in unnamed_dcf_wacc_rows + unnamed_wacc_sheet_rows:
                 for _, w_val, w_coord in entries:
                     if w_coord not in seen_wacc_coords:
                         seen_wacc_coords.add(w_coord)
                         all_wacc_entries.append((w_val, w_coord))
 
+            # Per-scenario WACCs (named WACC_<scenario> merged with unnamed scenario-tagged rows,
+            # deduplicated by rounded value with named first to avoid noisy duplicates)
+            scenario_waccs: dict[str, list[tuple[float, str]]] = {s: [] for s in SCENARIO_NAMES}
+            for scenario in SCENARIO_NAMES:
+                seen_s_vals: set[float] = set()
+                sw = self._named_scenario_wacc.get(scenario)
+                if sw is not None:
+                    seen_s_vals.add(round(sw[0], 8))
+                    scenario_waccs[scenario].append((sw[0], sw[1]))
+                for _, _, tag, entries in unnamed_dcf_wacc_rows + unnamed_wacc_sheet_rows:
+                    if tag != scenario:
+                        continue
+                    for _, w_val, w_coord in entries:
+                        rkey = round(w_val, 8)
+                        if rkey not in seen_s_vals:
+                            seen_s_vals.add(rkey)
+                            scenario_waccs[scenario].append((w_val, w_coord))
+
+            # Global/unscoped WACCs (named DCF_WACC merged with distinct-valued unscoped/active WACCs)
+            global_waccs: list[tuple[float, str]] = []
+            seen_global_vals: set[float] = set()
+            if named_wacc is not None:
+                seen_global_vals.add(round(named_wacc[0], 8))
+                global_waccs.append((named_wacc[0], named_wacc[1]))
+            for _, _, tag, entries in unnamed_dcf_wacc_rows + unnamed_wacc_sheet_rows:
+                if tag is not None and tag != 'active':
+                    continue
+                for _, w_val, w_coord in entries:
+                    rkey = round(w_val, 8)
+                    if rkey not in seen_global_vals:
+                        seen_global_vals.add(rkey)
+                        global_waccs.append((w_val, w_coord))
+
             # Report any explicitly named terminal growth cells that are empty or non-numeric
-            seen_invalid_tg_coords: set[str] = set()
             invalid_tg_items: list[tuple[str, Any, str]] = []
             for scenario in SCENARIO_NAMES:
                 if scenario in self._invalid_named_scenario_tg:
@@ -882,24 +973,20 @@ class DCFModelValidator:
             if 'terminal_growth' in self._invalid_named_metrics:
                 raw_val, coord = self._invalid_named_metrics['terminal_growth']
                 invalid_tg_items.append(('Active', raw_val, coord))
-            for label, raw_val, coord in invalid_tg_items:
-                if coord in seen_invalid_tg_coords:
-                    continue
-                seen_invalid_tg_coords.add(coord)
-                if coord in self._formula_error_coords:
-                    continue
-                if raw_val is None:
-                    if self.uncached_formulas == 0:
-                        self.errors.append(
-                            f"CRITICAL: Named terminal growth ({label} at {coord}) is empty — "
-                            "enter a valid terminal growth rate."
-                        )
-                else:
-                    self.errors.append(
-                        f"CRITICAL: Named terminal growth ({label} at {coord}) has non-numeric value ({raw_val!r})."
-                    )
+            self._report_invalid_named(
+                invalid_tg_items,
+                severity='error',
+                empty_template=(
+                    "CRITICAL: Named terminal growth ({label} at {coord}) is empty — "
+                    "enter a valid terminal growth rate."
+                ),
+                non_numeric_template=(
+                    "CRITICAL: Named terminal growth ({label} at {coord}) has non-numeric value ({raw_val!r})."
+                ),
+                skip_empty_when_uncached=True,
+            )
 
-            has_any_tg = bool(self._named_scenario_tg) or named_tg is not None or bool(tg_rows)
+            has_any_tg = bool(self._named_scenario_tg) or named_tg is not None or bool(unnamed_tg_rows)
             has_any_wacc = bool(all_wacc_entries)
             has_invalid_named_tg = bool(invalid_tg_items)
             has_invalid_named_wacc = (
@@ -917,8 +1004,8 @@ class DCFModelValidator:
             if len(distinct_wacc_vals) == 1:
                 if named_wacc is not None:
                     single_global_wacc = (named_wacc[0], named_wacc[1])
-                elif wacc_rows:
-                    first = wacc_rows[0][3][0]
+                elif valid_dcf_wacc_rows:
+                    first = valid_dcf_wacc_rows[0][3][0]
                     single_global_wacc = (first[1], first[2])
                 else:
                     single_global_wacc = all_wacc_entries[0]
@@ -934,7 +1021,7 @@ class DCFModelValidator:
                     seen_pairs.add(key)
                     pairs.append((tg_val, tg_coord, w_val, w_coord))
 
-            # 1. Per-scenario named ranges (TerminalGrowth_Bear/Base/Bull vs WACC_Bear/Base/Bull or DCF_WACC)
+            # 1. Per-scenario named TG (against named + unnamed scenario WACCs, else global WACCs)
             for scenario in SCENARIO_NAMES:
                 stg = self._named_scenario_tg.get(scenario)
                 if stg is None:
@@ -943,37 +1030,35 @@ class DCFModelValidator:
                     # This scenario's own WACC_<Scenario> is invalid/empty and already handled
                     # in _check_wacc_range(); avoid mis-pairing against another scenario's WACC.
                     continue
-                sw = self._named_scenario_wacc.get(scenario)
-                if sw is not None:
-                    w_val, w_coord = sw[0], sw[1]
-                elif named_wacc is not None:
-                    w_val, w_coord = named_wacc[0], named_wacc[1]
+                if scenario_waccs[scenario]:
+                    for w_val, w_coord in scenario_waccs[scenario]:
+                        _add_pair(stg[0], stg[1], w_val, w_coord)
+                elif global_waccs:
+                    for w_val, w_coord in global_waccs:
+                        _add_pair(stg[0], stg[1], w_val, w_coord)
                 elif single_global_wacc is not None:
-                    w_val, w_coord = single_global_wacc
+                    _add_pair(stg[0], stg[1], single_global_wacc[0], single_global_wacc[1])
                 else:
-                    w_val, w_coord = min_wacc
-                _add_pair(stg[0], stg[1], w_val, w_coord)
+                    _add_pair(stg[0], stg[1], min_wacc[0], min_wacc[1])
 
-            # 2. Active named TerminalGrowth (always paired with active DCF_WACC when defined)
+            # 2. Active named TerminalGrowth (paired with global/active WACCs)
             if (
                 named_tg is not None
                 and 'wacc' not in self._invalid_named_metrics
-                and (named_wacc is not None or not (all_scenario_tg_named and all_scenario_wacc_named))
+                and (bool(global_waccs) or not (all_scenario_tg_named and all_scenario_wacc_named))
             ):
                 ntg_val, ntg_coord, _, _, _ = named_tg
                 if ntg_coord not in {p[1] for p in pairs}:
-                    if named_wacc is not None:
-                        w_val, w_coord = named_wacc[0], named_wacc[1]
+                    if global_waccs:
+                        for w_val, w_coord in global_waccs:
+                            _add_pair(ntg_val, ntg_coord, w_val, w_coord)
                     elif single_global_wacc is not None:
-                        w_val, w_coord = single_global_wacc
+                        _add_pair(ntg_val, ntg_coord, single_global_wacc[0], single_global_wacc[1])
                     else:
-                        w_val, w_coord = min_wacc
-                    _add_pair(ntg_val, ntg_coord, w_val, w_coord)
+                        _add_pair(ntg_val, ntg_coord, min_wacc[0], min_wacc[1])
 
-            named_tg_coords = {p[1] for p in pairs}
-
-            # 3. Label-scan fallback only when full scenario named-range coverage is absent
-            if use_named_rates_only:
+            # 3. Always merge any unnamed label-scanned TG rows (already excluding owned named TG coords)
+            if has_full_named_coverage:
                 if not has_invalid_named_tg and not has_invalid_named_wacc:
                     self.info.append(
                         "✓ Validated scenario Terminal Growth and WACC via workbook named ranges"
@@ -983,36 +1068,53 @@ class DCFModelValidator:
                     "Using label-scan fallback for rate validation "
                     "(define DCF_WACC and TerminalGrowth_Bear/Base/Bull named ranges for exact cell binding)"
                 )
-                for tg_row_idx, tg_block_id, tg_tag, tg_entries in tg_rows:
-                    unchecked_entries = [
-                        entry for entry in tg_entries if entry[2] not in named_tg_coords
-                    ]
-                    if not unchecked_entries:
-                        continue
-                    same_block_waccs = [wr for wr in wacc_rows if wr[1] == tg_block_id]
-                    same_tag_waccs = (
-                        [wr for wr in wacc_rows if wr[2] == tg_tag]
-                        if (not same_block_waccs and tg_tag is not None)
-                        else []
-                    )
-                    if same_block_waccs:
-                        closest = min(same_block_waccs, key=lambda wr: abs(tg_row_idx - wr[0]))
-                        for pair in self._pair_entries_by_column(unchecked_entries, closest[3]):
+
+            for tg_row_idx, tg_block_id, tg_tag, tg_entries in unnamed_tg_rows:
+                if tg_tag in self._invalid_named_scenario_wacc:
+                    continue
+                same_block_waccs = [wr for wr in valid_dcf_wacc_rows if wr[1] == tg_block_id]
+                same_tag_dcf_waccs = (
+                    [wr for wr in valid_dcf_wacc_rows if wr[2] == tg_tag]
+                    if (not same_block_waccs and tg_tag is not None)
+                    else []
+                )
+                same_tag_wacc_sheet = (
+                    [wr for wr in unnamed_wacc_sheet_rows if wr[2] == tg_tag]
+                    if (not same_block_waccs and tg_tag is not None)
+                    else []
+                )
+                if same_block_waccs:
+                    closest = min(same_block_waccs, key=lambda wr: abs(tg_row_idx - wr[0]))
+                    for pair in self._pair_entries_by_column(tg_entries, closest[3]):
+                        _add_pair(*pair)
+                elif same_tag_dcf_waccs or (tg_tag in scenario_waccs and scenario_waccs[tg_tag]) or same_tag_wacc_sheet:
+                    if same_tag_dcf_waccs:
+                        closest = min(same_tag_dcf_waccs, key=lambda wr: abs(tg_row_idx - wr[0]))
+                        for pair in self._pair_entries_by_column(tg_entries, closest[3]):
                             _add_pair(*pair)
-                    elif same_tag_waccs:
-                        closest = min(same_tag_waccs, key=lambda wr: abs(tg_row_idx - wr[0]))
-                        for pair in self._pair_entries_by_column(unchecked_entries, closest[3]):
-                            _add_pair(*pair)
-                    elif single_global_wacc is not None:
-                        w_val, w_coord = single_global_wacc
-                        for _, tg_val, tg_coord in unchecked_entries:
+                    if tg_tag in scenario_waccs and scenario_waccs[tg_tag]:
+                        for _, tg_val, tg_coord in tg_entries:
+                            for w_val, w_coord in scenario_waccs[tg_tag]:
+                                _add_pair(tg_val, tg_coord, w_val, w_coord)
+                    elif same_tag_wacc_sheet:
+                        for _, _, _, entries in same_tag_wacc_sheet:
+                            for _, tg_val, tg_coord in tg_entries:
+                                for _, w_val, w_coord in entries:
+                                    _add_pair(tg_val, tg_coord, w_val, w_coord)
+                elif named_wacc is not None and 'wacc' not in self._invalid_named_metrics and global_waccs:
+                    for _, tg_val, tg_coord in tg_entries:
+                        for w_val, w_coord in global_waccs:
                             _add_pair(tg_val, tg_coord, w_val, w_coord)
-                    else:
-                        # Multiple distinct scenario WACCs exist and this TG row has no WACC
-                        # in its own scenario block; use the conservative minimum WACC.
-                        w_val, w_coord = min_wacc
-                        for _, tg_val, tg_coord in unchecked_entries:
-                            _add_pair(tg_val, tg_coord, w_val, w_coord)
+                elif single_global_wacc is not None:
+                    w_val, w_coord = single_global_wacc
+                    for _, tg_val, tg_coord in tg_entries:
+                        _add_pair(tg_val, tg_coord, w_val, w_coord)
+                else:
+                    # Multiple distinct scenario WACCs exist and this TG row has no WACC
+                    # in its own scenario block; use the conservative minimum WACC.
+                    w_val, w_coord = min_wacc
+                    for _, tg_val, tg_coord in tg_entries:
+                        _add_pair(tg_val, tg_coord, w_val, w_coord)
 
             for tg_val, tg_coord, w_val, w_coord in pairs:
                 if tg_val >= w_val:
@@ -1042,9 +1144,8 @@ class DCFModelValidator:
 
     def _check_wacc_range(
         self,
-        dcf_wacc_rows=None,
-        wacc_sheet_wacc_rows=None,
-        use_named_rates_only: Optional[bool] = None,
+        dcf_wacc_rows: list[tuple[int, int, Optional[str], list[tuple[int, float, str]]]],
+        wacc_sheet_wacc_rows: list[tuple[int, int, Optional[str], list[tuple[int, float, str]]]],
     ):
         """Check if WACC is in reasonable range across named ranges and both WACC and DCF sheets."""
         try:
@@ -1052,9 +1153,7 @@ class DCFModelValidator:
                 # Missing sheets already recorded as errors in check_sheet_structure()
                 return
 
-            if use_named_rates_only is None:
-                use_named_rates_only = self._all_scenario_tg_named() and self._has_named_wacc_coverage()
-
+            owned_wacc_coords = self._owned_named_wacc_coords()
             seen_rounded: set[float] = set()
             wacc_entries: list[tuple[float, str]] = []
 
@@ -1072,33 +1171,16 @@ class DCFModelValidator:
                         seen_rounded.add(key)
                         wacc_entries.append((sw[0], sw[1]))
 
-            if not use_named_rates_only:
-                if wacc_sheet_wacc_rows is None:
-                    wacc_sheet_rows = (
-                        self._extract_rate_rows('WACC', self._wacc_grid)[1]
-                        if self._wacc_grid is not None
-                        else []
-                    )
-                else:
-                    wacc_sheet_rows = wacc_sheet_wacc_rows
+            # Always merge unnamed scanned WACCs from both WACC and DCF sheets (named wins on coord)
+            for _, _, _, entries in wacc_sheet_wacc_rows + dcf_wacc_rows:
+                for _, val, coord in entries:
+                    if coord in owned_wacc_coords:
+                        continue
+                    key = round(val, 8)
+                    if key not in seen_rounded:
+                        seen_rounded.add(key)
+                        wacc_entries.append((val, coord))
 
-                if dcf_wacc_rows is None:
-                    dcf_rows = (
-                        self._extract_rate_rows('DCF', self._dcf_grid)[1]
-                        if self._dcf_grid is not None
-                        else []
-                    )
-                else:
-                    dcf_rows = dcf_wacc_rows
-
-                for _, _, _, entries in wacc_sheet_rows + dcf_rows:
-                    for _, val, coord in entries:
-                        key = round(val, 8)
-                        if key not in seen_rounded:
-                            seen_rounded.add(key)
-                            wacc_entries.append((val, coord))
-
-            seen_invalid_wacc_coords: set[str] = set()
             invalid_wacc_items: list[tuple[str, Any, str]] = []
             if 'wacc' in self._invalid_named_metrics:
                 raw_val, coord = self._invalid_named_metrics['wacc']
@@ -1107,22 +1189,18 @@ class DCFModelValidator:
                 if scenario in self._invalid_named_scenario_wacc:
                     raw_val, coord = self._invalid_named_scenario_wacc[scenario]
                     invalid_wacc_items.append((scenario.title(), raw_val, coord))
-            for label, raw_val, coord in invalid_wacc_items:
-                if coord in seen_invalid_wacc_coords:
-                    continue
-                seen_invalid_wacc_coords.add(coord)
-                if coord in self._formula_error_coords:
-                    continue
-                if raw_val is None:
-                    if self.uncached_formulas == 0:
-                        self.errors.append(
-                            f"CRITICAL: Named WACC ({label} at {coord}) is empty — "
-                            "enter a valid discount rate."
-                        )
-                else:
-                    self.errors.append(
-                        f"CRITICAL: Named WACC ({label} at {coord}) has non-numeric value ({raw_val!r})."
-                    )
+            self._report_invalid_named(
+                invalid_wacc_items,
+                severity='error',
+                empty_template=(
+                    "CRITICAL: Named WACC ({label} at {coord}) is empty — "
+                    "enter a valid discount rate."
+                ),
+                non_numeric_template=(
+                    "CRITICAL: Named WACC ({label} at {coord}) has non-numeric value ({raw_val!r})."
+                ),
+                skip_empty_when_uncached=True,
+            )
 
             if wacc_entries:
                 for wacc, coord in wacc_entries:
@@ -1158,25 +1236,27 @@ class DCFModelValidator:
             invalid_tv = self._invalid_named_metrics.get('pv_terminal_value')
             invalid_ev = self._invalid_named_metrics.get('enterprise_value')
             if invalid_tv is not None or invalid_ev is not None:
+                invalid_tv_ev_items: list[tuple[str, Any, str]] = []
                 for metric_name, invalid_item in (
                     ('PV_TerminalValue', invalid_tv),
                     ('EnterpriseValue', invalid_ev),
                 ):
-                    if invalid_item is None:
-                        continue
-                    raw_val, coord = invalid_item
-                    if coord in self._formula_error_coords:
-                        continue
-                    if raw_val is None:
-                        self.warnings.append(
-                            f"Named {metric_name} at {coord} is empty or uncached — "
-                            "skipping TV % of EV ratio check."
-                        )
-                    else:
-                        self.warnings.append(
-                            f"Named {metric_name} at {coord} has non-numeric value ({raw_val!r}) — "
-                            "skipping TV % of EV ratio check."
-                        )
+                    if invalid_item is not None:
+                        raw_val, coord = invalid_item
+                        invalid_tv_ev_items.append((metric_name, raw_val, coord))
+                self._report_invalid_named(
+                    invalid_tv_ev_items,
+                    severity='warning',
+                    empty_template=(
+                        "Named {label} at {coord} is empty or uncached — "
+                        "skipping TV % of EV ratio check."
+                    ),
+                    non_numeric_template=(
+                        "Named {label} at {coord} has non-numeric value ({raw_val!r}) — "
+                        "skipping TV % of EV ratio check."
+                    ),
+                    skip_empty_when_uncached=False,
+                )
                 return
 
             named_tv = self._named_metrics.get('pv_terminal_value')

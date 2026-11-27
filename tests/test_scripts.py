@@ -2226,6 +2226,242 @@ class TestRecalcXlsx(unittest.TestCase):
             self.assertEqual(Path(payload_scan["file"]), out_path.resolve())
             self.assertTrue(payload_scan["recalculated_with_libreoffice"])
 
+    def test_defined_name_point_captures_non_target_sheet_without_loading_full_grid(self) -> None:
+        from openpyxl.workbook.defined_name import DefinedName
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "large_data_point_capture.xlsx"
+            wb = openpyxl.Workbook()
+            ws_dcf = wb.active
+            ws_dcf.title = "DCF"
+            ws_dcf["A1"] = "WACC"
+            ws_dcf["B1"] = 0.09
+            ws_dcf["A2"] = "Terminal Growth Rate"
+            ws_dcf["B2"] = 0.025
+
+            # Large non-target sheet (2,000 rows x 10 cols = 20,000 cells) with one valued defined name
+            # (Data!$A$1), one blank defined name (Data!$B$1), and a distant error cell at row 1500
+            ws_data = wb.create_sheet("Data")
+            ws_data.append([123.45, None, "c3", "c4", "c5", "c6", "c7", "c8", "c9", "c10"])
+            for r in range(2, 2001):
+                if r == 1500:
+                    ws_data.append(["#DIV/0!", r, r + 1, r + 2, r + 3, r + 4, r + 5, r + 6, r + 7, r + 8])
+                else:
+                    ws_data.append([r, r + 1, r + 2, r + 3, r + 4, r + 5, r + 6, r + 7, r + 8, r + 9])
+
+            # Non-target sheet whose ONLY targeted defined name points to a blank cell
+            ws_blank = wb.create_sheet("BlankTarget")
+            ws_blank["A1"] = "Unrelated label"
+
+            # Completely unreferenced non-target sheet
+            ws_unused = wb.create_sheet("Unused")
+            ws_unused["A1"] = 999
+
+            wb.defined_names["LastPrice"] = DefinedName("LastPrice", attr_text="Data!$A$1")
+            wb.defined_names["EmptyRef"] = DefinedName("EmptyRef", attr_text="Data!$B$1")
+            wb.defined_names["BlankOnly"] = DefinedName("BlankOnly", attr_text="BlankTarget!$C$4")
+            wb.save(path)
+            wb.close()
+
+            scan = xlsx_scan_mod.scan_workbook_formulas(
+                path,
+                capture_sheet_grids=True,
+                grid_sheet_names=["DCF"],
+                capture_defined_names=True,
+            )
+
+            # 1. Target sheet ("DCF") captures its full grid
+            self.assertIn("DCF", scan["sheet_grids"])
+            dcf_cells = sum(len(row) for row in scan["sheet_grids"]["DCF"].values())
+            self.assertEqual(dcf_cells, 4)
+
+            # 2. Point-captured "Data" sheet stores ONLY the 1 non-empty named cell (A1), NOT 19,999+ cells
+            self.assertIn("Data", scan["sheet_grids"])
+            self.assertEqual(scan["sheet_grids"]["Data"], {1: {1: (123.45, "A1")}})
+
+            # 3. Point-captured sheet with only a blank named cell stores {} so empty-cell detection works
+            self.assertIn("BlankTarget", scan["sheet_grids"])
+            self.assertEqual(scan["sheet_grids"]["BlankTarget"], {})
+            defined_lower = {k.lower(): v for k, v in scan["defined_names"].items()}
+            self.assertEqual(
+                validate_dcf_mod._find_invalid_named_metric(
+                    defined_lower, ("emptyref",), scan["sheet_grids"]
+                ),
+                (None, "Data!B1"),
+            )
+            self.assertEqual(
+                validate_dcf_mod._find_invalid_named_metric(
+                    defined_lower, ("blankonly",), scan["sheet_grids"]
+                ),
+                (None, "BlankTarget!C4"),
+            )
+
+            # 4. Unreferenced non-target sheet is not captured in sheet_grids at all
+            self.assertNotIn("Unused", scan["sheet_grids"])
+
+            # 5. Formula/error scanning STILL scans every cell of non-target sheets (row 1500 error caught)
+            self.assertEqual(scan["total_errors"], 1)
+            self.assertEqual(scan["error_summary"]["#DIV/0!"]["locations"], ["Data!A1500"])
+
+    def test_allowlist_ooxml_parts_and_worksheet_extlst_detection_and_clean_double_inplace(self) -> None:
+        import xml.etree.ElementTree as ET
+        from openpyxl.comments import Comment
+        from openpyxl.formatting.rule import CellIsRule, ColorScaleRule, FormulaRule
+        from openpyxl.styles import PatternFill
+        from openpyxl.worksheet.datavalidation import DataValidation
+
+        def _fake_popen(cmd, **kwargs):
+            outdir = Path(cmd[cmd.index("--outdir") + 1])
+            src_arg = Path(cmd[-1])
+            shutil.copyfile(src_arg, outdir / f"{src_arg.stem}.xlsx")
+            proc = mock.MagicMock()
+            proc.returncode = 0
+            proc.communicate.return_value = ("", "")
+            return proc
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # 1. Verify allowlist + worksheet <extLst> URI detection catches all lossy categories
+            lossy_cases = [
+                ("threaded_comments", {"xl/threadedComments/threadedComment1.xml": b"<ThreadedComments/>"}, None),
+                ("threaded_comments", {"xl/persons/person.xml": b"<personList/>"}, None),
+                ("connections_or_power_query", {"xl/connections.xml": b"<connections/>"}, None),
+                ("connections_or_power_query", {"xl/queryTables/queryTable1.xml": b"<queryTable/>"}, None),
+                ("connections_or_power_query", {"xl/model/item.data": b"MODEL"}, None),
+                ("connections_or_power_query", {"customXml/item1.xml": b"<root/>"}, None),
+                ("embedded_media_or_objects", {"xl/media/image1.png": b"\x89PNG"}, None),
+                ("embedded_media_or_objects", {"xl/embeddings/oleObject1.bin": b"OLE"}, None),
+                ("excel_metadata_or_rich_data", {"xl/metadata.xml": b"<metadata/>"}, None),
+                ("excel_metadata_or_rich_data", {"xl/richData/rdrichvalue.xml": b"<rvData/>"}, None),
+                ("external_links", {"xl/externalLinks/externalLink1.xml": b"<externalLink/>"}, None),
+                ("x14_conditional_formatting", {}, "{78C0D931-6437-407d-A8EE-F0AAD7539E65}"),
+                ("x14_data_validation", {}, "{CCE6A557-97BC-4b89-ADB6-D9C93CAAB3DF}"),
+                ("slicers_or_timelines", {}, "{A8765BA9-456A-4DAB-B4F3-ACF838C121DE}"),
+                ("worksheet_extensions", {}, "{DEADBEEF-0000-0000-0000-000000000000}"),
+                ("unsupported_ooxml_parts", {"xl/webExtensions/webExtension1.xml": b"<webextension/>"}, None),
+            ]
+            for idx, (expected_feature, extra_entries, ext_uri) in enumerate(lossy_cases):
+                with self.subTest(feature=expected_feature, extra=list(extra_entries), ext_uri=ext_uri):
+                    fpath = Path(tmp) / f"allowlist_{idx}_{expected_feature}.xlsx"
+                    out_path = Path(tmp) / f"allowlist_{idx}_out.xlsx"
+                    wb = openpyxl.Workbook()
+                    ws = wb.active
+                    ws["A1"] = 10
+                    wb.save(fpath)
+                    wb.close()
+
+                    with zipfile.ZipFile(fpath, "r") as zin:
+                        entries = {name: zin.read(name) for name in zin.namelist()}
+                    for k, v in extra_entries.items():
+                        entries[k] = v
+                    if ext_uri is not None:
+                        ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                        ET.register_namespace("", ns)
+                        root = ET.fromstring(entries["xl/worksheets/sheet1.xml"])
+                        ext_lst = ET.SubElement(root, f"{{{ns}}}extLst")
+                        ET.SubElement(ext_lst, f"{{{ns}}}ext", {"uri": ext_uri})
+                        entries["xl/worksheets/sheet1.xml"] = ET.tostring(
+                            root, encoding="utf-8", xml_declaration=True
+                        )
+                    with zipfile.ZipFile(fpath, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+                        for name, data in entries.items():
+                            zout.writestr(name, data)
+
+                    self.assertEqual(
+                        xlsx_scan_mod.inspect_workbook_xml(fpath)["lossy_features"],
+                        [expected_feature],
+                    )
+                    # Refuses --in-place without spawning LibreOffice
+                    with (
+                        mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value="/usr/bin/soffice"),
+                        mock.patch.object(recalc_xlsx_mod.subprocess, "Popen") as mock_popen,
+                    ):
+                        rc_ip, payload_ip = self._run_main([str(fpath), "--in-place"])
+                    mock_popen.assert_not_called()
+                    self.assertEqual(rc_ip, 1, payload_ip)
+                    self.assertEqual(payload_ip["status"], "error")
+                    self.assertEqual(payload_ip["lossy_features"], [expected_feature])
+
+                    # Warns cleanly on --check-only and --output
+                    with (
+                        mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value="/usr/bin/soffice"),
+                        mock.patch.object(recalc_xlsx_mod.subprocess, "Popen", side_effect=_fake_popen),
+                    ):
+                        rc_chk, payload_chk = self._run_main([str(fpath), "--check-only"])
+                        self.assertEqual(rc_chk, 0, payload_chk)
+                        self.assertEqual(payload_chk["lossy_features"], [expected_feature])
+                        self.assertIn(expected_feature, payload_chk.get("warning", ""))
+
+                        rc_out, payload_out = self._run_main([str(fpath), "--output", str(out_path)])
+                        self.assertEqual(rc_out, 0, payload_out)
+                        self.assertEqual(payload_out["lossy_features"], [expected_feature])
+                        self.assertIn(expected_feature, payload_out.get("warning", ""))
+
+            # 2. Safe core OOXML parts (including directory entries, calcChain, printerSettings, custom.xml)
+            #    MUST report lossy_features == []
+            safe_path = Path(tmp) / "safe_parts.xlsx"
+            wb_s = openpyxl.Workbook()
+            ws_s = wb_s.active
+            ws_s["A1"] = 1
+            wb_s.save(safe_path)
+            wb_s.close()
+            with zipfile.ZipFile(safe_path, "r") as zin:
+                safe_entries = {name: zin.read(name) for name in zin.namelist()}
+            safe_entries["xl/calcChain.xml"] = b"<calcChain/>"
+            safe_entries["xl/printerSettings/printerSettings1.bin"] = b"PRINTER"
+            safe_entries["docProps/custom.xml"] = b"<Properties/>"
+            with zipfile.ZipFile(safe_path, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+                zout.writestr("xl/worksheets/", b"")
+                for name, data in safe_entries.items():
+                    zout.writestr(name, data)
+            self.assertEqual(xlsx_scan_mod.inspect_workbook_xml(safe_path)["lossy_features"], [])
+
+            # 3. Clean build_dcf_skeleton.py with cell comments, data validation, and classic conditional
+            #    formatting passes recalc_xlsx.py --in-place TWICE in a row with real LibreOffice and
+            #    reports lossy_features == [] before, after #1, and after #2.
+            if recalc_xlsx_mod.find_soffice() is not None:
+                skel_path = Path(tmp) / "clean_double_inplace.xlsx"
+                build_proc = subprocess.run(
+                    [sys.executable, str(BUILD_DCF_SKELETON_PATH), "--output", str(skel_path), "--case", "2"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(build_proc.returncode, 0, build_proc.stdout + build_proc.stderr)
+
+                wb_rich = openpyxl.load_workbook(skel_path)
+                ws_dcf = wb_rich["DCF"]
+                ws_dcf["H4"] = "Audit Note"
+                ws_dcf["H4"].comment = Comment("Verified clean comment", "Analyst")
+                dv = DataValidation(type="list", formula1='"Bear,Base,Bull"', allow_blank=True)
+                ws_dcf.add_data_validation(dv)
+                dv.add("H5")
+                fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+                ws_dcf.conditional_formatting.add(
+                    "C74:G74", CellIsRule(operator="greaterThan", formula=["0"], fill=fill)
+                )
+                ws_dcf.conditional_formatting.add(
+                    "C86:G86",
+                    ColorScaleRule(start_type="min", start_color="F8696B", end_type="max", end_color="63BE7B"),
+                )
+                ws_dcf.conditional_formatting.add(
+                    "C89:G89", FormulaRule(formula=["C89>0"], fill=fill)
+                )
+                wb_rich.save(skel_path)
+                wb_rich.close()
+
+                self.assertEqual(xlsx_scan_mod.inspect_workbook_xml(skel_path)["lossy_features"], [])
+
+                for run_idx in (1, 2):
+                    with self.subTest(inplace_run=run_idx):
+                        rc_r, payload_r = self._run_main([str(skel_path), "30", "--in-place"])
+                        self.assertEqual(rc_r, 0, payload_r)
+                        self.assertEqual(payload_r["status"], "success", payload_r)
+                        self.assertNotIn("lossy_features", payload_r)
+                        self.assertEqual(
+                            xlsx_scan_mod.inspect_workbook_xml(skel_path)["lossy_features"],
+                            [],
+                        )
+
 
 @unittest.skipIf(openpyxl is None, "openpyxl is required for DCF validation tests")
 class TestValidateDcf(unittest.TestCase):
@@ -3587,17 +3823,31 @@ class TestValidateDcf(unittest.TestCase):
             wb.save(path)
             wb.close()
 
+            real_extract = validate_dcf_mod.DCFModelValidator._extract_rate_rows
             with mock.patch.object(
                 validate_dcf_mod.DCFModelValidator,
                 "_extract_rate_rows",
-                wraps=validate_dcf_mod.DCFModelValidator._extract_rate_rows,
+                side_effect=lambda self_obj, title, grid: real_extract(self_obj, title, grid),
+                autospec=True,
             ) as spy_extract:
                 res_ok = validate_dcf_mod.validate_dcf_model(str(path))
 
             self.assertEqual(res_ok["status"], "PASS", res_ok)
             self.assertEqual(res_ok["error_count"], 0, res_ok["errors"])
             self.assertEqual(res_ok["warning_count"], 0, res_ok["warnings"])
-            self.assertEqual(spy_extract.call_count, 0, "Expected zero regex rate-row extraction when named ranges cover all scenarios")
+            self.assertEqual(
+                spy_extract.call_count,
+                2,
+                "Expected _extract_rate_rows once per sheet (DCF + WACC) so unnamed rate cells are always merged",
+            )
+            self.assertTrue(
+                any("Validated scenario Terminal Growth and WACC via workbook named ranges" in i for i in res_ok["info"]),
+                res_ok["info"],
+            )
+            self.assertFalse(
+                any("Using label-scan fallback" in i for i in res_ok["info"]),
+                res_ok["info"],
+            )
 
             # Make Bull TG (7.5%) >= Bull WACC (7.0%) and Bear WACC out-of-range (25%)
             wb_bad = openpyxl.load_workbook(path)
@@ -4331,6 +4581,137 @@ class TestValidateDcf(unittest.TestCase):
             self.assertFalse(
                 any("typically should be 50-70%" in w or "250.0%" in w for w in res_fe["warnings"]),
                 f"Bogus Exit Multiple TV mis-pairing warning emitted: {res_fe['warnings']}",
+            )
+
+    def test_unnamed_scenario_wacc_and_wacc_sheet_rows_checked_alongside_standard_named_ranges(self) -> None:
+        from openpyxl.workbook.defined_name import DefinedName
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # 1. Exact repro: build_dcf_skeleton.py --case 2 with Bull TG (DCF!C57) = 10% and an unnamed
+            #    "Bull Case WACC" = 9% at DCF!C59 while keeping all standard named ranges intact.
+            #    Recalculate with real LibreOffice -> validate_dcf.py MUST return FAIL (g >= WACC).
+            if recalc_xlsx_mod.find_soffice() is not None:
+                skel_path = Path(tmp) / "repro_unnamed_bull_wacc.xlsx"
+                build_proc = subprocess.run(
+                    [sys.executable, str(BUILD_DCF_SKELETON_PATH), "--output", str(skel_path), "--case", "2"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(build_proc.returncode, 0, build_proc.stdout + build_proc.stderr)
+
+                wb = openpyxl.load_workbook(skel_path)
+                wb["DCF"]["C57"] = 0.10
+                wb["DCF"]["A59"] = "Bull Case WACC"
+                wb["DCF"]["C59"] = 0.09
+                wb.save(skel_path)
+                wb.close()
+
+                recalc_proc = subprocess.run(
+                    [sys.executable, str(RECALC_XLSX_PATH), str(skel_path), "30", "--in-place"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(recalc_proc.returncode, 0, recalc_proc.stdout + recalc_proc.stderr)
+
+                res_repro = validate_dcf_mod.validate_dcf_model(str(skel_path))
+                self.assertEqual(res_repro["status"], "FAIL", res_repro)
+                self.assertTrue(
+                    any(
+                        "Terminal growth (10.00% at DCF!C57) >= WACC (9.00% at DCF!C59)" in e
+                        for e in res_repro["errors"]
+                    ),
+                    res_repro["errors"],
+                )
+
+                # 2. Unnamed out-of-range WACC row (25%) on the WACC sheet alongside DCF_WACC MUST warn
+                wacc_row_path = Path(tmp) / "repro_unnamed_wacc_sheet_out_of_range.xlsx"
+                build_proc2 = subprocess.run(
+                    [sys.executable, str(BUILD_DCF_SKELETON_PATH), "--output", str(wacc_row_path), "--case", "2"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(build_proc2.returncode, 0, build_proc2.stdout + build_proc2.stderr)
+
+                wb2 = openpyxl.load_workbook(wacc_row_path)
+                wb2["WACC"]["A35"] = "WACC"
+                wb2["WACC"]["C35"] = 0.25
+                wb2.save(wacc_row_path)
+                wb2.close()
+
+                recalc_proc2 = subprocess.run(
+                    [sys.executable, str(RECALC_XLSX_PATH), str(wacc_row_path), "30", "--in-place"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(recalc_proc2.returncode, 0, recalc_proc2.stdout + recalc_proc2.stderr)
+
+                res_wacc_warn = validate_dcf_mod.validate_dcf_model(str(wacc_row_path))
+                self.assertEqual(res_wacc_warn["status"], "PASS", res_wacc_warn)
+                self.assertTrue(
+                    any(
+                        "WACC (25.00% at WACC!C35) is outside typical range (5%-20%)" in w
+                        for w in res_wacc_warn["warnings"]
+                    ),
+                    res_wacc_warn["warnings"],
+                )
+
+            # 3. Standalone (no-LibreOffice) check: unnamed Bull Case WACC alongside standard named ranges
+            #    AND unnamed out-of-range WACC row on WACC sheet both caught deterministically
+            static_path = Path(tmp) / "static_named_plus_unnamed_wacc.xlsx"
+            wb_s = openpyxl.Workbook()
+            ws_dcf = wb_s.active
+            ws_dcf.title = "DCF"
+            ws_dcf["A2"] = "BEAR CASE"
+            ws_dcf["A3"] = "Terminal Growth Rate"
+            ws_dcf["C3"] = 0.02
+            ws_dcf["A5"] = "BASE CASE"
+            ws_dcf["A6"] = "Terminal Growth Rate"
+            ws_dcf["C6"] = 0.025
+            ws_dcf["A8"] = "BULL CASE"
+            ws_dcf["A9"] = "Terminal Growth Rate"
+            ws_dcf["C9"] = 0.10
+            ws_dcf["A10"] = "Bull Case WACC"
+            ws_dcf["C10"] = 0.09
+            ws_dcf["A14"] = "PV of Terminal Value"
+            ws_dcf["C14"] = 600.0
+            ws_dcf["A15"] = "Enterprise Value"
+            ws_dcf["C15"] = 1000.0
+            ws_dcf["A20"] = "Sensitivity Analysis"
+
+            ws_wacc = wb_s.create_sheet("WACC")
+            ws_wacc["A5"] = "WEIGHTED AVERAGE COST OF CAPITAL"
+            ws_wacc["C5"] = 0.11
+            ws_wacc["A8"] = "WACC"
+            ws_wacc["C8"] = 0.25
+
+            wb_s.defined_names["DCF_WACC"] = DefinedName("DCF_WACC", attr_text="WACC!$C$5")
+            wb_s.defined_names["TerminalGrowth_Bear"] = DefinedName("TerminalGrowth_Bear", attr_text="DCF!$C$3")
+            wb_s.defined_names["TerminalGrowth_Base"] = DefinedName("TerminalGrowth_Base", attr_text="DCF!$C$6")
+            wb_s.defined_names["TerminalGrowth_Bull"] = DefinedName("TerminalGrowth_Bull", attr_text="DCF!$C$9")
+            wb_s.defined_names["PV_TerminalValue"] = DefinedName("PV_TerminalValue", attr_text="DCF!$C$14")
+            wb_s.defined_names["EnterpriseValue"] = DefinedName("EnterpriseValue", attr_text="DCF!$C$15")
+            wb_s.save(static_path)
+            wb_s.close()
+
+            res_static = validate_dcf_mod.validate_dcf_model(str(static_path))
+            self.assertEqual(res_static["status"], "FAIL", res_static)
+            self.assertTrue(
+                any(
+                    "Terminal growth (10.00% at DCF!C9) >= WACC (9.00% at DCF!C10)" in e
+                    for e in res_static["errors"]
+                ),
+                res_static["errors"],
+            )
+            self.assertTrue(
+                any(
+                    "WACC (25.00% at WACC!C8) is outside typical range (5%-20%)" in w
+                    for w in res_static["warnings"]
+                ),
+                res_static["warnings"],
             )
 
 
