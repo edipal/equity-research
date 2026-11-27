@@ -474,6 +474,7 @@ class DCFModelValidator:
             self._scan = scan_workbook_formulas(
                 path_obj,
                 capture_sheet_grids=True,
+                grid_sheet_names=("DCF", "WACC"),
                 capture_defined_names=True,
             )
             self.uncached_formulas = int(self._scan.get('uncached_formulas', 0))
@@ -1083,24 +1084,43 @@ class DCFModelValidator:
                     if (not same_block_waccs and tg_tag is not None)
                     else []
                 )
+                named_sw = (
+                    self._named_scenario_wacc.get(tg_tag)
+                    if (not same_block_waccs and tg_tag is not None)
+                    else None
+                )
                 if same_block_waccs:
                     closest = min(same_block_waccs, key=lambda wr: abs(tg_row_idx - wr[0]))
                     for pair in self._pair_entries_by_column(tg_entries, closest[3]):
                         _add_pair(*pair)
-                elif same_tag_dcf_waccs or (tg_tag in scenario_waccs and scenario_waccs[tg_tag]) or same_tag_wacc_sheet:
-                    if same_tag_dcf_waccs:
-                        closest = min(same_tag_dcf_waccs, key=lambda wr: abs(tg_row_idx - wr[0]))
-                        for pair in self._pair_entries_by_column(tg_entries, closest[3]):
-                            _add_pair(*pair)
-                    if tg_tag in scenario_waccs and scenario_waccs[tg_tag]:
+                elif same_tag_dcf_waccs:
+                    closest = min(same_tag_dcf_waccs, key=lambda wr: abs(tg_row_idx - wr[0]))
+                    for pair in self._pair_entries_by_column(tg_entries, closest[3]):
+                        _add_pair(*pair)
+                    closest_coords = {w_coord for _, _, w_coord in closest[3]}
+                    non_dcf_waccs: list[tuple[float, str]] = []
+                    seen_non_dcf_vals: set[float] = set()
+                    if named_sw is not None and named_sw[1] not in closest_coords:
+                        seen_non_dcf_vals.add(round(named_sw[0], 8))
+                        non_dcf_waccs.append((named_sw[0], named_sw[1]))
+                    for _, _, _, entries in same_tag_wacc_sheet:
+                        for _, w_val, w_coord in entries:
+                            rkey = round(w_val, 8)
+                            if rkey not in seen_non_dcf_vals:
+                                seen_non_dcf_vals.add(rkey)
+                                non_dcf_waccs.append((w_val, w_coord))
+                    for _, tg_val, tg_coord in tg_entries:
+                        for w_val, w_coord in non_dcf_waccs:
+                            _add_pair(tg_val, tg_coord, w_val, w_coord)
+                elif tg_tag in scenario_waccs and scenario_waccs[tg_tag]:
+                    for _, tg_val, tg_coord in tg_entries:
+                        for w_val, w_coord in scenario_waccs[tg_tag]:
+                            _add_pair(tg_val, tg_coord, w_val, w_coord)
+                elif same_tag_wacc_sheet:
+                    for _, _, _, entries in same_tag_wacc_sheet:
                         for _, tg_val, tg_coord in tg_entries:
-                            for w_val, w_coord in scenario_waccs[tg_tag]:
+                            for _, w_val, w_coord in entries:
                                 _add_pair(tg_val, tg_coord, w_val, w_coord)
-                    elif same_tag_wacc_sheet:
-                        for _, _, _, entries in same_tag_wacc_sheet:
-                            for _, tg_val, tg_coord in tg_entries:
-                                for _, w_val, w_coord in entries:
-                                    _add_pair(tg_val, tg_coord, w_val, w_coord)
                 elif named_wacc is not None and 'wacc' not in self._invalid_named_metrics and global_waccs:
                     for _, tg_val, tg_coord in tg_entries:
                         for w_val, w_coord in global_waccs:

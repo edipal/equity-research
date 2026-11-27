@@ -187,6 +187,10 @@ _LOSSY_WORKSHEET_EXT_URIS: dict[str, str] = {
 }
 
 
+_DRAWING_XML_PART_RE = re.compile(r"^xl/drawings/[^/]+\.xml$")
+_DRAWING_RELS_PART_RE = re.compile(r"^xl/drawings/_rels/[^/]+\.xml\.rels$")
+
+
 def _is_safe_ooxml_part(low: str) -> bool:
     """Return True if a normalized lowercase OOXML zip member is known-safe for LibreOffice re-export."""
     if low in _SAFE_EXACT_PARTS:
@@ -196,20 +200,55 @@ def _is_safe_ooxml_part(low: str) -> bool:
     return any(pattern.match(low) for pattern in _SAFE_REGEX_PARTS)
 
 
-def _detect_manifest_lossy_features(namelist: list[str]) -> set[str]:
+def _is_empty_ooxml_root(stream, expected_root: str) -> bool:
+    """Return True iff the XML stream parses cleanly with *expected_root* and zero child elements.
+
+    Streams with ``ET.iterparse`` so large drawing/rels parts never buffer whole trees,
+    and lets ``ET.ParseError`` propagate so callers fail closed on malformed XML.
+    """
+    root_seen = False
+    is_empty = True
+    for event, elem in ET.iterparse(stream, events=("start", "end")):
+        if event == "start":
+            if not root_seen:
+                root_seen = True
+                if _local_tag(elem.tag) != expected_root:
+                    is_empty = False
+            else:
+                is_empty = False
+        else:
+            if (elem.text or "").strip():
+                is_empty = False
+            elem.clear()
+    return root_seen and is_empty
+
+
+def _detect_manifest_lossy_features(
+    namelist: list[str],
+) -> tuple[set[str], list[str], list[str]]:
     """Identify non-allowlisted OOXML archive parts that LibreOffice re-export can drop or alter.
 
     Uses an allowlist of known-safe core OOXML parts (worksheets, styles, sharedStrings,
     calcChain, themes, docProps, printerSettings, and legacy comment XML/VML) so unknown
     or newer Excel parts fail closed as ``unsupported_ooxml_parts`` instead of slipping past
-    a denylist.
+    a denylist. Non-VML ``xl/drawings/*.xml`` and ``xl/drawings/_rels/*.xml.rels`` entries are
+    returned separately for content inspection so empty LibreOffice AutoFilter ``<xdr:wsDr/>``
+    stubs do not trigger false positives while non-empty drawings still fail closed.
     """
     features: set[str] = set()
+    drawing_xml_entries: list[str] = []
+    drawing_rels_entries: list[str] = []
     for name in namelist:
         if not name or name.endswith("/"):
             continue
         low = name.replace("\\", "/").lstrip("/").lower()
         if not low or _is_safe_ooxml_part(low):
+            continue
+        if _DRAWING_XML_PART_RE.match(low):
+            drawing_xml_entries.append(name)
+            continue
+        if _DRAWING_RELS_PART_RE.match(low):
+            drawing_rels_entries.append(name)
             continue
         if low.startswith(("xl/charts/", "xl/chartsheets/")):
             features.add("charts")
@@ -247,7 +286,7 @@ def _detect_manifest_lossy_features(namelist: list[str]) -> set[str]:
             features.add("vba_macros")
         else:
             features.add("unsupported_ooxml_parts")
-    return features
+    return features, drawing_xml_entries, drawing_rels_entries
 
 
 def inspect_workbook_xml(xlsx_path: Path) -> dict[str, Any]:
@@ -279,7 +318,17 @@ def inspect_workbook_xml(xlsx_path: Path) -> dict[str, Any]:
         uncached_formulas = 0
         with zipfile.ZipFile(xlsx_path, "r") as zf:
             namelist = zf.namelist()
-            lossy_features = _detect_manifest_lossy_features(namelist)
+            lossy_features, drawing_xml_entries, drawing_rels_entries = _detect_manifest_lossy_features(
+                namelist
+            )
+            for entry in drawing_xml_entries:
+                with zf.open(entry, "r") as stream:
+                    if not _is_empty_ooxml_root(stream, "wsDr"):
+                        lossy_features.add("drawings_or_shapes")
+            for entry in drawing_rels_entries:
+                with zf.open(entry, "r") as stream:
+                    if not _is_empty_ooxml_root(stream, "Relationships"):
+                        lossy_features.add("drawings_or_shapes")
             titles = _sheet_titles_by_xml_path(zf)
             sheet_entries = sorted(
                 name

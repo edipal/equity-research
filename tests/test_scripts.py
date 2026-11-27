@@ -2095,7 +2095,16 @@ class TestRecalcXlsx(unittest.TestCase):
                 ("slicers_or_timelines", {"xl/slicers/slicer1.xml": b"<slicers/>"}, None),
                 ("slicers_or_timelines", {"xl/slicerCaches/slicerCache1.xml": b"<slicerCacheDefinition/>"}, None),
                 ("slicers_or_timelines", {"xl/timelineCaches/timelineCache1.xml": b"<timelineCacheDefinition/>"}, None),
-                ("drawings_or_shapes", {"xl/drawings/drawing1.xml": b"<wsDr/>"}, None),
+                (
+                    "drawings_or_shapes",
+                    {
+                        "xl/drawings/drawing1.xml": (
+                            b'<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing">'
+                            b"<xdr:twoCellAnchor/></xdr:wsDr>"
+                        )
+                    },
+                    None,
+                ),
                 ("vba_macros", {"xl/vbaProject.bin": b"VBA"}, None),
                 ("form_or_activex_controls", {"xl/ctrlProps/ctrlProp1.xml": b"<formControlPr/>"}, None),
                 ("sparklines", {}, "sparklines"),
@@ -2461,6 +2470,155 @@ class TestRecalcXlsx(unittest.TestCase):
                             xlsx_scan_mod.inspect_workbook_xml(skel_path)["lossy_features"],
                             [],
                         )
+
+    def test_autofilter_empty_wsdr_stub_allows_double_inplace_while_nonempty_and_malformed_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            # 1. Real LibreOffice 24.2 test: clean workbook with AutoFilter passes --in-place TWICE
+            #    even though LibreOffice writes an empty <xdr:wsDr/> stub at xl/drawings/drawing1.xml.
+            if recalc_xlsx_mod.find_soffice() is not None:
+                af_path = Path(tmp) / "autofilter_clean.xlsx"
+                wb = openpyxl.Workbook()
+                ws = wb.active
+                ws.title = "Data"
+                ws["A1"] = "Item"
+                ws["B1"] = "Value"
+                ws["A2"] = "Alpha"
+                ws["B2"] = "=20+5"
+                ws.auto_filter.ref = "A1:B2"
+                wb.save(af_path)
+                wb.close()
+
+                for pass_num in (1, 2):
+                    with self.subTest(autofilter_inplace_pass=pass_num):
+                        rc, payload = self._run_main([str(af_path), "30", "--in-place"])
+                        self.assertEqual(rc, 0, payload)
+                        self.assertEqual(payload["status"], "success", payload)
+                        self.assertEqual(payload["mode"], "in_place")
+                        self.assertTrue(payload["recalculated_with_libreoffice"])
+                        self.assertEqual(payload["total_errors"], 0)
+                        self.assertEqual(payload["uncached_formulas"], 0)
+                        self.assertNotIn("lossy_features", payload)
+                        self.assertEqual(
+                            xlsx_scan_mod.inspect_workbook_xml(af_path)["lossy_features"],
+                            [],
+                        )
+
+                with zipfile.ZipFile(af_path, "r") as zf:
+                    self.assertIn("xl/drawings/drawing1.xml", zf.namelist())
+
+                wb_check = openpyxl.load_workbook(af_path, data_only=True)
+                try:
+                    ws_check = wb_check["Data"]
+                    self.assertEqual(ws_check.auto_filter.ref, "A1:B2")
+                    self.assertEqual(ws_check["B2"].value, 25)
+                finally:
+                    wb_check.close()
+
+            def _make_with_extra(name: str, extra: dict[str, bytes]) -> Path:
+                p = Path(tmp) / name
+                wb_s = openpyxl.Workbook()
+                ws_s = wb_s.active
+                ws_s["A1"] = 10
+                wb_s.save(p)
+                wb_s.close()
+                with zipfile.ZipFile(p, "r") as zin:
+                    entries = {n: zin.read(n) for n in zin.namelist()}
+                entries.update(extra)
+                with zipfile.ZipFile(p, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+                    for n, data in entries.items():
+                        zout.writestr(n, data)
+                return p
+
+            # 2. Empty <xdr:wsDr/> stub + empty drawing .rels -> lossy_features == []
+            empty_stub_path = _make_with_extra(
+                "empty_wsdr_and_rels.xlsx",
+                {
+                    "xl/drawings/drawing1.xml": (
+                        b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                        b'<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing">'
+                        b"</xdr:wsDr>"
+                    ),
+                    "xl/drawings/_rels/drawing1.xml.rels": (
+                        b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                        b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>'
+                    ),
+                },
+            )
+            self.assertEqual(xlsx_scan_mod.inspect_workbook_xml(empty_stub_path)["lossy_features"], [])
+
+            # 3. Non-empty drawing anchor STILL refuses --in-place with drawings_or_shapes
+            nonempty_path = _make_with_extra(
+                "nonempty_wsdr.xlsx",
+                {
+                    "xl/drawings/drawing1.xml": (
+                        b'<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing">'
+                        b"<xdr:twoCellAnchor/></xdr:wsDr>"
+                    )
+                },
+            )
+            self.assertEqual(
+                xlsx_scan_mod.inspect_workbook_xml(nonempty_path)["lossy_features"],
+                ["drawings_or_shapes"],
+            )
+            with (
+                mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value="/usr/bin/soffice"),
+                mock.patch.object(recalc_xlsx_mod.subprocess, "Popen") as mock_popen,
+            ):
+                rc_ne, payload_ne = self._run_main([str(nonempty_path), "--in-place"])
+            mock_popen.assert_not_called()
+            self.assertEqual(rc_ne, 1, payload_ne)
+            self.assertEqual(payload_ne["status"], "error")
+            self.assertEqual(payload_ne["lossy_features"], ["drawings_or_shapes"])
+
+            # 4. Non-wsDr root and non-empty drawing .rels STILL flag drawings_or_shapes
+            non_wsdr_path = _make_with_extra(
+                "non_wsdr_root.xlsx",
+                {"xl/drawings/drawing1.xml": b"<customDrawingRoot/>"},
+            )
+            self.assertEqual(
+                xlsx_scan_mod.inspect_workbook_xml(non_wsdr_path)["lossy_features"],
+                ["drawings_or_shapes"],
+            )
+            nonempty_rels_path = _make_with_extra(
+                "nonempty_drawing_rels.xlsx",
+                {
+                    "xl/drawings/drawing1.xml": (
+                        b'<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"/>'
+                    ),
+                    "xl/drawings/_rels/drawing1.xml.rels": (
+                        b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                        b'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" '
+                        b'Target="../media/image1.png"/></Relationships>'
+                    ),
+                },
+            )
+            self.assertEqual(
+                xlsx_scan_mod.inspect_workbook_xml(nonempty_rels_path)["lossy_features"],
+                ["drawings_or_shapes"],
+            )
+
+            # 5. Malformed drawing XML and malformed drawing .rels STILL fail closed
+            malformed_drawing_path = _make_with_extra(
+                "malformed_drawing.xlsx",
+                {"xl/drawings/drawing1.xml": b"<xdr:wsDr><unclosed"},
+            )
+            with self.assertRaises(xlsx_scan_mod.WorkbookLoadError):
+                xlsx_scan_mod.inspect_workbook_xml(malformed_drawing_path)
+            with (
+                mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value="/usr/bin/soffice"),
+                mock.patch.object(recalc_xlsx_mod.subprocess, "Popen") as mock_popen2,
+            ):
+                rc_mal, payload_mal = self._run_main([str(malformed_drawing_path), "--in-place"])
+            mock_popen2.assert_not_called()
+            self.assertEqual(rc_mal, 1, payload_mal)
+            self.assertEqual(payload_mal["status"], "error")
+
+            malformed_rels_path = _make_with_extra(
+                "malformed_drawing_rels.xlsx",
+                {"xl/drawings/_rels/drawing1.xml.rels": b"<Relationships><broken"},
+            )
+            with self.assertRaises(xlsx_scan_mod.WorkbookLoadError):
+                xlsx_scan_mod.inspect_workbook_xml(malformed_rels_path)
 
 
 @unittest.skipIf(openpyxl is None, "openpyxl is required for DCF validation tests")
@@ -4712,6 +4870,128 @@ class TestValidateDcf(unittest.TestCase):
                     for w in res_static["warnings"]
                 ),
                 res_static["warnings"],
+            )
+
+    def test_multi_column_unnamed_same_tag_rows_align_by_column_without_cartesian_cross_pairing(self) -> None:
+        from openpyxl.workbook.defined_name import DefinedName
+
+        def _build_multi_col_bull(path: Path) -> openpyxl.Workbook:
+            wb = openpyxl.Workbook()
+            ws_dcf = wb.active
+            ws_dcf.title = "DCF"
+            ws_dcf["A2"] = "Bull Case Terminal Growth"
+            ws_dcf["C2"] = 0.07
+            ws_dcf["D2"] = 0.09
+            # Row 3 intentionally blank -> separates row 2 and row 4 into distinct blocks
+            ws_dcf["A4"] = "Bull Case WACC"
+            ws_dcf["C4"] = 0.08
+            ws_dcf["D4"] = 0.10
+            ws_dcf["A10"] = "PV of Terminal Value"
+            ws_dcf["C10"] = 600.0
+            ws_dcf["A11"] = "Enterprise Value"
+            ws_dcf["C11"] = 1000.0
+
+            ws_wacc = wb.create_sheet("WACC")
+            ws_wacc["A1"] = "Notes"
+            ws_wacc["B1"] = "WACC schedule"
+
+            ws_sens = wb.create_sheet("Sensitivity")
+            ws_sens["A1"] = "WACC vs Terminal Growth"
+            ws_sens["B2"] = 100.0
+            return wb
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # 1. Valid multi-column same-tag rows separated by blank row MUST PASS with 1-to-1 column
+            #    alignment (7% < 8%, 9% < 10%), NO cross-column 9% >= 8% error, NO 7% < 10% info line,
+            #    and DCFModelValidator skips buffering the full Sensitivity sheet grid.
+            valid_path = Path(tmp) / "multi_col_bull_valid.xlsx"
+            wb1 = _build_multi_col_bull(valid_path)
+            wb1.save(valid_path)
+            wb1.close()
+
+            validator1 = validate_dcf_mod.DCFModelValidator(str(valid_path))
+            self.assertIn("Sensitivity", validator1.sheet_names)
+            self.assertNotIn("Sensitivity", validator1._scan["sheet_grids"])
+            self.assertIn("DCF", validator1._scan["sheet_grids"])
+            self.assertIn("WACC", validator1._scan["sheet_grids"])
+
+            res1 = validator1.validate_all()
+            self.assertEqual(res1["status"], "PASS", res1)
+            self.assertEqual(res1["error_count"], 0, res1["errors"])
+            self.assertIn("✓ Terminal growth (7.00% at DCF!C2) < WACC (8.00% at DCF!C4)", res1["info"])
+            self.assertIn("✓ Terminal growth (9.00% at DCF!D2) < WACC (10.00% at DCF!D4)", res1["info"])
+            self.assertFalse(
+                any("DCF!C2" in line and "DCF!D4" in line for line in res1["info"] + res1["errors"]),
+                res1["info"],
+            )
+            self.assertFalse(
+                any("DCF!D2" in line and "DCF!C4" in line for line in res1["info"] + res1["errors"]),
+                res1["errors"],
+            )
+
+            # 2. Named WACC_Bull (0.06) on the WACC tab alongside that multi-column DCF block MUST still
+            #    catch 7% >= 6% (and 9% >= 6%) without falsely cross-pairing DCF!D2 against DCF!C4.
+            named_wacc_path = Path(tmp) / "multi_col_bull_with_named_wacc_bull.xlsx"
+            wb2 = _build_multi_col_bull(named_wacc_path)
+            wb2["WACC"]["A5"] = "Bull Rate"
+            wb2["WACC"]["C5"] = 0.06
+            wb2.defined_names["WACC_Bull"] = DefinedName("WACC_Bull", attr_text="WACC!$C$5")
+            wb2.save(named_wacc_path)
+            wb2.close()
+
+            res2 = validate_dcf_mod.validate_dcf_model(str(named_wacc_path))
+            self.assertEqual(res2["status"], "FAIL", res2)
+            self.assertTrue(
+                any(
+                    "Terminal growth (7.00% at DCF!C2) >= WACC (6.00% at WACC!C5)" in e
+                    for e in res2["errors"]
+                ),
+                res2["errors"],
+            )
+            self.assertTrue(
+                any(
+                    "Terminal growth (9.00% at DCF!D2) >= WACC (6.00% at WACC!C5)" in e
+                    for e in res2["errors"]
+                ),
+                res2["errors"],
+            )
+            self.assertFalse(
+                any("DCF!D2" in e and "DCF!C4" in e for e in res2["errors"]),
+                res2["errors"],
+            )
+
+            # 3. Named WACC_Bull pointing to DCF!C4 (already in closest[3]) MUST NOT cross-pair with DCF!D2.
+            named_in_closest_path = Path(tmp) / "multi_col_bull_named_in_closest.xlsx"
+            wb3 = _build_multi_col_bull(named_in_closest_path)
+            wb3.defined_names["WACC_Bull"] = DefinedName("WACC_Bull", attr_text="DCF!$C$4")
+            wb3.save(named_in_closest_path)
+            wb3.close()
+
+            res3 = validate_dcf_mod.validate_dcf_model(str(named_in_closest_path))
+            self.assertEqual(res3["status"], "PASS", res3)
+            self.assertEqual(res3["error_count"], 0, res3["errors"])
+
+            # 4. Unnamed Bull Case WACC (0.06) on the WACC sheet alongside that multi-column DCF block
+            #    MUST also be caught without cross-pairing DCF!D2 against DCF!C4.
+            wacc_sheet_row_path = Path(tmp) / "multi_col_bull_with_wacc_sheet_row.xlsx"
+            wb4 = _build_multi_col_bull(wacc_sheet_row_path)
+            wb4["WACC"]["A5"] = "Bull Case WACC"
+            wb4["WACC"]["C5"] = 0.06
+            wb4.save(wacc_sheet_row_path)
+            wb4.close()
+
+            res4 = validate_dcf_mod.validate_dcf_model(str(wacc_sheet_row_path))
+            self.assertEqual(res4["status"], "FAIL", res4)
+            self.assertTrue(
+                any(
+                    "Terminal growth (7.00% at DCF!C2) >= WACC (6.00% at WACC!C5)" in e
+                    for e in res4["errors"]
+                ),
+                res4["errors"],
+            )
+            self.assertFalse(
+                any("DCF!D2" in e and "DCF!C4" in e for e in res4["errors"]),
+                res4["errors"],
             )
 
 
