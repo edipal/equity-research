@@ -34,12 +34,10 @@ if _REPO_SCRIPTS_DIR is not None:
     if _repo_scripts_str not in sys.path:
         sys.path.insert(0, _repo_scripts_str)
 
-_EXCEL_ERRORS_FALLBACK = ("#REF!", "#DIV/0!", "#VALUE!", "#NAME?", "#N/A", "#NUM!", "#NULL!")
 _XLSX_SCAN_IMPORT_ERROR: Optional[str] = None
 try:
-    from xlsx_scan import EXCEL_ERRORS, scan_workbook_formulas  # noqa: E402
+    from xlsx_scan import scan_workbook_formulas  # noqa: E402
 except ModuleNotFoundError:
-    EXCEL_ERRORS = _EXCEL_ERRORS_FALLBACK
     scan_workbook_formulas = None  # type: ignore[assignment]
     _XLSX_SCAN_IMPORT_ERROR = _MISSING_XLSX_SCAN_MESSAGE
 
@@ -888,10 +886,10 @@ class DCFModelValidator:
                 if coord in seen_invalid_tg_coords:
                     continue
                 seen_invalid_tg_coords.add(coord)
-                if isinstance(raw_val, str) and raw_val in EXCEL_ERRORS:
+                if coord in self._formula_error_coords:
                     continue
                 if raw_val is None:
-                    if self.uncached_formulas == 0 and coord not in self._formula_error_coords:
+                    if self.uncached_formulas == 0:
                         self.errors.append(
                             f"CRITICAL: Named terminal growth ({label} at {coord}) is empty — "
                             "enter a valid terminal growth rate."
@@ -1113,10 +1111,10 @@ class DCFModelValidator:
                 if coord in seen_invalid_wacc_coords:
                     continue
                 seen_invalid_wacc_coords.add(coord)
-                if isinstance(raw_val, str) and raw_val in EXCEL_ERRORS:
+                if coord in self._formula_error_coords:
                     continue
                 if raw_val is None:
-                    if self.uncached_formulas == 0 and coord not in self._formula_error_coords:
+                    if self.uncached_formulas == 0:
                         self.errors.append(
                             f"CRITICAL: Named WACC ({label} at {coord}) is empty — "
                             "enter a valid discount rate."
@@ -1160,28 +1158,23 @@ class DCFModelValidator:
             invalid_tv = self._invalid_named_metrics.get('pv_terminal_value')
             invalid_ev = self._invalid_named_metrics.get('enterprise_value')
             if invalid_tv is not None or invalid_ev is not None:
-                if invalid_tv is not None:
-                    raw_val, coord = invalid_tv
+                for metric_name, invalid_item in (
+                    ('PV_TerminalValue', invalid_tv),
+                    ('EnterpriseValue', invalid_ev),
+                ):
+                    if invalid_item is None:
+                        continue
+                    raw_val, coord = invalid_item
+                    if coord in self._formula_error_coords:
+                        continue
                     if raw_val is None:
                         self.warnings.append(
-                            f"Named PV_TerminalValue at {coord} is empty or uncached — "
+                            f"Named {metric_name} at {coord} is empty or uncached — "
                             "skipping TV % of EV ratio check."
                         )
                     else:
                         self.warnings.append(
-                            f"Named PV_TerminalValue at {coord} has non-numeric value ({raw_val!r}) — "
-                            "skipping TV % of EV ratio check."
-                        )
-                if invalid_ev is not None:
-                    raw_val, coord = invalid_ev
-                    if raw_val is None:
-                        self.warnings.append(
-                            f"Named EnterpriseValue at {coord} is empty or uncached — "
-                            "skipping TV % of EV ratio check."
-                        )
-                    else:
-                        self.warnings.append(
-                            f"Named EnterpriseValue at {coord} has non-numeric value ({raw_val!r}) — "
+                            f"Named {metric_name} at {coord} has non-numeric value ({raw_val!r}) — "
                             "skipping TV % of EV ratio check."
                         )
                 return

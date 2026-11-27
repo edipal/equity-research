@@ -4135,6 +4135,204 @@ class TestValidateDcf(unittest.TestCase):
                 f"Duplicate non-numeric/empty error emitted for formula error cell: {res_me['errors']}",
             )
 
+    def test_plain_text_error_token_in_named_cells_caught_while_real_formula_errors_deduplicated(self) -> None:
+        from openpyxl.workbook.defined_name import DefinedName
+
+        with tempfile.TemporaryDirectory() as tmp:
+            has_soffice = recalc_xlsx_mod.find_soffice() is not None
+
+            # 1. Plain-text "'#N/A" (data_type == "s") in TerminalGrowth_Bull (DCF!C57) on a
+            #    build_dcf_skeleton.py --case 2 workbook recalculated via real LibreOffice must FAIL
+            #    with a non-numeric TerminalGrowth error (not silently PASS).
+            if has_soffice:
+                skel_path = Path(tmp) / "skeleton_plain_text_na_bull_tg.xlsx"
+                build_proc = subprocess.run(
+                    [sys.executable, str(BUILD_DCF_SKELETON_PATH), "--output", str(skel_path), "--case", "2"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(build_proc.returncode, 0, build_proc.stdout + build_proc.stderr)
+
+                wb_na = openpyxl.load_workbook(skel_path)
+                cell_tg_bull = wb_na["DCF"]["C57"]
+                cell_tg_bull.value = "#N/A"
+                cell_tg_bull.data_type = "s"
+                wb_na.save(skel_path)
+                wb_na.close()
+
+                recalc_na = subprocess.run(
+                    [sys.executable, str(RECALC_XLSX_PATH), str(skel_path), "30", "--in-place"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(recalc_na.returncode, 0, recalc_na.stdout + recalc_na.stderr)
+                recalc_na_payload = json.loads(recalc_na.stdout)
+                self.assertEqual(recalc_na_payload["total_errors"], 0, recalc_na_payload)
+
+                res_tg_na = validate_dcf_mod.validate_dcf_model(str(skel_path))
+                self.assertEqual(res_tg_na["status"], "FAIL", res_tg_na)
+                self.assertTrue(
+                    any(
+                        "Named terminal growth (Bull at DCF!C57) has non-numeric value ('#N/A')" in e
+                        for e in res_tg_na["errors"]
+                    ),
+                    res_tg_na["errors"],
+                )
+
+                # 2. Real Excel formula error (=1/0 -> #DIV/0!) in TerminalGrowth_Bull (DCF!C57)
+                #    must still emit only the formula error (deduplicated via _formula_error_coords).
+                wb_div0 = openpyxl.load_workbook(skel_path)
+                wb_div0["DCF"]["C57"] = "=1/0"
+                wb_div0.save(skel_path)
+                wb_div0.close()
+
+                recalc_div0 = subprocess.run(
+                    [sys.executable, str(RECALC_XLSX_PATH), str(skel_path), "30", "--in-place"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(recalc_div0.returncode, 1, recalc_div0.stdout + recalc_div0.stderr)
+
+                res_tg_div0 = validate_dcf_mod.validate_dcf_model(str(skel_path))
+                self.assertEqual(res_tg_div0["status"], "FAIL", res_tg_div0)
+                self.assertTrue(
+                    any("#DIV/0! at DCF!C57" in e for e in res_tg_div0["errors"]),
+                    res_tg_div0["errors"],
+                )
+                self.assertFalse(
+                    any("DCF!C57" in e and ("non-numeric" in e or "is empty" in e) for e in res_tg_div0["errors"]),
+                    f"Duplicate non-numeric/empty error emitted for formula error cell: {res_tg_div0['errors']}",
+                )
+
+            # Helper for named-range WACC / PV_TerminalValue tests
+            def _make_named_rates_wb(dest: Path) -> None:
+                wb = openpyxl.Workbook()
+                ws_dcf = wb.active
+                ws_dcf.title = "DCF"
+                ws_dcf["A1"] = "Bear TG"
+                ws_dcf["B1"] = 0.02
+                ws_dcf["A2"] = "Base TG"
+                ws_dcf["B2"] = 0.025
+                ws_dcf["A3"] = "Bull TG"
+                ws_dcf["B3"] = 0.03
+                ws_dcf["A4"] = "PV of Terminal Value"
+                ws_dcf["B4"] = 600.0
+                ws_dcf["A5"] = "Enterprise Value"
+                ws_dcf["B5"] = 1000.0
+                ws_dcf["A8"] = "PV of Exit Multiple TV"
+                ws_dcf["B8"] = 2500.0
+                ws_dcf["A12"] = "Sensitivity Analysis"
+
+                ws_wacc = wb.create_sheet("WACC")
+                ws_wacc["A1"] = "Bear WACC"
+                ws_wacc["B1"] = 0.11
+                ws_wacc["A2"] = "Base WACC"
+                ws_wacc["B2"] = 0.09
+                ws_wacc["A3"] = "Bull WACC"
+                ws_wacc["B3"] = 0.08
+
+                wb.defined_names["TerminalGrowth_Bear"] = DefinedName("TerminalGrowth_Bear", attr_text="DCF!$B$1")
+                wb.defined_names["TerminalGrowth_Base"] = DefinedName("TerminalGrowth_Base", attr_text="DCF!$B$2")
+                wb.defined_names["TerminalGrowth_Bull"] = DefinedName("TerminalGrowth_Bull", attr_text="DCF!$B$3")
+                wb.defined_names["WACC_Bear"] = DefinedName("WACC_Bear", attr_text="WACC!$B$1")
+                wb.defined_names["WACC_Base"] = DefinedName("WACC_Base", attr_text="WACC!$B$2")
+                wb.defined_names["WACC_Bull"] = DefinedName("WACC_Bull", attr_text="WACC!$B$3")
+                wb.defined_names["PV_TerminalValue"] = DefinedName("PV_TerminalValue", attr_text="DCF!$B$4")
+                wb.defined_names["EnterpriseValue"] = DefinedName("EnterpriseValue", attr_text="DCF!$B$5")
+                wb.save(dest)
+                wb.close()
+
+            # 3. Plain-text "#N/A" (data_type == "s") in WACC_Bull -> FAIL with non-numeric WACC error
+            p_wacc_na = Path(tmp) / "plain_text_na_wacc_bull.xlsx"
+            _make_named_rates_wb(p_wacc_na)
+            wb_wna = openpyxl.load_workbook(p_wacc_na)
+            c_wacc_bull = wb_wna["WACC"]["B3"]
+            c_wacc_bull.value = "#N/A"
+            c_wacc_bull.data_type = "s"
+            wb_wna.save(p_wacc_na)
+            wb_wna.close()
+
+            res_wna = validate_dcf_mod.validate_dcf_model(str(p_wacc_na))
+            self.assertEqual(res_wna["status"], "FAIL", res_wna)
+            self.assertTrue(
+                any(
+                    "Named WACC (Bull at WACC!B3) has non-numeric value ('#N/A')" in e
+                    for e in res_wna["errors"]
+                ),
+                res_wna["errors"],
+            )
+            self.assertFalse(
+                any("DCF!B3" in i for i in res_wna["info"]),
+                f"Should not cross-pair Bull TG against another scenario's WACC: {res_wna['info']}",
+            )
+
+            # 4. Plain-text "#N/A" (data_type == "s") in PV_TerminalValue -> clean warning, no Exit Multiple TV mis-pair
+            p_tv_na = Path(tmp) / "plain_text_na_pv_tv.xlsx"
+            _make_named_rates_wb(p_tv_na)
+            wb_tvna = openpyxl.load_workbook(p_tv_na)
+            c_pv_tv = wb_tvna["DCF"]["B4"]
+            c_pv_tv.value = "#N/A"
+            c_pv_tv.data_type = "s"
+            wb_tvna.save(p_tv_na)
+            wb_tvna.close()
+
+            res_tvna = validate_dcf_mod.validate_dcf_model(str(p_tv_na))
+            self.assertEqual(res_tvna["status"], "PASS", res_tvna)
+            self.assertTrue(
+                any(
+                    "Named PV_TerminalValue at DCF!B4 has non-numeric value ('#N/A')" in w
+                    for w in res_tvna["warnings"]
+                ),
+                res_tvna["warnings"],
+            )
+            self.assertFalse(
+                any("typically should be 50-70%" in w or "250.0%" in w for w in res_tvna["warnings"]),
+                f"Bogus Exit Multiple TV mis-pairing warning emitted: {res_tvna['warnings']}",
+            )
+
+            # 5. Real Excel formula error (=1/0 -> #DIV/0!) in WACC_Bull and PV_TerminalValue ->
+            #    deduplicated cleanly via _formula_error_coords without duplicate error/warning spam.
+            p_formula_err = Path(tmp) / "formula_err_wacc_and_pv_tv.xlsx"
+            _make_named_rates_wb(p_formula_err)
+            wb_fe = openpyxl.load_workbook(p_formula_err)
+            if has_soffice:
+                wb_fe["WACC"]["B3"] = "=1/0"
+                wb_fe["DCF"]["B4"] = "=1/0"
+            else:
+                wb_fe["WACC"]["B3"] = "#DIV/0!"
+                wb_fe["DCF"]["B4"] = "#DIV/0!"
+            wb_fe.save(p_formula_err)
+            wb_fe.close()
+
+            if has_soffice:
+                recalc_fe = subprocess.run(
+                    [sys.executable, str(RECALC_XLSX_PATH), str(p_formula_err), "30", "--in-place"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(recalc_fe.returncode, 1, recalc_fe.stdout + recalc_fe.stderr)
+
+            res_fe = validate_dcf_mod.validate_dcf_model(str(p_formula_err))
+            self.assertEqual(res_fe["status"], "FAIL", res_fe)
+            self.assertTrue(any("#DIV/0! at WACC!B3" in e for e in res_fe["errors"]), res_fe["errors"])
+            self.assertTrue(any("#DIV/0! at DCF!B4" in e for e in res_fe["errors"]), res_fe["errors"])
+            self.assertFalse(
+                any("WACC!B3" in e and ("non-numeric" in e or "is empty" in e) for e in res_fe["errors"]),
+                f"Duplicate non-numeric/empty WACC error emitted for formula error cell: {res_fe['errors']}",
+            )
+            self.assertFalse(
+                any("Named PV_TerminalValue at DCF!B4" in w for w in res_fe["warnings"]),
+                f"Redundant PV_TerminalValue warning emitted for formula error cell: {res_fe['warnings']}",
+            )
+            self.assertFalse(
+                any("typically should be 50-70%" in w or "250.0%" in w for w in res_fe["warnings"]),
+                f"Bogus Exit Multiple TV mis-pairing warning emitted: {res_fe['warnings']}",
+            )
+
 
 @unittest.skipIf(openpyxl is None, "openpyxl is required for DCF skeleton tests")
 class TestBuildDcfSkeleton(unittest.TestCase):
