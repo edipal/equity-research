@@ -829,6 +829,12 @@ def _build_dcf_sheet(ws, wb: openpyxl.Workbook, default_case: int = 2) -> None:
     ws.cell(row=ROW_EV, column=2, value="$M").font = FONT_NOTE
     _write_formula_cell(ws, ROW_EV, 3, f"=C{ROW_SUM_PV_FCF}+C{ROW_PV_TV}", FMT_CURRENCY_M, bold=True, border=BORDER_SUBTOTAL)
 
+    # Standard workbook-level named ranges for downstream QA, charts, and report assembly
+    wb.defined_names["DCF_WACC"] = DefinedName("DCF_WACC", attr_text=f"WACC!$C${WACC_OUTPUT_ROW}")
+    wb.defined_names["TerminalGrowth"] = DefinedName("TerminalGrowth", attr_text=f"DCF!$C${ROW_ACT_TG}")
+    wb.defined_names["PV_TerminalValue"] = DefinedName("PV_TerminalValue", attr_text=f"DCF!$C${ROW_PV_TV}")
+    wb.defined_names["EnterpriseValue"] = DefinedName("EnterpriseValue", attr_text=f"DCF!$C${ROW_EV}")
+
     ws.cell(row=ROW_BR_DEBT, column=1, value="Less: Total Gross Debt").font = FONT_FORMULA
     ws.cell(row=ROW_BR_DEBT, column=2, value="$M").font = FONT_NOTE
     _write_formula_cell(ws, ROW_BR_DEBT, 3, f"=-C{ROW_DEBT}", FMT_CURRENCY_M)
@@ -898,8 +904,18 @@ def _build_dcf_sheet(ws, wb: openpyxl.Workbook, default_case: int = 2) -> None:
 
     ws.cell(row=ROW_IMPL_EXIT_M, column=1, value="Implied Exit EV / FY2030E EBITDA (from Perpetuity)").font = FONT_FORMULA
     ws.cell(row=ROW_IMPL_EXIT_M, column=2, value="x").font = FONT_NOTE
-    _write_formula_cell(ws, ROW_IMPL_EXIT_M, 3, f"=C{ROW_UNDISC_TV}/G{ROW_EBITDA}", FMT_MULT)
-    ws.cell(row=ROW_IMPL_EXIT_M, column=4, value="Undiscounted Perpetuity TV / Year 5 EBITDA").font = FONT_NOTE
+    _write_formula_cell(
+        ws,
+        ROW_IMPL_EXIT_M,
+        3,
+        f"=C{ROW_UNDISC_TV}*(1+$C${ROW_WACC})^0.5/G{ROW_EBITDA}",
+        FMT_MULT,
+    )
+    ws.cell(
+        row=ROW_IMPL_EXIT_M,
+        column=4,
+        value="End-of-year TV (Perpetuity TV * (1 + WACC)^0.5) / Year 5 EBITDA",
+    ).font = FONT_NOTE
 
     ws.cell(row=ROW_EXIT_TV, column=1, value="Undiscounted Exit Multiple TV (FY2030E EBITDA * Multiple)").font = FONT_FORMULA
     ws.cell(row=ROW_EXIT_TV, column=2, value="$M").font = FONT_NOTE

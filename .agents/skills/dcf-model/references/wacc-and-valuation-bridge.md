@@ -8,7 +8,7 @@ Reference guide for the `dcf-model` skill. Every formula and convention here mat
 
 ## 1. Weighted Average Cost of Capital (WACC)
 
-Build WACC on a dedicated `WACC` worksheet and link `DCF!C21 = WACC!C30` as the single source of truth (`WACC!C20 = DCF!C14` for Market Cap, `WACC!C21 = DCF!C15` for Total Gross Debt, and `WACC!C22 = DCF!C16` for Preferred Stock).
+Build WACC on a dedicated `WACC` worksheet and link `DCF!C21 = WACC!C30` as the single source of truth (`WACC!C20 = DCF!C14` for Market Cap, `WACC!C21 = DCF!C15` for Total Gross Debt, and `WACC!C22 = DCF!C16` for Preferred Stock). `build_dcf_skeleton.py` also defines 5 workbook-level named ranges (`Case` → `DCF!$B$4`, `DCF_WACC` → `WACC!$C$30`, `TerminalGrowth` → `DCF!$C$69`, `PV_TerminalValue` → `DCF!$C$99`, `EnterpriseValue` → `DCF!$C$100`) that `validate_dcf.py` resolves first before falling back to label heuristics.
 
 ### 1.1 Cost of Equity (CAPM)
 
@@ -147,7 +147,7 @@ PV of Exit Multiple TV          = Undiscounted TV / (1 + WACC)^N
 ```
 
 - **CRITICAL DISCOUNTING RULE:** An exit multiple (`EBITDA_N × Multiple`) values the business at the **end of Year `N`** (point-in-time exit transaction). It MUST ALWAYS be discounted by **`(1 + WACC)^N`** (`N = 5.0` in a 5-year model, e.g., `^($G$87+0.5)`) — **NEVER `(1 + WACC)^(N - 0.5)`**, even when explicit FCFs and Perpetuity Growth TV use the mid-year convention.
-- Always display **Implied Exit EV / Terminal EBITDA** from the Perpetuity Growth TV (`= Undiscounted Perpetuity TV / EBITDA_N`) and cross-check against peer trading multiples from `comps-analysis`.
+- Always display **Implied Exit EV / Terminal EBITDA** from the Perpetuity Growth TV on an apples-to-apples end-of-year `t = N` basis: when Perpetuity TV is valued at mid-year `t = N - 0.5`, compound it half a year to `t = N` before dividing by Year `N` EBITDA (`= Undiscounted Perpetuity TV × (1 + WACC)^0.5 / EBITDA_N`, i.e., `=C95*(1+$C$21)^0.5/G83` in `build_dcf_skeleton.py`) and cross-check against peer trading multiples from `comps-analysis`.
 
 ### 3.4 Terminal Value Sanity Checks
 - **TV % of Enterprise Value:** Target **`50%–70%`** (`validate_dcf.py` warns if `< 50%` or `> 70%`).

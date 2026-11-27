@@ -48,23 +48,30 @@ def extract_formula_text(val_f) -> str | None:
 
 
 def detect_cell_error(cell_v, val_f) -> str | None:
-    """Return Excel error token for a cell without false-positiving on prose or quoted literals.
+    """Return Excel error token for a cell without false-positiving on prose, text cells, or quoted literals.
 
-    Checks cached error values first. When the cached result is not an error, only scans
-    stripped formula text for ``#REF!`` (a broken reference is always a static formula error,
-    whereas ``#N/A`` or other error tokens inside live branches such as
-    ``=IF(ISBLANK(B5),#N/A,B5)`` are valid when the evaluated cached value is non-error).
+    Checks cached error values first:
+    - Any cell with Excel error type (``data_type == "e"``) is always flagged.
+    - For formula cells (``formula_text is not None``), a cached string matching an exact
+      Excel error token is also flagged.
+    - Plain non-formula text cells (``formula_text is None`` and ``data_type != "e"``)
+      containing literal strings such as ``"#N/A"`` are NOT flagged as formula errors.
+
+    When the cached result is not an error, only scans stripped formula text for ``#REF!``
+    (a broken reference is always a static formula error, whereas ``#N/A`` or other error
+    tokens inside live branches such as ``=IF(ISBLANK(B5),#N/A,B5)`` are valid when the
+    evaluated cached value is non-error).
     """
     val_v = cell_v.value if cell_v is not None else None
+    formula_text = extract_formula_text(val_f)
 
-    # 1. Cached error value (openpyxl error data_type or exact Excel error token)
+    # 1. Cached error value (Excel error data_type, or exact error token cached on a formula cell)
     if getattr(cell_v, "data_type", None) == "e":
         return str(val_v) if val_v is not None else "#ERROR!"
-    if isinstance(val_v, str) and val_v in EXCEL_ERRORS:
+    if formula_text is not None and isinstance(val_v, str) and val_v in EXCEL_ERRORS:
         return val_v
 
     # 2. Static broken reference (#REF!) inside formula text (ignoring double-quoted string literals)
-    formula_text = extract_formula_text(val_f)
     if formula_text is not None:
         stripped_formula = STRING_LITERAL_RE.sub("", formula_text)
         if "#REF!" in stripped_formula:

@@ -15,8 +15,8 @@ Audit formulas and data in `.xlsx` workbooks (or exported Google Sheets) for acc
    - Exit `0` (`"status": "success"`): zero formula errors, all formulas verified.
    - Exit `1` (`"status": "errors_found"` / `"error"`): formula errors found or file/LibreOffice failure — inspect `error_summary`.
    - Exit `2` (`"status": "unverified"`): LibreOffice is not installed and the workbook has uncached formulas. Report `unverified` explicitly; only pass `--allow-unrecalculated` if the user explicitly accepts unverified cached values.
-   - *(Note: If the workbook was just written/modified by `openpyxl` so cached values were stripped, first write a recalculated copy via `--output <recalc.xlsx>` — or `--in-place` on a newly Python-generated `.xlsx` — before running `validate_dcf.py` or reading `data_only=True`.)*
-2. For DCF workbooks, also run `python3 .agents/skills/dcf-model/scripts/validate_dcf.py <path-to-workbook.xlsx>` (read-only; requires cached formula values on disk).
+   - *(Note: Default `--check-only` mode also reports `on_disk_uncached_formulas` and warns if the untouched input file on disk still has uncached formulas. Confirm `on_disk_uncached_formulas == 0` — or first write a recalculated copy via `--output <recalc.xlsx>` or `--in-place` on a newly Python-generated `.xlsx` — before running `validate_dcf.py` or reading `openpyxl.load_workbook(..., data_only=True)`.)*
+2. For DCF workbooks, also run `python3 .agents/skills/dcf-model/scripts/validate_dcf.py <path-to-workbook.xlsx>` (read-only; requires cached formula values on disk, i.e., `on_disk_uncached_formulas == 0`).
 3. Inspect formulas (`data_only=False`) and cached values (`data_only=True`) programmatically with Python (`openpyxl`) across the requested file, sheet(s), and cell range(s). Never modify the workbook until the user explicitly approves fixes.
 
 ## Step 1: Determine scope

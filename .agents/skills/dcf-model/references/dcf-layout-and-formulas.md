@@ -37,9 +37,15 @@ python3 .agents/skills/dcf-model/scripts/build_dcf_skeleton.py \
 
 ## 3. `DCF` Sheet Row Map
 
-### Header & Named Case Selector (Rows 1–4)
+### Header, Named Ranges & Case Selector (Rows 1–4)
 - `DCF!B4`: Named cell `Case` (`wb.defined_names["Case"] = DefinedName("Case", attr_text="DCF!$B$4")`) containing `1` (Bear), `2` (Base), or `3` (Bull), enforced via `DataValidation(type="whole", operator="between", formula1="1", formula2="3", allow_blank=False)`. Blue bold input font with `#BDD7EE` fill.
 - `DCF!C4`: `=CHOOSE(INT(Case),"Bear Case","Base Case","Bull Case")`.
+- **Standard Workbook-Level Named Ranges (defined in `build_dcf_skeleton.py`, resolved first by `validate_dcf.py`):**
+  - `Case` → `DCF!$B$4` (Active scenario selector: `1` = Bear, `2` = Base, `3` = Bull)
+  - `DCF_WACC` → `WACC!$C$30` (Weighted Average Cost of Capital output)
+  - `TerminalGrowth` → `DCF!$C$69` (Active Case Terminal Growth Rate)
+  - `PV_TerminalValue` → `DCF!$C$99` (PV of Perpetuity Terminal Value)
+  - `EnterpriseValue` → `DCF!$C$100` (Implied Enterprise Value)
 
 ### Section 1 — Market Data & Valuation Inputs (Rows 6–22)
 - `C8` Current Share Price, `C9` Basic Shares Outstanding
@@ -136,7 +142,7 @@ Column `B` holds the historical anchor year (`B74 = C20`); columns `C:G` hold pr
 ### Section 6 — Cross-Checks & Exit Multiple Method (Rows 111–119)
 - `C113` TV % of Enterprise Value: `=C99/C100` (target `50%–70%`)
 - `C114` Implied EV / Year 1 EBITDA: `=C100/C83`
-- `C115` Implied Exit EV / Year 5 EBITDA (from Perpetuity): `=C95/G83`
+- `C115` Implied Exit EV / Year 5 EBITDA (from Perpetuity): `=C95*(1+$C$21)^0.5/G83` *(compounds mid-year Perpetuity TV at `t = N - 0.5` by `(1 + WACC)^0.5` to end-of-year `t = N` so it is apples-to-apples with an end-of-year exit multiple)*
 - `C116` Undiscounted Exit Multiple TV: `=G83*C70`
 - `C117` PV of Exit Multiple TV: `=C116/(1+$C$21)^($G$87+0.5)` *(strictly end-of-year `(1+WACC)^N` = `(1+WACC)^5`, NOT `4.5`)*
 - `C118` Implied Enterprise Value (Exit Multiple): `=C98+C117`

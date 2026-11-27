@@ -305,16 +305,7 @@ def check_openpyxl_available() -> str | None:
 def scan_workbook(xlsx_path: Path) -> dict:
     openpyxl_err = check_openpyxl_available()
     if openpyxl_err is not None:
-        print(
-            json.dumps(
-                {
-                    "status": "error",
-                    "message": openpyxl_err,
-                },
-                indent=2,
-            )
-        )
-        raise SystemExit(1)
+        raise WorkbookLoadError(openpyxl_err)
 
     return scan_workbook_formulas(xlsx_path)
 
@@ -459,7 +450,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     dest_path: Path | None
-    if is_check_only or soffice is None:
+    if is_check_only:
         dest_path = None
     elif output_path is not None:
         dest_path = output_path
@@ -495,7 +486,7 @@ def main(argv: list[str] | None = None) -> int:
         locs_preview = ", ".join(data_table_locs[:5])
         if len(data_table_locs) > 5:
             locs_preview += f" (+{len(data_table_locs) - 5} more)"
-        if soffice is not None and not is_check_only and is_in_place:
+        if is_in_place:
             print(
                 json.dumps(
                     {
@@ -515,7 +506,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
             return 1
-        if soffice is not None and args.output:
+        if args.output:
             warnings.append(
                 f"Input workbook contains Excel What-If data table(s) ({locs_preview}); "
                 "LibreOffice re-export converts What-If data tables into Calc TABLE(...) formulas "
@@ -618,6 +609,29 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 1
 
+    on_disk_uncached: int | None
+    if is_check_only and recalculated:
+        if xlsx_path.suffix.lower() in OOXML_ZIP_SUFFIXES:
+            try:
+                disk_scan = scan_workbook(xlsx_path)
+                on_disk_uncached = disk_scan["uncached_formulas"]
+            except WorkbookLoadError as exc:
+                on_disk_uncached = None
+                warnings.append(
+                    f"Could not inspect input file on disk for uncached formulas: {exc}"
+                )
+        else:
+            on_disk_uncached = None
+    else:
+        on_disk_uncached = scan["uncached_formulas"]
+
+    if is_check_only and recalculated and on_disk_uncached is not None and on_disk_uncached > 0:
+        warnings.append(
+            f"Input file on disk still has {on_disk_uncached} uncached formula(s) "
+            "(audited in temporary copy only); run with --in-place or --output <recalc.xlsx> "
+            "before reading with openpyxl(data_only=True) or validate_dcf.py."
+        )
+
     if scan["total_errors"] > 0:
         status = "errors_found"
         exit_code = 1
@@ -637,9 +651,12 @@ def main(argv: list[str] | None = None) -> int:
         "total_errors": scan["total_errors"],
         "total_formulas": scan["total_formulas"],
         "uncached_formulas": scan["uncached_formulas"],
-        "data_table_formulas": scan["data_table_formulas"],
+        "on_disk_uncached_formulas": on_disk_uncached,
+        "data_table_formulas": max(scan["data_table_formulas"], len(data_table_locs)),
         "error_summary": scan["error_summary"],
     }
+    if data_table_locs:
+        result["data_tables"] = data_table_locs
     if is_check_only:
         result["check_only"] = True
     if not _is_same_file(reported_file, xlsx_path):

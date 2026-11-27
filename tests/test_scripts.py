@@ -1579,6 +1579,178 @@ class TestRecalcXlsx(unittest.TestCase):
             self.assertEqual(payload_ref["total_errors"], 1)
             self.assertEqual(payload_ref["error_summary"]["#REF!"]["locations"], ["BrokenRef!A1"])
 
+    @unittest.skipIf(
+        recalc_xlsx_mod.find_soffice() is None,
+        "LibreOffice (soffice) is required for on_disk_uncached_formulas integration test",
+    )
+    def test_check_only_reports_on_disk_uncached_formulas_and_clears_after_recalc(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "uncached_check_only.xlsx"
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Model"
+            ws["A1"] = 25
+            ws["A2"] = "=A1*4"
+            wb.save(path)
+            wb.close()
+
+            orig_bytes = path.read_bytes()
+
+            # 1. Default / --check-only on uncached workbook: temp copy recalculated (uncached_formulas == 0),
+            #    but on_disk_uncached_formulas == 1 and warning advises persisting with --in-place or --output.
+            for flags in ([], ["--check-only"]):
+                with self.subTest(flags=flags):
+                    rc, payload = self._run_main([str(path), "30", *flags])
+                    self.assertEqual(rc, 0, payload)
+                    self.assertEqual(payload["status"], "success")
+                    self.assertTrue(payload["recalculated_with_libreoffice"])
+                    self.assertFalse(payload["modified_file"])
+                    self.assertEqual(payload["uncached_formulas"], 0)
+                    self.assertEqual(payload["on_disk_uncached_formulas"], 1)
+                    self.assertIn("Input file on disk still has 1 uncached formula(s)", payload.get("warning", ""))
+                    self.assertIn("--in-place", payload.get("warning", ""))
+                    self.assertIn("--output", payload.get("warning", ""))
+                    self.assertEqual(path.read_bytes(), orig_bytes)
+
+            # 2. Persist cached values with --in-place, then re-run --check-only -> on_disk_uncached_formulas == 0, no warning
+            rc_ip, payload_ip = self._run_main([str(path), "30", "--in-place"])
+            self.assertEqual(rc_ip, 0, payload_ip)
+            self.assertEqual(payload_ip["uncached_formulas"], 0)
+            self.assertEqual(payload_ip["on_disk_uncached_formulas"], 0)
+
+            rc_after, payload_after = self._run_main([str(path), "30", "--check-only"])
+            self.assertEqual(rc_after, 0, payload_after)
+            self.assertEqual(payload_after["uncached_formulas"], 0)
+            self.assertEqual(payload_after["on_disk_uncached_formulas"], 0)
+            self.assertNotIn("Input file on disk still has", payload_after.get("warning", ""))
+
+    @unittest.skipIf(
+        recalc_xlsx_mod.find_soffice() is None,
+        "LibreOffice (soffice) is required for real What-If data table pre-scan test",
+    )
+    def test_real_libreoffice_preserves_prescan_data_table_count_and_locations(self) -> None:
+        from openpyxl.worksheet.formula import DataTableFormula
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "real_lo_datatable.xlsx"
+            out_path = Path(tmp) / "real_lo_datatable_out.xlsx"
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Sensitivity"
+            ws["A1"] = 10
+            ws["A2"] = 2
+            ws["B2"] = "=A1*A2"
+            ws["C2"] = 10
+            ws["D2"] = 20
+            ws["B3"] = 2
+            ws["B4"] = 3
+            ws["C3"] = DataTableFormula(ref="C3:D4", dt2D=True, r1="A1", r2="A2")
+            wb.save(path)
+            wb.close()
+
+            orig_bytes = path.read_bytes()
+
+            # Both --check-only and --output MUST report data_table_formulas == 1 and data_tables
+            # even though LibreOffice converts <f t="dataTable"> into Calc TABLE(...) formulas.
+            rc_chk, payload_chk = self._run_main([str(path), "30", "--check-only"])
+            self.assertEqual(rc_chk, 0, payload_chk)
+            self.assertTrue(payload_chk["recalculated_with_libreoffice"])
+            self.assertEqual(payload_chk["data_table_formulas"], 1)
+            self.assertEqual(payload_chk["data_tables"], ["Sensitivity!C3:D4"])
+            self.assertEqual(path.read_bytes(), orig_bytes)
+
+            rc_out, payload_out = self._run_main([str(path), "30", "--output", str(out_path)])
+            self.assertEqual(rc_out, 0, payload_out)
+            self.assertTrue(payload_out["recalculated_with_libreoffice"])
+            self.assertEqual(payload_out["data_table_formulas"], 1)
+            self.assertEqual(payload_out["data_tables"], ["Sensitivity!C3:D4"])
+            self.assertTrue(out_path.exists())
+            self.assertEqual(path.read_bytes(), orig_bytes)
+
+    def test_plain_text_na_cell_not_flagged_while_error_cell_and_formula_na_fail(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            # 1. Plain non-formula text cells ("#N/A", "#DIV/0!") with data_type="s" MUST pass with 0 errors
+            text_path = Path(tmp) / "plain_text_na.xlsx"
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "DCF"
+            ws["A1"] = "WACC"
+            ws["B1"] = 0.09
+            ws["A2"] = "Terminal Growth Rate"
+            ws["B2"] = 0.025
+            ws["A3"] = "PV of Terminal Value"
+            ws["B3"] = 600.0
+            ws["A4"] = "Enterprise Value"
+            ws["B4"] = 1000.0
+            ws["A5"] = "Sensitivity Analysis"
+            c_na = ws["C1"]
+            c_na.value = "#N/A"
+            c_na.data_type = "s"
+            c_div = ws["C2"]
+            c_div.value = "#DIV/0!"
+            c_div.data_type = "s"
+            ws_wacc = wb.create_sheet("WACC")
+            ws_wacc["A1"] = "WEIGHTED AVERAGE COST OF CAPITAL"
+            ws_wacc["B1"] = 0.09
+            wb.save(text_path)
+            wb.close()
+
+            with mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value=None):
+                rc_txt, payload_txt = self._run_main([str(text_path)])
+            self.assertEqual(rc_txt, 0, payload_txt)
+            self.assertEqual(payload_txt["status"], "success")
+            self.assertEqual(payload_txt["total_errors"], 0)
+
+            dcf_txt = validate_dcf_mod.validate_dcf_model(str(text_path))
+            self.assertEqual(dcf_txt["status"], "PASS", dcf_txt)
+            self.assertEqual(dcf_txt["error_count"], 0, dcf_txt["errors"])
+
+            if recalc_xlsx_mod.find_soffice() is not None:
+                rc_lo, payload_lo = self._run_main([str(text_path), "30", "--check-only"])
+                self.assertEqual(rc_lo, 0, payload_lo)
+                self.assertEqual(payload_lo["total_errors"], 0)
+
+            # 2. Real Excel error cell (data_type == "e") MUST fail
+            err_cell_path = Path(tmp) / "real_error_cell.xlsx"
+            wb2 = openpyxl.Workbook()
+            ws2 = wb2.active
+            ws2.title = "Model"
+            c_err = ws2["A1"]
+            c_err.value = "#N/A"
+            c_err.data_type = "e"
+            wb2.save(err_cell_path)
+            wb2.close()
+
+            with mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value=None):
+                rc_err, payload_err = self._run_main([str(err_cell_path)])
+            self.assertEqual(rc_err, 1, payload_err)
+            self.assertEqual(payload_err["status"], "errors_found")
+            self.assertEqual(payload_err["error_summary"]["#N/A"]["locations"], ["Model!A1"])
+
+            # 3. Formula evaluating to #N/A via real LibreOffice MUST fail
+            if recalc_xlsx_mod.find_soffice() is not None:
+                formula_na_path = Path(tmp) / "formula_na.xlsx"
+                wb3 = openpyxl.Workbook()
+                ws3 = wb3.active
+                ws3.title = "Model"
+                ws3["A1"] = "=NA()"
+                wb3.save(formula_na_path)
+                wb3.close()
+
+                rc_fna, payload_fna = self._run_main([str(formula_na_path), "30", "--check-only"])
+                self.assertEqual(rc_fna, 1, payload_fna)
+                self.assertEqual(payload_fna["status"], "errors_found")
+                self.assertEqual(payload_fna["error_summary"]["#N/A"]["locations"], ["Model!A1"])
+
+    def test_scan_workbook_missing_openpyxl_raises_workbook_load_error(self) -> None:
+        with mock.patch.object(
+            recalc_xlsx_mod,
+            "check_openpyxl_available",
+            return_value="openpyxl is required: No module named 'openpyxl'.",
+        ):
+            with self.assertRaises(recalc_xlsx_mod.WorkbookLoadError):
+                recalc_xlsx_mod.scan_workbook(Path("dummy.xlsx"))
+
 
 @unittest.skipIf(openpyxl is None, "openpyxl is required for DCF validation tests")
 class TestValidateDcf(unittest.TestCase):
@@ -2173,6 +2345,200 @@ class TestValidateDcf(unittest.TestCase):
                 res_neg_wacc["errors"],
             )
 
+    def test_broadened_tv_and_ev_labels_including_exit_multiple_pv(self) -> None:
+        label_pairs = (
+            ("PV of TV", "Enterprise Value"),
+            ("Discounted Terminal Value", "Implied Enterprise Value"),
+            ("Present Value of Terminal Value", "Total Enterprise Value"),
+            ("PV Terminal Value", "Implied EV"),
+            ("PV of Terminal Value (Exit Multiple)", "Implied Enterprise Value (Exit Multiple Method)"),
+            ("PV of Terminal Value (Perpetuity)", "Enterprise Value"),
+        )
+        for tv_label, ev_label in label_pairs:
+            with self.subTest(tv_label=tv_label, ev_label=ev_label), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "broad_labels.xlsx"
+                wb = openpyxl.Workbook()
+                ws_dcf = wb.active
+                ws_dcf.title = "DCF"
+                ws_dcf["A2"] = "WACC"
+                ws_dcf["B2"] = 0.09
+                ws_dcf["A3"] = "Terminal Growth Rate"
+                ws_dcf["B3"] = 0.025
+                # Undiscounted TV and ratio/multiple distractors placed ABOVE the real PV/EV rows
+                ws_dcf["A4"] = "Undiscounted Terminal Value"
+                ws_dcf["B4"] = 900.0
+                ws_dcf["A5"] = "PV of Terminal Value (% of EV)"
+                ws_dcf["B5"] = 0.60
+                ws_dcf["A6"] = "Exit EV/EBITDA Multiple"
+                ws_dcf["B6"] = 8.5
+                ws_dcf["A7"] = tv_label
+                ws_dcf["B7"] = 600.0
+                ws_dcf["A8"] = ev_label
+                ws_dcf["B8"] = 1000.0
+                ws_dcf["A12"] = "Sensitivity Analysis"
+
+                ws_wacc = wb.create_sheet("WACC")
+                ws_wacc["A3"] = "WEIGHTED AVERAGE COST OF CAPITAL"
+                ws_wacc["B3"] = 0.09
+                wb.save(path)
+                wb.close()
+
+                results = validate_dcf_mod.validate_dcf_model(str(path))
+                self.assertEqual(results["status"], "PASS", results)
+                self.assertEqual(results["error_count"], 0, results["errors"])
+                self.assertEqual(results["warning_count"], 0, results["warnings"])
+                self.assertTrue(
+                    any("Terminal value is 60.0% of EV" in i for i in results["info"]),
+                    results["info"],
+                )
+
+    def test_named_ranges_resolve_even_with_non_standard_row_labels(self) -> None:
+        from openpyxl.workbook.defined_name import DefinedName
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "named_ranges_custom_labels.xlsx"
+            wb = openpyxl.Workbook()
+            ws_dcf = wb.active
+            ws_dcf.title = "DCF"
+            ws_dcf["A1"] = "Row 1"
+            ws_dcf["B1"] = 0.025
+            ws_dcf["A2"] = "Row 2"
+            ws_dcf["B2"] = 600.0
+            ws_dcf["A3"] = "Row 3"
+            ws_dcf["B3"] = 1000.0
+            ws_dcf["A10"] = "Sensitivity Analysis"
+
+            ws_wacc = wb.create_sheet("WACC")
+            ws_wacc["A1"] = "Metric Alpha"
+            ws_wacc["B1"] = 0.095
+
+            wb.defined_names["DCF_WACC"] = DefinedName("DCF_WACC", attr_text="WACC!$B$1")
+            wb.defined_names["TerminalGrowth"] = DefinedName("TerminalGrowth", attr_text="DCF!$B$1")
+            wb.defined_names["PV_TerminalValue"] = DefinedName("PV_TerminalValue", attr_text="DCF!$B$2")
+            wb.defined_names["EnterpriseValue"] = DefinedName("EnterpriseValue", attr_text="DCF!$B$3")
+            wb.save(path)
+            wb.close()
+
+            res_ok = validate_dcf_mod.validate_dcf_model(str(path))
+            self.assertEqual(res_ok["status"], "PASS", res_ok)
+            self.assertEqual(res_ok["error_count"], 0, res_ok["errors"])
+            self.assertEqual(res_ok["warning_count"], 0, res_ok["warnings"])
+            self.assertTrue(any("9.50%" in i for i in res_ok["info"]), res_ok["info"])
+            self.assertTrue(any("Terminal value is 60.0% of EV" in i for i in res_ok["info"]), res_ok["info"])
+
+            # Invalid TerminalGrowth >= DCF_WACC via named ranges must still FAIL
+            wb_bad = openpyxl.load_workbook(path)
+            wb_bad["DCF"]["B1"] = 0.10
+            wb_bad.save(path)
+            wb_bad.close()
+
+            res_bad = validate_dcf_mod.validate_dcf_model(str(path))
+            self.assertEqual(res_bad["status"], "FAIL", res_bad)
+            self.assertTrue(
+                any("Terminal growth (10.00% at DCF!B1) >= WACC (9.50% at WACC!B1)" in e for e in res_bad["errors"]),
+                res_bad["errors"],
+            )
+
+    def test_scenario_scoped_pairing_never_crosses_bull_tg_with_bear_wacc(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            # 1. Global WACC (9%) + Bear (WACC 11%, g 2%) + Bull (WACC 7%, g 7.5% INVALID)
+            #    Old zip/nearest logic could cross Bull g with Bear WACC (11%) or global WACC (9%).
+            path = Path(tmp) / "scenario_scoped.xlsx"
+            wb = openpyxl.Workbook()
+            ws_dcf = wb.active
+            ws_dcf.title = "DCF"
+            ws_dcf["A2"] = "Discount Rate (WACC)"
+            ws_dcf["B2"] = 0.09
+
+            ws_dcf["A5"] = "BEAR CASE ASSUMPTIONS"
+            ws_dcf["A6"] = "WACC"
+            ws_dcf["B6"] = 0.11
+            ws_dcf["A7"] = "Terminal Growth Rate"
+            ws_dcf["B7"] = 0.02
+
+            ws_dcf["A12"] = "BULL CASE ASSUMPTIONS"
+            ws_dcf["A13"] = "WACC"
+            ws_dcf["B13"] = 0.07
+            ws_dcf["A14"] = "Terminal Growth Rate"
+            ws_dcf["B14"] = 0.075  # INVALID: 7.5% >= Bull WACC 7.0%
+
+            ws_dcf["A20"] = "PV of Terminal Value"
+            ws_dcf["B20"] = 600.0
+            ws_dcf["A21"] = "Enterprise Value"
+            ws_dcf["B21"] = 1000.0
+            ws_dcf["A25"] = "Sensitivity Analysis"
+
+            ws_wacc = wb.create_sheet("WACC")
+            ws_wacc["A3"] = "WEIGHTED AVERAGE COST OF CAPITAL"
+            ws_wacc["B3"] = 0.09
+            wb.save(path)
+            wb.close()
+
+            res = validate_dcf_mod.validate_dcf_model(str(path))
+            self.assertEqual(res["status"], "FAIL", res)
+            self.assertTrue(
+                any("Terminal growth (7.50% at DCF!B14) >= WACC (7.00% at DCF!B13)" in e for e in res["errors"]),
+                res["errors"],
+            )
+
+            # 2. Un-scoped Terminal Growth row when multiple scenario WACCs exist uses conservative min WACC (7.0%)
+            path_unscoped = Path(tmp) / "scenario_unscoped_tg.xlsx"
+            wb2 = openpyxl.load_workbook(path)
+            wb2["DCF"]["B14"] = 0.03  # Fix Bull TG so Bull passes
+            wb2["DCF"]["A17"] = "Active Summary"
+            wb2["DCF"]["A18"] = "Terminal Growth Rate"
+            wb2["DCF"]["B18"] = 0.072  # 7.2% >= min WACC (7.0%)
+            wb2.save(path_unscoped)
+            wb2.close()
+
+            res_unscoped = validate_dcf_mod.validate_dcf_model(str(path_unscoped))
+            self.assertEqual(res_unscoped["status"], "FAIL", res_unscoped)
+            self.assertTrue(
+                any("Terminal growth (7.20% at DCF!B18) >= WACC (7.00% at DCF!B13)" in e for e in res_unscoped["errors"]),
+                res_unscoped["errors"],
+            )
+
+    def test_full_used_range_scans_beyond_row_260_and_column_aa(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "large_grid_dcf.xlsx"
+            wb = openpyxl.Workbook()
+            ws_dcf = wb.active
+            ws_dcf.title = "DCF"
+            ws_dcf["AA265"] = "WACC"
+            ws_dcf["AB265"] = 0.09
+            ws_dcf["AA266"] = "Terminal Growth Rate"
+            ws_dcf["AB266"] = 0.025
+            ws_dcf["AA270"] = "PV of Terminal Value"
+            ws_dcf["AB270"] = 600.0
+            ws_dcf["AA271"] = "Enterprise Value"
+            ws_dcf["AB271"] = 1000.0
+            ws_dcf["AA280"] = "Sensitivity Analysis"
+
+            ws_wacc = wb.create_sheet("WACC")
+            ws_wacc["AA265"] = "WEIGHTED AVERAGE COST OF CAPITAL"
+            ws_wacc["AB265"] = 0.09
+            wb.save(path)
+            wb.close()
+
+            res_ok = validate_dcf_mod.validate_dcf_model(str(path))
+            self.assertEqual(res_ok["status"], "PASS", res_ok)
+            self.assertEqual(res_ok["error_count"], 0, res_ok["errors"])
+            self.assertEqual(res_ok["warning_count"], 0, res_ok["warnings"])
+            self.assertTrue(any("Terminal value is 60.0% of EV" in i for i in res_ok["info"]), res_ok["info"])
+
+            # Invalid g >= WACC far beyond row 250 and column Z MUST still be caught
+            wb_bad = openpyxl.load_workbook(path)
+            wb_bad["DCF"]["AB266"] = 0.11
+            wb_bad.save(path)
+            wb_bad.close()
+
+            res_bad = validate_dcf_mod.validate_dcf_model(str(path))
+            self.assertEqual(res_bad["status"], "FAIL", res_bad)
+            self.assertTrue(
+                any("Terminal growth (11.00% at DCF!AB266) >= WACC (9.00% at DCF!AB265)" in e for e in res_bad["errors"]),
+                res_bad["errors"],
+            )
+
 
 @unittest.skipIf(openpyxl is None, "openpyxl is required for DCF skeleton tests")
 class TestBuildDcfSkeleton(unittest.TestCase):
@@ -2214,8 +2580,10 @@ class TestBuildDcfSkeleton(unittest.TestCase):
                 self.assertEqual(str(ws_f["C21"].value), "=WACC!C30")
                 self.assertEqual(str(ws_f["C22"].value), "=WACC!C14")
                 self.assertEqual(str(ws_wacc_f["C22"].value), "=DCF!C16")
-                # Perpetuity TV discounted at N - 0.5 ($G$87), Exit Multiple TV at N ($G$87+0.5)
+                # Perpetuity TV discounted at N - 0.5 ($G$87), Exit Multiple TV at N ($G$87+0.5),
+                # and Implied Exit EV/EBITDA compounds mid-year Perpetuity TV half a year to t = N
                 self.assertIn("^$G$87", str(ws_f["C96"].value))
+                self.assertEqual(str(ws_f["C115"].value), "=C95*(1+$C$21)^0.5/G83")
                 self.assertIn("^($G$87+0.5)", str(ws_f["C117"].value))
                 # Horizon-independent IF(WACC<=g,"NM", SUMPRODUCT(...)) sensitivity formula
                 sens_formula = str(ws_f["E127"].value)
@@ -2286,14 +2654,29 @@ class TestBuildDcfSkeleton(unittest.TestCase):
                     tv_pct = float(ws_dcf["C113"].value)
                     self.assertGreaterEqual(tv_pct, 0.50)
                     self.assertLessEqual(tv_pct, 0.70)
-                    # Perpetuity TV DF = 1/(1+WACC)^4.5 and Exit Multiple PV = ExitTV/(1+WACC)^5.0
+                    # Perpetuity TV DF = 1/(1+WACC)^4.5, Exit Multiple PV = ExitTV/(1+WACC)^5.0,
+                    # and Implied Exit Multiple compounds mid-year Perpetuity TV half a year to t = N
                     wacc = float(ws_dcf["C21"].value)
                     self.assertAlmostEqual(float(ws_dcf["C96"].value), 1.0 / ((1.0 + wacc) ** 4.5), places=8)
+                    expected_impl_exit = float(ws_dcf["C95"].value) * ((1.0 + wacc) ** 0.5) / float(ws_dcf["G83"].value)
+                    self.assertLess(abs(float(ws_dcf["C115"].value) - expected_impl_exit), 1e-6)
                     self.assertAlmostEqual(
                         float(ws_dcf["C117"].value),
                         float(ws_dcf["C116"].value) / ((1.0 + wacc) ** 5.0),
                         places=6,
                     )
+                    # All 5 workbook-level named ranges survive LibreOffice recalculation cleanly
+                    expected_names = {
+                        "Case": ("DCF", "$B$4"),
+                        "DCF_WACC": ("WACC", "$C$30"),
+                        "TerminalGrowth": ("DCF", "$C$69"),
+                        "PV_TerminalValue": ("DCF", "$C$99"),
+                        "EnterpriseValue": ("DCF", "$C$100"),
+                    }
+                    for dn_name, expected_dest in expected_names.items():
+                        self.assertIn(dn_name, wb_val.defined_names)
+                        self.assertEqual(list(wb_val.defined_names[dn_name].destinations), [expected_dest])
+
                     # Center cell of SUMPRODUCT 5x5 sensitivity matches Active Case Implied Share Price
                     implied_price = float(ws_dcf["C108"].value)
                     sens_center = float(ws_dcf["E127"].value)
@@ -2301,6 +2684,13 @@ class TestBuildDcfSkeleton(unittest.TestCase):
                     prices_by_case[case_num] = implied_price
                 finally:
                     wb_val.close()
+
+                # Verify DCFModelValidator resolves all 4 valuation named metrics directly
+                validator_obj = validate_dcf_mod.DCFModelValidator(str(model_path))
+                self.assertEqual(
+                    set(validator_obj._named_metrics.keys()),
+                    {"wacc", "terminal_growth", "pv_terminal_value", "enterprise_value"},
+                )
 
             self.assertLess(prices_by_case[1], prices_by_case[2])
             self.assertLess(prices_by_case[2], prices_by_case[3])
