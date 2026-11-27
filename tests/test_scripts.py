@@ -568,6 +568,7 @@ class TestRecalcXlsx(unittest.TestCase):
     def test_libreoffice_uses_isolated_profile_and_handles_non_xlsx_conversion(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             src_path = Path(tmp) / "legacy_model.xlsm"
+            out_path = Path(tmp) / "converted_model.xlsx"
             wb = openpyxl.Workbook()
             ws = wb.active
             ws["A1"] = 100
@@ -577,6 +578,7 @@ class TestRecalcXlsx(unittest.TestCase):
             xcu_contents: list[str] = []
 
             def fake_popen(cmd, **kwargs):
+                captured_cmd.clear()
                 captured_cmd.extend(cmd)
                 outdir = Path(cmd[cmd.index("--outdir") + 1])
                 xcu = outdir / "lo_profile" / "user" / "registrymodifications.xcu"
@@ -593,21 +595,34 @@ class TestRecalcXlsx(unittest.TestCase):
                 mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value="/usr/bin/soffice"),
                 mock.patch.object(recalc_xlsx_mod.subprocess, "Popen", side_effect=fake_popen),
             ):
-                rc, payload = self._run_main([str(src_path)])
+                # 1. Default mode is non-destructive: scans in temp dir without creating sibling .xlsx
+                rc_def, payload_def = self._run_main([str(src_path)])
+                self.assertEqual(rc_def, 0, payload_def)
+                self.assertEqual(payload_def["status"], "success")
+                self.assertEqual(payload_def["mode"], "check_only")
+                self.assertFalse(payload_def["modified_file"])
+                self.assertTrue(payload_def["check_only"])
+                self.assertTrue(payload_def["recalculated_with_libreoffice"])
+                self.assertFalse(src_path.with_suffix(".xlsx").exists())
 
-            self.assertEqual(rc, 0)
-            self.assertEqual(payload["status"], "success")
-            self.assertTrue(payload["recalculated_with_libreoffice"])
+                # 2. Explicit --output writes the converted .xlsx using isolated profile
+                rc_out, payload_out = self._run_main([str(src_path), "--output", str(out_path)])
+
+            self.assertEqual(rc_out, 0, payload_out)
+            self.assertEqual(payload_out["status"], "success")
+            self.assertEqual(payload_out["mode"], "output")
+            self.assertTrue(payload_out["modified_file"])
+            self.assertTrue(payload_out["recalculated_with_libreoffice"])
             self.assertTrue(
                 any(arg.startswith("-env:UserInstallation=file://") and arg.endswith("/lo_profile") for arg in captured_cmd),
                 f"Expected isolated LibreOffice profile flag in {captured_cmd}",
             )
-            self.assertEqual(len(xcu_contents), 1, "Expected registrymodifications.xcu to be written")
+            self.assertGreaterEqual(len(xcu_contents), 1, "Expected registrymodifications.xcu to be written")
             self.assertIn("OOXMLRecalcMode", xcu_contents[0])
             self.assertIn("ODFRecalcMode", xcu_contents[0])
-            converted_target = src_path.with_suffix(".xlsx")
-            self.assertEqual(Path(payload["file"]), converted_target.resolve())
-            self.assertTrue(converted_target.exists())
+            self.assertEqual(Path(payload_out["file"]), out_path.resolve())
+            self.assertEqual(Path(payload_out["source_file"]), src_path.resolve())
+            self.assertTrue(out_path.exists())
 
     def test_checks_tab_quoted_error_literals_do_not_false_positive(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -745,7 +760,7 @@ class TestRecalcXlsx(unittest.TestCase):
                     side_effect=PermissionError("Read-only output directory"),
                 ),
             ):
-                rc, payload = self._run_main([str(path)])
+                rc, payload = self._run_main([str(path), "--in-place"])
 
             self.assertEqual(rc, 1, payload)
             self.assertEqual(payload["status"], "error")
@@ -821,7 +836,7 @@ class TestRecalcXlsx(unittest.TestCase):
             self.assertEqual(payload_fake["status"], "error")
             self.assertEqual(non_zip_xlsm.read_bytes(), b"not a zip file")
 
-    def test_xlsm_sibling_xlsx_protection_refuses_overwrite(self) -> None:
+    def test_xlsm_refuses_in_place_and_default_mode_leaves_sibling_untouched(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             xlsm_path = Path(tmp) / "model.xlsm"
             sibling_xlsx = Path(tmp) / "model.xlsx"
@@ -829,20 +844,41 @@ class TestRecalcXlsx(unittest.TestCase):
             wb.save(xlsm_path)
             sibling_xlsx.write_bytes(b"precious sibling content")
 
+            # 1. Explicit --in-place on .xlsm MUST refuse before invoking LibreOffice
             with (
                 mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value="/usr/bin/soffice"),
                 mock.patch.object(recalc_xlsx_mod.subprocess, "Popen") as mock_popen,
             ):
-                rc, payload = self._run_main([str(xlsm_path)])
+                rc, payload = self._run_main([str(xlsm_path), "--in-place"])
 
             mock_popen.assert_not_called()
             self.assertEqual(rc, 1, payload)
             self.assertEqual(payload["status"], "error")
+            self.assertIn("--in-place", payload["message"])
             self.assertIn("--output", payload["message"])
             self.assertIn("--check-only", payload["message"])
             self.assertEqual(sibling_xlsx.read_bytes(), b"precious sibling content")
 
-    def test_check_only_and_output_flags_preserve_input_and_permissions(self) -> None:
+            # 2. Default mode (no flags) audits in temp dir without touching sibling .xlsx
+            def fake_popen(cmd, **kwargs):
+                outdir = Path(cmd[cmd.index("--outdir") + 1])
+                shutil.copy2(xlsm_path, outdir / f"{xlsm_path.stem}.xlsx")
+                proc = mock.MagicMock()
+                proc.returncode = 0
+                proc.communicate.return_value = ("", "")
+                return proc
+
+            with (
+                mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value="/usr/bin/soffice"),
+                mock.patch.object(recalc_xlsx_mod.subprocess, "Popen", side_effect=fake_popen),
+            ):
+                rc_def, payload_def = self._run_main([str(xlsm_path)])
+
+            self.assertEqual(rc_def, 0, payload_def)
+            self.assertFalse(payload_def["modified_file"])
+            self.assertEqual(sibling_xlsx.read_bytes(), b"precious sibling content")
+
+    def test_default_check_only_output_and_in_place_flags_preserve_input_and_permissions(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             src_path = Path(tmp) / "sensitive.xlsx"
             out_path = Path(tmp) / "recalced_copy.xlsx"
@@ -873,9 +909,22 @@ class TestRecalcXlsx(unittest.TestCase):
                 mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value="/usr/bin/soffice"),
                 mock.patch.object(recalc_xlsx_mod.subprocess, "Popen", side_effect=fake_popen),
             ):
-                # 1. --check-only must not touch src_path or create extra files
+                # 0. Default mode (no mode flag) is non-destructive and must not touch src_path
+                rc_def, payload_def = self._run_main([str(src_path)])
+                self.assertEqual(rc_def, 0, payload_def)
+                self.assertEqual(payload_def["mode"], "check_only")
+                self.assertFalse(payload_def["modified_file"])
+                self.assertTrue(payload_def["check_only"])
+                self.assertEqual(src_path.read_bytes(), orig_bytes)
+                self.assertEqual(src_path.stat().st_mtime_ns, orig_stat.st_mtime_ns)
+                if os.name != "nt":
+                    self.assertEqual(src_path.stat().st_mode & 0o777, 0o640)
+
+                # 1. Explicit --check-only alias behaves identically
                 rc_chk, payload_chk = self._run_main([str(src_path), "--check-only"])
                 self.assertEqual(rc_chk, 0, payload_chk)
+                self.assertEqual(payload_chk["mode"], "check_only")
+                self.assertFalse(payload_chk["modified_file"])
                 self.assertTrue(payload_chk["check_only"])
                 self.assertEqual(src_path.read_bytes(), orig_bytes)
                 self.assertEqual(src_path.stat().st_mtime_ns, orig_stat.st_mtime_ns)
@@ -885,6 +934,8 @@ class TestRecalcXlsx(unittest.TestCase):
                 # 2. --output writes to out_path without touching src_path
                 rc_out, payload_out = self._run_main([str(src_path), "--output", str(out_path)])
                 self.assertEqual(rc_out, 0, payload_out)
+                self.assertEqual(payload_out["mode"], "output")
+                self.assertTrue(payload_out["modified_file"])
                 self.assertEqual(Path(payload_out["file"]), out_path.resolve())
                 self.assertEqual(Path(payload_out["source_file"]), src_path.resolve())
                 self.assertTrue(out_path.exists())
@@ -892,13 +943,16 @@ class TestRecalcXlsx(unittest.TestCase):
                 if os.name != "nt":
                     self.assertEqual(out_path.stat().st_mode & 0o777, 0o640)
 
-                # 3. In-place update preserves 0o640 permission bits (never loosened to 0o644)
-                rc_inplace, payload_inplace = self._run_main([str(src_path)])
+                # 3. Explicit --in-place updates src_path atomically while preserving 0o640 permission bits
+                rc_inplace, payload_inplace = self._run_main([str(src_path), "--in-place"])
                 self.assertEqual(rc_inplace, 0, payload_inplace)
+                self.assertEqual(payload_inplace["mode"], "in_place")
+                self.assertTrue(payload_inplace["modified_file"])
+                self.assertNotIn("check_only", payload_inplace)
                 if os.name != "nt":
                     self.assertEqual(src_path.stat().st_mode & 0o777, 0o640)
 
-    def test_output_flag_without_libreoffice_emits_error_and_never_succeeds_silently(self) -> None:
+    def test_write_flags_without_libreoffice_emit_error_and_never_succeed_silently(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             src_path = Path(tmp) / "input.xlsx"
             out_path = Path(tmp) / "recalced.xlsx"
@@ -909,7 +963,7 @@ class TestRecalcXlsx(unittest.TestCase):
 
             with mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value=None):
                 for extra_args in ([], ["--allow-unrecalculated"]):
-                    with self.subTest(extra_args=extra_args):
+                    with self.subTest(mode="output", extra_args=extra_args):
                         rc, payload = self._run_main(
                             [str(src_path), "--output", str(out_path), *extra_args]
                         )
@@ -924,6 +978,20 @@ class TestRecalcXlsx(unittest.TestCase):
                             "LibreOffice (soffice) is not installed on PATH.",
                         )
                         self.assertFalse(out_path.exists())
+
+                    with self.subTest(mode="in_place", extra_args=extra_args):
+                        rc, payload = self._run_main(
+                            [str(src_path), "--in-place", *extra_args]
+                        )
+                        self.assertEqual(rc, 1, payload)
+                        self.assertEqual(payload["status"], "error")
+                        self.assertEqual(Path(payload["file"]), src_path.resolve())
+                        self.assertFalse(payload["recalculated_with_libreoffice"])
+                        self.assertEqual(
+                            payload["message"],
+                            "Cannot update workbook --in-place because "
+                            "LibreOffice (soffice) is not installed on PATH.",
+                        )
 
     def test_real_process_group_timeout_kills_spawned_child(self) -> None:
         if os.name == "nt":
@@ -1015,21 +1083,27 @@ class TestRecalcXlsx(unittest.TestCase):
             finally:
                 wb_before.close()
 
-            # First verify --check-only catches the errors WITHOUT modifying path
+            # First verify default mode (and explicit --check-only) catch errors WITHOUT modifying path
             orig_bytes = path.read_bytes()
-            rc_chk, payload_chk = self._run_main([str(path), "30", "--check-only"])
-            self.assertEqual(rc_chk, 1, payload_chk)
-            self.assertEqual(payload_chk["status"], "errors_found")
-            self.assertTrue(payload_chk["recalculated_with_libreoffice"])
-            self.assertEqual(payload_chk["total_errors"], 2)
-            self.assertIn("#DIV/0!", payload_chk["error_summary"])
-            self.assertIn("#N/A", payload_chk["error_summary"])
-            self.assertEqual(path.read_bytes(), orig_bytes)
+            for flags in ([], ["--check-only"]):
+                with self.subTest(flags=flags):
+                    rc_chk, payload_chk = self._run_main([str(path), "30", *flags])
+                    self.assertEqual(rc_chk, 1, payload_chk)
+                    self.assertEqual(payload_chk["status"], "errors_found")
+                    self.assertEqual(payload_chk["mode"], "check_only")
+                    self.assertFalse(payload_chk["modified_file"])
+                    self.assertTrue(payload_chk["recalculated_with_libreoffice"])
+                    self.assertEqual(payload_chk["total_errors"], 2)
+                    self.assertIn("#DIV/0!", payload_chk["error_summary"])
+                    self.assertIn("#N/A", payload_chk["error_summary"])
+                    self.assertEqual(path.read_bytes(), orig_bytes)
 
-            # Now run in-place recalculation and verify cached values on disk are updated
-            rc, payload = self._run_main([str(path), "30"])
+            # Now run explicit --in-place recalculation and verify cached values on disk are updated
+            rc, payload = self._run_main([str(path), "30", "--in-place"])
             self.assertEqual(rc, 1, payload)
             self.assertEqual(payload["status"], "errors_found")
+            self.assertEqual(payload["mode"], "in_place")
+            self.assertTrue(payload["modified_file"])
             self.assertTrue(payload["recalculated_with_libreoffice"])
             self.assertEqual(payload["total_errors"], 2)
             self.assertEqual(payload["error_summary"]["#DIV/0!"]["locations"], ["Stale!D2"])
@@ -1043,7 +1117,7 @@ class TestRecalcXlsx(unittest.TestCase):
             finally:
                 wb_after.close()
 
-    def test_what_if_data_table_refuses_inplace_allows_check_only_and_counts_formulas(self) -> None:
+    def test_what_if_data_table_refuses_inplace_allows_default_and_check_only_and_counts_formulas(self) -> None:
         from openpyxl.worksheet.formula import DataTableFormula
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -1069,21 +1143,22 @@ class TestRecalcXlsx(unittest.TestCase):
             locs = xlsx_scan_mod.workbook_has_data_tables(path)
             self.assertEqual(locs, ["Sensitivity!C3:D4"])
 
-            # 2. Scan-only (no soffice): counts DataTableFormula in total_formulas and flags uncached
+            # 2. Scan-only (no soffice): counts DataTableFormula in total_formulas and data_table_formulas
             with mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value=None):
                 rc_scan, payload_scan = self._run_main([str(path)])
             self.assertEqual(rc_scan, 2, payload_scan)
             self.assertEqual(payload_scan["status"], "unverified")
             self.assertEqual(payload_scan["total_formulas"], 2)  # B2 + C3 DataTableFormula
             self.assertEqual(payload_scan["uncached_formulas"], 2)
+            self.assertEqual(payload_scan["data_table_formulas"], 1)
             self.assertEqual(path.read_bytes(), orig_bytes)
 
-            # 3. Default in-place with soffice: MUST REFUSE to overwrite and never call Popen
+            # 3. Explicit --in-place with soffice: MUST REFUSE to overwrite and never call Popen
             with (
                 mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value="/usr/bin/soffice"),
                 mock.patch.object(recalc_xlsx_mod.subprocess, "Popen") as mock_popen,
             ):
-                rc_inplace, payload_inplace = self._run_main([str(path)])
+                rc_inplace, payload_inplace = self._run_main([str(path), "--in-place"])
             mock_popen.assert_not_called()
             self.assertEqual(rc_inplace, 1, payload_inplace)
             self.assertEqual(payload_inplace["status"], "error")
@@ -1092,7 +1167,7 @@ class TestRecalcXlsx(unittest.TestCase):
             self.assertIn("--output", payload_inplace["message"])
             self.assertEqual(path.read_bytes(), orig_bytes)
 
-            # 4. --check-only and --output work safely without modifying original input
+            # 4. Default mode, --check-only, and --output work safely without modifying original input
             def fake_popen(cmd, **kwargs):
                 outdir = Path(cmd[cmd.index("--outdir") + 1])
                 converted = outdir / f"{path.stem}.xlsx"
@@ -1106,14 +1181,19 @@ class TestRecalcXlsx(unittest.TestCase):
                 mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value="/usr/bin/soffice"),
                 mock.patch.object(recalc_xlsx_mod.subprocess, "Popen", side_effect=fake_popen),
             ):
-                rc_chk, payload_chk = self._run_main([str(path), "--check-only"])
-                self.assertEqual(rc_chk, 0, payload_chk)
-                self.assertTrue(payload_chk["check_only"])
-                self.assertIn("What-If data table", payload_chk.get("warning", ""))
-                self.assertEqual(path.read_bytes(), orig_bytes)
+                for flags in ([], ["--check-only"]):
+                    rc_chk, payload_chk = self._run_main([str(path), *flags])
+                    self.assertEqual(rc_chk, 0, payload_chk)
+                    self.assertTrue(payload_chk["check_only"])
+                    self.assertFalse(payload_chk["modified_file"])
+                    self.assertEqual(payload_chk["data_table_formulas"], 1)
+                    self.assertIn("What-If data table", payload_chk.get("warning", ""))
+                    self.assertEqual(path.read_bytes(), orig_bytes)
 
                 rc_out, payload_out = self._run_main([str(path), "--output", str(out_path)])
                 self.assertEqual(rc_out, 0, payload_out)
+                self.assertTrue(payload_out["modified_file"])
+                self.assertEqual(payload_out["data_table_formulas"], 1)
                 self.assertTrue(out_path.exists())
                 self.assertIn("TABLE(...)", payload_out.get("warning", ""))
                 self.assertEqual(path.read_bytes(), orig_bytes)
@@ -1329,6 +1409,151 @@ class TestRecalcXlsx(unittest.TestCase):
                 any("#ERROR! at DCF!E8" in e for e in dcf_results["errors"]),
                 f"Expected unified '#ERROR! at DCF!E8', got: {dcf_results['errors']}",
             )
+
+    def test_missing_openpyxl_fails_upfront_before_libreoffice_or_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src_path = Path(tmp) / "model.xlsx"
+            out_path = Path(tmp) / "out.xlsx"
+            wb = openpyxl.Workbook()
+            wb.save(src_path)
+            wb.close()
+            orig_bytes = src_path.read_bytes()
+
+            with (
+                mock.patch.object(
+                    recalc_xlsx_mod,
+                    "check_openpyxl_available",
+                    return_value="openpyxl is required: No module named 'openpyxl'.",
+                ),
+                mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value="/usr/bin/soffice"),
+                mock.patch.object(recalc_xlsx_mod.subprocess, "Popen") as mock_popen,
+            ):
+                for argv in (
+                    [str(src_path)],
+                    [str(src_path), "--in-place"],
+                    [str(src_path), "--output", str(out_path)],
+                ):
+                    with self.subTest(argv=argv):
+                        rc, payload = self._run_main(argv)
+                        self.assertEqual(rc, 1, payload)
+                        self.assertEqual(payload["status"], "error")
+                        self.assertFalse(payload["recalculated_with_libreoffice"])
+                        self.assertIn("openpyxl", payload["message"])
+
+            mock_popen.assert_not_called()
+            self.assertEqual(src_path.read_bytes(), orig_bytes)
+            self.assertFalse(out_path.exists())
+
+    def test_corrupt_worksheet_xml_in_xlsx_fails_closed_before_libreoffice(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "corrupt_xml.xlsx"
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws["A1"] = 123
+            wb.save(path)
+            wb.close()
+
+            # Replace xl/worksheets/sheet1.xml with malformed XML while keeping valid zip container
+            with zipfile.ZipFile(path, "r") as zin:
+                entries = {name: zin.read(name) for name in zin.namelist()}
+            entries["xl/worksheets/sheet1.xml"] = b"<worksheet><sheetData><broken"
+            with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+                for name, data in entries.items():
+                    zout.writestr(name, data)
+
+            corrupt_bytes = path.read_bytes()
+
+            # 1. workbook_has_data_tables MUST fail closed by raising WorkbookLoadError
+            with self.assertRaises(xlsx_scan_mod.WorkbookLoadError):
+                xlsx_scan_mod.workbook_has_data_tables(path)
+
+            # 2. recalc_xlsx.py --in-place MUST exit 1 without invoking LibreOffice or modifying the file
+            with (
+                mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value="/usr/bin/soffice"),
+                mock.patch.object(recalc_xlsx_mod.subprocess, "Popen") as mock_popen,
+            ):
+                rc, payload = self._run_main([str(path), "--in-place"])
+
+            mock_popen.assert_not_called()
+            self.assertEqual(rc, 1, payload)
+            self.assertEqual(payload["status"], "error")
+            self.assertFalse(payload["recalculated_with_libreoffice"])
+            self.assertIn("What-If data tables", payload["message"])
+            self.assertEqual(path.read_bytes(), corrupt_bytes)
+
+    def test_literal_na_in_formula_valid_cached_passes_while_cached_na_and_static_ref_fail(self) -> None:
+        import xml.etree.ElementTree as ET
+
+        ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+        ET.register_namespace("", ns)
+
+        def _set_cached_cell(xlsx_path: Path, cell_ref: str, value: str, cell_type: str | None = None) -> None:
+            with zipfile.ZipFile(xlsx_path, "r") as zin:
+                entries = {name: zin.read(name) for name in zin.namelist()}
+            root = ET.fromstring(entries["xl/worksheets/sheet1.xml"])
+            for cell in root.iter(f"{{{ns}}}c"):
+                if cell.attrib.get("r") == cell_ref:
+                    if cell_type is None:
+                        cell.attrib.pop("t", None)
+                    else:
+                        cell.attrib["t"] = cell_type
+                    v_el = cell.find(f"{{{ns}}}v")
+                    if v_el is None:
+                        v_el = ET.SubElement(cell, f"{{{ns}}}v")
+                    v_el.text = value
+                    break
+            entries["xl/worksheets/sheet1.xml"] = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+            with zipfile.ZipFile(xlsx_path, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+                for name, data in entries.items():
+                    zout.writestr(name, data)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # 1. =IF(ISBLANK(B5),#N/A,B5) cached as numeric 42.0 -> PASS, 0 errors
+            valid_na_path = Path(tmp) / "valid_na_branch.xlsx"
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "ChartData"
+            ws["B5"] = 42.0
+            ws["C5"] = "=IF(ISBLANK(B5),#N/A,B5)"
+            wb.save(valid_na_path)
+            wb.close()
+            _set_cached_cell(valid_na_path, "C5", "42.0", cell_type=None)
+
+            with mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value=None):
+                rc_ok, payload_ok = self._run_main([str(valid_na_path)])
+            self.assertEqual(rc_ok, 0, payload_ok)
+            self.assertEqual(payload_ok["status"], "success")
+            self.assertEqual(payload_ok["total_errors"], 0)
+            self.assertEqual(payload_ok["uncached_formulas"], 0)
+
+            # 2. Same formula cached as #N/A -> FAIL, #N/A detected
+            cached_na_path = Path(tmp) / "cached_na_branch.xlsx"
+            shutil.copyfile(valid_na_path, cached_na_path)
+            _set_cached_cell(cached_na_path, "C5", "#N/A", cell_type="e")
+
+            with mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value=None):
+                rc_na, payload_na = self._run_main([str(cached_na_path)])
+            self.assertEqual(rc_na, 1, payload_na)
+            self.assertEqual(payload_na["status"], "errors_found")
+            self.assertEqual(payload_na["total_errors"], 1)
+            self.assertEqual(payload_na["error_summary"]["#N/A"]["locations"], ["ChartData!C5"])
+
+            # 3. =IF(TRUE,1,#REF!) cached as 1 -> FAIL, #REF! always flagged
+            static_ref_path = Path(tmp) / "static_ref_branch.xlsx"
+            wb3 = openpyxl.Workbook()
+            ws3 = wb3.active
+            ws3.title = "BrokenRef"
+            ws3["A1"] = "=IF(TRUE,1,#REF!)"
+            wb3.save(static_ref_path)
+            wb3.close()
+            _set_cached_cell(static_ref_path, "A1", "1", cell_type=None)
+
+            with mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value=None):
+                rc_ref, payload_ref = self._run_main([str(static_ref_path)])
+            self.assertEqual(rc_ref, 1, payload_ref)
+            self.assertEqual(payload_ref["status"], "errors_found")
+            self.assertEqual(payload_ref["total_errors"], 1)
+            self.assertEqual(payload_ref["error_summary"]["#REF!"]["locations"], ["BrokenRef!A1"])
 
 
 @unittest.skipIf(openpyxl is None, "openpyxl is required for DCF validation tests")
@@ -1890,6 +2115,40 @@ class TestValidateDcf(unittest.TestCase):
             self.assertEqual(proc_ok.returncode, 0, proc_ok.stdout + proc_ok.stderr)
             self.assertEqual(json.loads(proc_ok.stdout)["status"], "PASS")
 
+    def test_negative_terminal_growth_rate_supported_and_validated(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "negative_tg_dcf.xlsx"
+            self._build_compliant_two_sheet_dcf(path, with_formula=False)
+            wb = openpyxl.load_workbook(path)
+            wb["DCF"]["B4"] = -0.01  # -1.0% declining terminal growth rate
+            wb.save(path)
+            wb.close()
+
+            results = validate_dcf_mod.validate_dcf_model(str(path))
+            self.assertEqual(results["status"], "PASS", results)
+            self.assertEqual(results["error_count"], 0, results["errors"])
+            self.assertEqual(results["warning_count"], 0, results["warnings"])
+            self.assertTrue(
+                any("-1.00%" in i and "9.00%" in i for i in results["info"]),
+                f"Expected negative terminal growth validation info, got: {results['info']}",
+            )
+
+            # Negative WACC MUST still be rejected (WACC must remain strictly 0 < w < 1)
+            neg_wacc_path = Path(tmp) / "negative_wacc_dcf.xlsx"
+            self._build_compliant_two_sheet_dcf(neg_wacc_path, with_formula=False)
+            wb2 = openpyxl.load_workbook(neg_wacc_path)
+            wb2["DCF"]["B3"] = -0.05
+            wb2["WACC"]["B3"] = -0.05
+            wb2.save(neg_wacc_path)
+            wb2.close()
+
+            res_neg_wacc = validate_dcf_mod.validate_dcf_model(str(neg_wacc_path))
+            self.assertEqual(res_neg_wacc["status"], "FAIL", res_neg_wacc)
+            self.assertTrue(
+                any("Could not locate WACC" in e for e in res_neg_wacc["errors"]),
+                res_neg_wacc["errors"],
+            )
+
 
 @unittest.skipIf(openpyxl is None, "openpyxl is required for DCF skeleton tests")
 class TestBuildDcfSkeleton(unittest.TestCase):
@@ -1915,6 +2174,7 @@ class TestBuildDcfSkeleton(unittest.TestCase):
             wb_f = openpyxl.load_workbook(model_path, data_only=False)
             try:
                 ws_f = wb_f["DCF"]
+                ws_wacc_f = wb_f["WACC"]
                 # B4 DataValidation enforcing whole numbers 1..3
                 dvs = list(ws_f.data_validations.dataValidation)
                 b4_dvs = [dv for dv in dvs if "B4" in str(dv.sqref)]
@@ -1926,11 +2186,16 @@ class TestBuildDcfSkeleton(unittest.TestCase):
                 # INT() guard in CHOOSE and INDEX
                 self.assertIn("INT(Case)", str(ws_f["C4"].value))
                 self.assertIn("INT($B$4)", str(ws_f["C62"].value))
+                # WACC link synchronized with WACC!C30 and Preferred Stock linked from DCF!C16
+                self.assertEqual(str(ws_f["C21"].value), "=WACC!C30")
+                self.assertEqual(str(ws_f["C22"].value), "=WACC!C14")
+                self.assertEqual(str(ws_wacc_f["C22"].value), "=DCF!C16")
                 # Perpetuity TV discounted at N - 0.5 ($G$87), Exit Multiple TV at N ($G$87+0.5)
                 self.assertIn("^$G$87", str(ws_f["C96"].value))
                 self.assertIn("^($G$87+0.5)", str(ws_f["C117"].value))
-                # Horizon-independent SUMPRODUCT sensitivity formula (no hardcoded ^0.5..^4.5 or ^5)
+                # Horizon-independent IF(WACC<=g,"NM", SUMPRODUCT(...)) sensitivity formula
                 sens_formula = str(ws_f["E127"].value)
+                self.assertTrue(sens_formula.startswith('=IF($B127<=E$124,"NM",'), sens_formula)
                 self.assertIn("SUMPRODUCT(", sens_formula)
                 self.assertIn("$G$87", sens_formula)
                 self.assertNotIn("^0.5", sens_formula)
@@ -1950,9 +2215,9 @@ class TestBuildDcfSkeleton(unittest.TestCase):
                     wb_edit.save(model_path)
                     wb_edit.close()
 
-                # Recalculate with real LibreOffice
+                # Recalculate with real LibreOffice (--in-place populates cached values on disk)
                 recalc_proc = subprocess.run(
-                    [sys.executable, str(RECALC_XLSX_PATH), str(model_path), "30"],
+                    [sys.executable, str(RECALC_XLSX_PATH), str(model_path), "30", "--in-place"],
                     capture_output=True,
                     text=True,
                     check=False,
@@ -1960,9 +2225,12 @@ class TestBuildDcfSkeleton(unittest.TestCase):
                 self.assertEqual(recalc_proc.returncode, 0, recalc_proc.stdout + recalc_proc.stderr)
                 recalc_payload = json.loads(recalc_proc.stdout)
                 self.assertEqual(recalc_payload["status"], "success", recalc_payload)
+                self.assertEqual(recalc_payload["mode"], "in_place")
+                self.assertTrue(recalc_payload["modified_file"])
                 self.assertTrue(recalc_payload["recalculated_with_libreoffice"])
                 self.assertEqual(recalc_payload["total_errors"], 0)
                 self.assertEqual(recalc_payload["uncached_formulas"], 0)
+                self.assertEqual(recalc_payload["data_table_formulas"], 0)
                 self.assertGreater(recalc_payload["total_formulas"], 100)
 
                 # Validate with hardened validate_dcf.py -> PASS with 0 errors and 0 warnings
@@ -1984,9 +2252,12 @@ class TestBuildDcfSkeleton(unittest.TestCase):
                     ws_dcf = wb_val["DCF"]
                     ws_wacc = wb_val["WACC"]
                     self.assertEqual(ws_dcf["C4"].value, expected_labels[case_num])
-                    # Gross-debt capital weights: non-negative and sum to 100%
-                    self.assertGreaterEqual(ws_wacc["C23"].value, 0.0)
-                    self.assertAlmostEqual(ws_wacc["C24"].value, 1.0, places=6)
+                    # Gross-capitalization weights (E + D + P): all non-negative and sum to 100%
+                    self.assertGreater(ws_wacc["C24"].value, 0.0)
+                    self.assertGreaterEqual(ws_wacc["C25"].value, 0.0)
+                    self.assertGreaterEqual(ws_wacc["C26"].value, 0.0)
+                    self.assertAlmostEqual(ws_wacc["C27"].value, 1.0, places=6)
+                    self.assertAlmostEqual(float(ws_dcf["C21"].value), float(ws_wacc["C30"].value), places=8)
                     # TV % of EV cleanly inside 50%-70%
                     tv_pct = float(ws_dcf["C113"].value)
                     self.assertGreaterEqual(tv_pct, 0.50)
@@ -2016,7 +2287,7 @@ class TestBuildDcfSkeleton(unittest.TestCase):
             wb_frac.save(model_path)
             wb_frac.close()
             recalc_frac = subprocess.run(
-                [sys.executable, str(RECALC_XLSX_PATH), str(model_path), "30"],
+                [sys.executable, str(RECALC_XLSX_PATH), str(model_path), "30", "--in-place"],
                 capture_output=True,
                 text=True,
                 check=False,
@@ -2036,7 +2307,7 @@ class TestBuildDcfSkeleton(unittest.TestCase):
             wb_otm.save(model_path)
             wb_otm.close()
             recalc_otm = subprocess.run(
-                [sys.executable, str(RECALC_XLSX_PATH), str(model_path), "30"],
+                [sys.executable, str(RECALC_XLSX_PATH), str(model_path), "30", "--in-place"],
                 capture_output=True,
                 text=True,
                 check=False,
@@ -2048,6 +2319,175 @@ class TestBuildDcfSkeleton(unittest.TestCase):
                 self.assertAlmostEqual(float(ws_otm["C13"].value), 97.5, places=6)
             finally:
                 wb_otm_v.close()
+
+    @unittest.skipIf(
+        recalc_xlsx_mod.find_soffice() is None,
+        "LibreOffice (soffice) is required for sensitivity WACC <= g guard integration test",
+    )
+    def test_sensitivity_grid_wacc_le_g_evaluates_to_nm_without_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            model_path = Path(tmp) / "low_wacc_dcf.xlsx"
+            build_proc = subprocess.run(
+                [sys.executable, str(BUILD_DCF_SKELETON_PATH), "--output", str(model_path)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(build_proc.returncode, 0, build_proc.stdout + build_proc.stderr)
+
+            # Case 1: WACC = 5.5% and Base Terminal Growth = 3.5%
+            # Corner cell G125 has WACC = 4.5% == g = 4.5% -> must evaluate to "NM" (no #DIV/0!)
+            wb = openpyxl.load_workbook(model_path)
+            ws_wacc = wb["WACC"]
+            ws_wacc["C6"] = 0.025   # Rf = 2.5%
+            ws_wacc["C7"] = 0.50    # Beta = 0.5 -> Ke = 2.5% + 0.5 * 6.0% = 5.5%
+            ws_wacc["C8"] = 0.060   # ERP = 6.0%
+            ws_wacc["C13"] = 0.055  # Kd = 5.5%
+            ws_wacc["C14"] = 0.0    # Tax = 0% -> after-tax Kd = 5.5%
+            ws_wacc["C16"] = 0.055  # Kp = 5.5% -> blended WACC = exactly 5.50%
+            wb["DCF"]["C45"] = 0.035  # Base Case Terminal Growth = 3.5%
+            wb.save(model_path)
+            wb.close()
+
+            recalc_eq = subprocess.run(
+                [sys.executable, str(RECALC_XLSX_PATH), str(model_path), "30", "--in-place"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(recalc_eq.returncode, 0, recalc_eq.stdout + recalc_eq.stderr)
+            payload_eq = json.loads(recalc_eq.stdout)
+            self.assertEqual(payload_eq["status"], "success", payload_eq)
+            self.assertEqual(payload_eq["total_errors"], 0, payload_eq)
+
+            wb_eq_v = openpyxl.load_workbook(model_path, data_only=True)
+            try:
+                ws_dcf_v = wb_eq_v["DCF"]
+                self.assertAlmostEqual(float(ws_dcf_v["C21"].value), 0.055, places=6)
+                self.assertEqual(ws_dcf_v["G125"].value, "NM")
+                self.assertAlmostEqual(float(ws_dcf_v["E127"].value), float(ws_dcf_v["C108"].value), places=6)
+            finally:
+                wb_eq_v.close()
+
+            # Case 2: WACC = 5.0% and Base Terminal Growth = 3.5%
+            # G125 has WACC 4.0% < g 4.5%, F125 has 4.0% == 4.0%, G126 has 4.5% == 4.5% -> all "NM"
+            wb2 = openpyxl.load_workbook(model_path)
+            ws_wacc2 = wb2["WACC"]
+            ws_wacc2["C6"] = 0.020   # Ke = 2.0% + 0.5 * 6.0% = 5.0%
+            ws_wacc2["C13"] = 0.050  # Kd = 5.0%
+            ws_wacc2["C16"] = 0.050  # Kp = 5.0% -> blended WACC = exactly 5.00%
+            wb2.save(model_path)
+            wb2.close()
+
+            recalc_lt = subprocess.run(
+                [sys.executable, str(RECALC_XLSX_PATH), str(model_path), "30", "--in-place"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(recalc_lt.returncode, 0, recalc_lt.stdout + recalc_lt.stderr)
+            payload_lt = json.loads(recalc_lt.stdout)
+            self.assertEqual(payload_lt["status"], "success", payload_lt)
+            self.assertEqual(payload_lt["total_errors"], 0, payload_lt)
+
+            wb_lt_v = openpyxl.load_workbook(model_path, data_only=True)
+            try:
+                ws_dcf_lt = wb_lt_v["DCF"]
+                self.assertAlmostEqual(float(ws_dcf_lt["C21"].value), 0.050, places=6)
+                self.assertEqual(ws_dcf_lt["F125"].value, "NM")
+                self.assertEqual(ws_dcf_lt["G125"].value, "NM")
+                self.assertEqual(ws_dcf_lt["G126"].value, "NM")
+                self.assertIsInstance(ws_dcf_lt["E127"].value, (int, float))
+                self.assertAlmostEqual(float(ws_dcf_lt["E127"].value), float(ws_dcf_lt["C108"].value), places=6)
+            finally:
+                wb_lt_v.close()
+
+    @unittest.skipIf(
+        recalc_xlsx_mod.find_soffice() is None,
+        "LibreOffice (soffice) is required for Preferred Stock WACC integration test",
+    )
+    def test_wacc_blends_preferred_stock_and_collapses_when_zero(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            model_path = Path(tmp) / "pref_wacc_dcf.xlsx"
+            build_proc = subprocess.run(
+                [sys.executable, str(BUILD_DCF_SKELETON_PATH), "--output", str(model_path)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(build_proc.returncode, 0, build_proc.stdout + build_proc.stderr)
+
+            # 1. Material Preferred Stock ($200M) with Kp = 7.0% blends all 3 capital tranches
+            wb = openpyxl.load_workbook(model_path)
+            wb["DCF"]["C16"] = 200.0
+            wb["WACC"]["C16"] = 0.07
+            wb.save(model_path)
+            wb.close()
+
+            recalc_pref = subprocess.run(
+                [sys.executable, str(RECALC_XLSX_PATH), str(model_path), "30", "--in-place"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(recalc_pref.returncode, 0, recalc_pref.stdout + recalc_pref.stderr)
+
+            val_pref = validate_dcf_mod.validate_dcf_model(str(model_path))
+            self.assertEqual(val_pref["status"], "PASS", val_pref)
+            self.assertEqual(val_pref["error_count"], 0, val_pref["errors"])
+
+            wb_v = openpyxl.load_workbook(model_path, data_only=True)
+            try:
+                ws_w = wb_v["WACC"]
+                ws_d = wb_v["DCF"]
+                ke = float(ws_w["C9"].value)
+                kd_at = float(ws_w["C15"].value)
+                kp = float(ws_w["C16"].value)
+                e_val = float(ws_w["C20"].value)
+                d_val = float(ws_w["C21"].value)
+                p_val = float(ws_w["C22"].value)
+                tot_cap = e_val + d_val + p_val
+
+                self.assertAlmostEqual(p_val, 200.0, places=6)
+                self.assertAlmostEqual(kp, 0.07, places=6)
+                self.assertAlmostEqual(float(ws_w["C23"].value), tot_cap, places=6)
+                self.assertGreater(float(ws_w["C26"].value), 0.0)
+                self.assertAlmostEqual(float(ws_w["C26"].value), p_val / tot_cap, places=8)
+                self.assertAlmostEqual(float(ws_w["C27"].value), 1.0, places=8)
+                expected_wacc = (e_val / tot_cap) * ke + (d_val / tot_cap) * kd_at + (p_val / tot_cap) * kp
+                self.assertAlmostEqual(float(ws_w["C30"].value), expected_wacc, places=8)
+                self.assertAlmostEqual(float(ws_d["C21"].value), expected_wacc, places=8)
+            finally:
+                wb_v.close()
+
+            # 2. Zero Preferred Stock ($0M, Kp = 0.0%) collapses cleanly to 2-tranche E + D WACC
+            wb0 = openpyxl.load_workbook(model_path)
+            wb0["DCF"]["C16"] = 0.0
+            wb0["WACC"]["C16"] = 0.0
+            wb0.save(model_path)
+            wb0.close()
+
+            recalc_zero = subprocess.run(
+                [sys.executable, str(RECALC_XLSX_PATH), str(model_path), "30", "--in-place"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(recalc_zero.returncode, 0, recalc_zero.stdout + recalc_zero.stderr)
+
+            wb0_v = openpyxl.load_workbook(model_path, data_only=True)
+            try:
+                ws_w0 = wb0_v["WACC"]
+                ke0 = float(ws_w0["C9"].value)
+                kd_at0 = float(ws_w0["C15"].value)
+                e0 = float(ws_w0["C20"].value)
+                d0 = float(ws_w0["C21"].value)
+                expected_wacc0 = (e0 / (e0 + d0)) * ke0 + (d0 / (e0 + d0)) * kd_at0
+                self.assertAlmostEqual(float(ws_w0["C26"].value), 0.0, places=8)
+                self.assertAlmostEqual(float(ws_w0["C27"].value), 1.0, places=8)
+                self.assertAlmostEqual(float(ws_w0["C30"].value), expected_wacc0, places=8)
+            finally:
+                wb0_v.close()
 
 
 if __name__ == "__main__":

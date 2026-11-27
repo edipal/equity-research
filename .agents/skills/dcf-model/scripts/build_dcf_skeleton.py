@@ -78,6 +78,20 @@ ROW_BASE_REV = 20
 ROW_WACC = 21
 ROW_TAX_RATE = 22
 
+# Locked WACC sheet output/input row constants (shared with DCF sheet cross-links)
+WACC_TAX_ROW = 14
+WACC_KP_ROW = 16
+WACC_EQUITY_ROW = 20
+WACC_DEBT_ROW = 21
+WACC_PREF_ROW = 22
+WACC_TOTAL_CAP_ROW = 23
+WACC_EQ_WT_ROW = 24
+WACC_DEBT_WT_ROW = 25
+WACC_PREF_WT_ROW = 26
+WACC_WT_SUM_ROW = 27
+WACC_OUTPUT_ROW = 30
+WACC_NCI_NOTE_ROW = 31
+
 
 def _comment(text: str) -> Comment:
     return Comment(text, "Equity Research Harness")
@@ -171,8 +185,8 @@ def _build_wacc_sheet(ws) -> None:
     _write_formula_cell(ws, 9, 3, "=C6+C7*C8", FMT_PCT_2, bold=True, border=BORDER_SUBTOTAL)
     ws.cell(row=9, column=4, value="CAPM: Rf + Beta * ERP").font = FONT_NOTE
 
-    # Section 2: Cost of Debt
-    _style_banner(ws, 11, 4, "2. AFTER-TAX COST OF DEBT")
+    # Section 2: Cost of Debt & Preferred Stock
+    _style_banner(ws, 11, 4, "2. AFTER-TAX COST OF DEBT & PREFERRED STOCK")
     _style_col_headers(ws, 12, ["Component", "Units", "Value", "Source / Basis"])
 
     ws.cell(row=13, column=1, value="Pre-Tax Cost of Debt (Kd)").font = FONT_FORMULA
@@ -180,67 +194,115 @@ def _build_wacc_sheet(ws) -> None:
     _write_input_cell(ws, 13, 3, 0.0600, FMT_PCT_2, "Source: Corporate bond YTM / weighted avg borrowing rate [ASSUMPTION]")
     ws.cell(row=13, column=4, value="Weighted-average yield on gross debt").font = FONT_NOTE
 
-    ws.cell(row=14, column=1, value="Effective Marginal Tax Rate").font = FONT_FORMULA
-    ws.cell(row=14, column=2, value="%").font = FONT_NOTE
-    _write_input_cell(ws, 14, 3, 0.21, FMT_PCT, "Source: US federal statutory tax rate [ASSUMPTION]")
-    ws.cell(row=14, column=4, value="Statutory + state marginal tax shield").font = FONT_NOTE
+    ws.cell(row=WACC_TAX_ROW, column=1, value="Effective Marginal Tax Rate").font = FONT_FORMULA
+    ws.cell(row=WACC_TAX_ROW, column=2, value="%").font = FONT_NOTE
+    _write_input_cell(ws, WACC_TAX_ROW, 3, 0.21, FMT_PCT, "Source: US federal statutory tax rate [ASSUMPTION]")
+    ws.cell(row=WACC_TAX_ROW, column=4, value="Statutory + state marginal tax shield").font = FONT_NOTE
 
     ws.cell(row=15, column=1, value="After-Tax Cost of Debt").font = FONT_FORMULA_BOLD
     ws.cell(row=15, column=2, value="%").font = FONT_NOTE
-    _write_formula_cell(ws, 15, 3, "=C13*(1-C14)", FMT_PCT_2, bold=True, border=BORDER_SUBTOTAL)
+    _write_formula_cell(ws, 15, 3, f"=C13*(1-C{WACC_TAX_ROW})", FMT_PCT_2, bold=True, border=BORDER_SUBTOTAL)
     ws.cell(row=15, column=4, value="Pre-tax Kd * (1 - Tax Rate)").font = FONT_NOTE
 
-    # Section 3: Capital Structure Weights (Gross Debt basis — never negative debt weight)
-    _style_banner(ws, 17, 4, "3. CAPITAL STRUCTURE WEIGHTS (GROSS DEBT BASIS)")
-    _style_col_headers(ws, 18, ["Component", "Units", "Value", "Source / Basis"])
+    ws.cell(row=WACC_KP_ROW, column=1, value="Cost of Preferred Stock (Kp)").font = FONT_FORMULA
+    ws.cell(row=WACC_KP_ROW, column=2, value="%").font = FONT_NOTE
+    _write_input_cell(
+        ws,
+        WACC_KP_ROW,
+        3,
+        0.0750,
+        FMT_PCT_2,
+        "Source: Preferred dividend yield (non-tax-deductible; set to 0.0% when Preferred Stock = $0M) [ASSUMPTION]",
+    )
+    ws.cell(row=WACC_KP_ROW, column=4, value="Preferred dividend yield (no tax shield; 0% if no preferred)").font = FONT_NOTE
 
-    ws.cell(row=19, column=1, value="Market Value of Equity (E)").font = FONT_FORMULA
-    ws.cell(row=19, column=2, value="$M").font = FONT_NOTE
-    _write_formula_cell(ws, 19, 3, f"=DCF!C{ROW_MKTCAP}", FMT_CURRENCY_M, cross_sheet=True)
-    ws.cell(row=19, column=4, value="Linked from DCF Market Capitalization").font = FONT_NOTE
+    # Section 3: Capital Structure Weights (Gross Capitalization basis: E + D + P — never negative weights)
+    _style_banner(ws, 18, 4, "3. CAPITAL STRUCTURE WEIGHTS (GROSS CAPITALIZATION BASIS)")
+    _style_col_headers(ws, 19, ["Component", "Units", "Value", "Source / Basis"])
 
-    ws.cell(row=20, column=1, value="Total Gross Debt (D)").font = FONT_FORMULA
-    ws.cell(row=20, column=2, value="$M").font = FONT_NOTE
-    _write_formula_cell(ws, 20, 3, f"=DCF!C{ROW_DEBT}", FMT_CURRENCY_M, cross_sheet=True)
-    ws.cell(row=20, column=4, value="Linked from DCF Total Gross Debt (gross basis, >= 0)").font = FONT_NOTE
+    ws.cell(row=WACC_EQUITY_ROW, column=1, value="Market Value of Equity (E)").font = FONT_FORMULA
+    ws.cell(row=WACC_EQUITY_ROW, column=2, value="$M").font = FONT_NOTE
+    _write_formula_cell(ws, WACC_EQUITY_ROW, 3, f"=DCF!C{ROW_MKTCAP}", FMT_CURRENCY_M, cross_sheet=True)
+    ws.cell(row=WACC_EQUITY_ROW, column=4, value="Linked from DCF Market Capitalization").font = FONT_NOTE
 
-    ws.cell(row=21, column=1, value="Total Capitalization (E + D)").font = FONT_FORMULA_BOLD
-    ws.cell(row=21, column=2, value="$M").font = FONT_NOTE
-    _write_formula_cell(ws, 21, 3, "=C19+C20", FMT_CURRENCY_M, bold=True, border=BORDER_SUBTOTAL)
-    ws.cell(row=21, column=4, value="Market Cap + Total Gross Debt").font = FONT_NOTE
+    ws.cell(row=WACC_DEBT_ROW, column=1, value="Total Gross Debt (D)").font = FONT_FORMULA
+    ws.cell(row=WACC_DEBT_ROW, column=2, value="$M").font = FONT_NOTE
+    _write_formula_cell(ws, WACC_DEBT_ROW, 3, f"=DCF!C{ROW_DEBT}", FMT_CURRENCY_M, cross_sheet=True)
+    ws.cell(row=WACC_DEBT_ROW, column=4, value="Linked from DCF Total Gross Debt (gross basis, >= 0)").font = FONT_NOTE
 
-    ws.cell(row=22, column=1, value="Equity Weight in WACC (E / (E + D))").font = FONT_FORMULA
-    ws.cell(row=22, column=2, value="%").font = FONT_NOTE
-    _write_formula_cell(ws, 22, 3, "=C19/C21", FMT_PCT_2)
-    ws.cell(row=22, column=4, value="Gross-capitalization equity weight").font = FONT_NOTE
+    ws.cell(row=WACC_PREF_ROW, column=1, value="Preferred Stock (P)").font = FONT_FORMULA
+    ws.cell(row=WACC_PREF_ROW, column=2, value="$M").font = FONT_NOTE
+    _write_formula_cell(ws, WACC_PREF_ROW, 3, f"=DCF!C{ROW_PREF}", FMT_CURRENCY_M, cross_sheet=True)
+    ws.cell(row=WACC_PREF_ROW, column=4, value="Linked from DCF Preferred Stock (liquidation / market value, >= 0)").font = FONT_NOTE
 
-    ws.cell(row=23, column=1, value="Debt Weight in WACC (D / (E + D))").font = FONT_FORMULA
-    ws.cell(row=23, column=2, value="%").font = FONT_NOTE
-    _write_formula_cell(ws, 23, 3, "=C20/C21", FMT_PCT_2)
-    ws.cell(row=23, column=4, value="Gross-capitalization debt weight (always >= 0%)").font = FONT_NOTE
-
-    ws.cell(row=24, column=1, value="Capital Weight Sum Check").font = FONT_NOTE
-    ws.cell(row=24, column=2, value="%").font = FONT_NOTE
-    _write_formula_cell(ws, 24, 3, "=C22+C23", FMT_PCT_2)
-    ws.cell(row=24, column=4, value="Must equal 100.00%").font = FONT_NOTE
-
-    # Section 4: WACC Output
-    _style_banner(ws, 26, 4, "4. WACC OUTPUT")
-    ws.cell(row=27, column=1, value="WEIGHTED AVERAGE COST OF CAPITAL").font = FONT_FORMULA_BOLD
-    ws.cell(row=27, column=2, value="%").font = FONT_NOTE
+    ws.cell(row=WACC_TOTAL_CAP_ROW, column=1, value="Total Capitalization (E + D + P)").font = FONT_FORMULA_BOLD
+    ws.cell(row=WACC_TOTAL_CAP_ROW, column=2, value="$M").font = FONT_NOTE
     _write_formula_cell(
         ws,
-        27,
+        WACC_TOTAL_CAP_ROW,
         3,
-        "=C9*C22+C15*C23",
+        f"=SUM(C{WACC_EQUITY_ROW}:C{WACC_PREF_ROW})",
+        FMT_CURRENCY_M,
+        bold=True,
+        border=BORDER_SUBTOTAL,
+    )
+    ws.cell(row=WACC_TOTAL_CAP_ROW, column=4, value="Market Cap + Total Gross Debt + Preferred Stock").font = FONT_NOTE
+
+    ws.cell(row=WACC_EQ_WT_ROW, column=1, value="Equity Weight in WACC (E / (E + D + P))").font = FONT_FORMULA
+    ws.cell(row=WACC_EQ_WT_ROW, column=2, value="%").font = FONT_NOTE
+    _write_formula_cell(ws, WACC_EQ_WT_ROW, 3, f"=C{WACC_EQUITY_ROW}/C{WACC_TOTAL_CAP_ROW}", FMT_PCT_2)
+    ws.cell(row=WACC_EQ_WT_ROW, column=4, value="Gross-capitalization equity weight").font = FONT_NOTE
+
+    ws.cell(row=WACC_DEBT_WT_ROW, column=1, value="Debt Weight in WACC (D / (E + D + P))").font = FONT_FORMULA
+    ws.cell(row=WACC_DEBT_WT_ROW, column=2, value="%").font = FONT_NOTE
+    _write_formula_cell(ws, WACC_DEBT_WT_ROW, 3, f"=C{WACC_DEBT_ROW}/C{WACC_TOTAL_CAP_ROW}", FMT_PCT_2)
+    ws.cell(row=WACC_DEBT_WT_ROW, column=4, value="Gross-capitalization debt weight (always >= 0%)").font = FONT_NOTE
+
+    ws.cell(row=WACC_PREF_WT_ROW, column=1, value="Preferred Weight in WACC (P / (E + D + P))").font = FONT_FORMULA
+    ws.cell(row=WACC_PREF_WT_ROW, column=2, value="%").font = FONT_NOTE
+    _write_formula_cell(ws, WACC_PREF_WT_ROW, 3, f"=C{WACC_PREF_ROW}/C{WACC_TOTAL_CAP_ROW}", FMT_PCT_2)
+    ws.cell(row=WACC_PREF_WT_ROW, column=4, value="Gross-capitalization preferred equity weight (always >= 0%)").font = FONT_NOTE
+
+    ws.cell(row=WACC_WT_SUM_ROW, column=1, value="Capital Weight Sum Check").font = FONT_NOTE
+    ws.cell(row=WACC_WT_SUM_ROW, column=2, value="%").font = FONT_NOTE
+    _write_formula_cell(ws, WACC_WT_SUM_ROW, 3, f"=SUM(C{WACC_EQ_WT_ROW}:C{WACC_PREF_WT_ROW})", FMT_PCT_2)
+    ws.cell(row=WACC_WT_SUM_ROW, column=4, value="Must equal 100.00%").font = FONT_NOTE
+
+    # Section 4: WACC Output
+    _style_banner(ws, 29, 4, "4. WACC OUTPUT")
+    ws.cell(row=WACC_OUTPUT_ROW, column=1, value="WEIGHTED AVERAGE COST OF CAPITAL").font = FONT_FORMULA_BOLD
+    ws.cell(row=WACC_OUTPUT_ROW, column=2, value="%").font = FONT_NOTE
+    _write_formula_cell(
+        ws,
+        WACC_OUTPUT_ROW,
+        3,
+        f"=C9*C{WACC_EQ_WT_ROW}+C15*C{WACC_DEBT_WT_ROW}+C{WACC_KP_ROW}*C{WACC_PREF_WT_ROW}",
         FMT_PCT_2,
         bold=True,
         highlight=True,
         border=BORDER_TOTAL,
     )
-    ws.cell(row=27, column=4, value="(Ke * Equity Weight) + (After-Tax Kd * Debt Weight)").font = FONT_NOTE
+    ws.cell(
+        row=WACC_OUTPUT_ROW,
+        column=4,
+        value="(Ke * Equity Wt) + (After-Tax Kd * Debt Wt) + (Kp * Preferred Wt)",
+    ).font = FONT_NOTE
 
-    col_widths = {1: 40, 2: 10, 3: 18, 4: 50}
+    ws.merge_cells(start_row=WACC_NCI_NOTE_ROW, start_column=1, end_row=WACC_NCI_NOTE_ROW, end_column=4)
+    nci_note = ws.cell(
+        row=WACC_NCI_NOTE_ROW,
+        column=1,
+        value=(
+            "NCI Convention: Non-Controlling Interest is excluded from parent WACC "
+            "(100% consolidated operating cash flows are discounted at consolidated WACC, "
+            "and NCI is deducted at market/fair value in the Enterprise-to-Equity bridge)."
+        ),
+    )
+    nci_note.font = FONT_NOTE
+    nci_note.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    ws.row_dimensions[WACC_NCI_NOTE_ROW].height = 28
+
+    col_widths = {1: 42, 2: 10, 3: 18, 4: 58}
     for col_idx, width in col_widths.items():
         ws.column_dimensions[get_column_letter(col_idx)].width = width
 
@@ -378,12 +440,12 @@ def _build_dcf_sheet(ws, wb: openpyxl.Workbook, default_case: int = 2) -> None:
 
     ws.cell(row=ROW_WACC, column=1, value="Discount Rate (WACC)").font = FONT_FORMULA_BOLD
     ws.cell(row=ROW_WACC, column=2, value="%").font = FONT_NOTE
-    _write_formula_cell(ws, ROW_WACC, 3, "=WACC!C27", FMT_PCT_2, bold=True, cross_sheet=True)
+    _write_formula_cell(ws, ROW_WACC, 3, f"=WACC!C{WACC_OUTPUT_ROW}", FMT_PCT_2, bold=True, cross_sheet=True)
     ws.cell(row=ROW_WACC, column=4, value="Linked from WACC worksheet").font = FONT_NOTE
 
     ws.cell(row=ROW_TAX_RATE, column=1, value="Effective Tax Rate").font = FONT_FORMULA
     ws.cell(row=ROW_TAX_RATE, column=2, value="%").font = FONT_NOTE
-    _write_formula_cell(ws, ROW_TAX_RATE, 3, "=WACC!C14", FMT_PCT, cross_sheet=True)
+    _write_formula_cell(ws, ROW_TAX_RATE, 3, f"=WACC!C{WACC_TAX_ROW}", FMT_PCT, cross_sheet=True)
     ws.cell(row=ROW_TAX_RATE, column=4, value="Linked from WACC worksheet").font = FONT_NOTE
 
     # Section 2: Vertically Stacked Scenario Assumption Blocks (Bear / Base / Bull)
@@ -909,7 +971,7 @@ def _build_dcf_sheet(ws, wb: openpyxl.Workbook, default_case: int = 2) -> None:
             pv_fcf_expr = f"SUMPRODUCT($C${ROW_UFCF}:$G${ROW_UFCF}/((1+{w_ref})^$C${ROW_PERIOD}:$G${ROW_PERIOD}))"
             pv_tv_expr = f"(($G${ROW_UFCF}*(1+{g_ref})/({w_ref}-{g_ref}))/((1+{w_ref})^$G${ROW_PERIOD}))"
             eq_adj_expr = f"(-$C${ROW_DEBT}-$C${ROW_PREF}-$C${ROW_NCI}+$C${ROW_CASH}+$C${ROW_EQ_INV})"
-            formula = f"=({pv_fcf_expr}+{pv_tv_expr}+{eq_adj_expr})/$C${ROW_DILUTED_SH}"
+            formula = f'=IF({w_ref}<={g_ref},"NM",({pv_fcf_expr}+{pv_tv_expr}+{eq_adj_expr})/$C${ROW_DILUTED_SH})'
             is_center = row == SENS_CENTER_ROW and col == SENS_CENTER_COL
             _write_formula_cell(
                 ws,

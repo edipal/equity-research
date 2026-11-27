@@ -73,14 +73,14 @@ Every folder in `.agents/skills/` is both **semantically discovered** by Antigra
 | Slash Command | Purpose |
 |---|---|
 | `/comps-analysis` | Comparable company trading multiples (full EV, LTM/NTM calendarized `EV/Rev`, `EV/EBITDA`, `P/E`, `"NM"` guards) with Max/75th/Median/25th/Min statistics |
-| `/dcf-model` | Institutional 2-sheet DCF model (gross-debt WACC, Bear/Base/Bull `INDEX` blocks, mid-year FCF & `N - 0.5` perpetuity TV, end-of-year exit-multiple TV, `SUMPRODUCT` 5×5 live sensitivities) + `build_dcf_skeleton.py` & `validate_dcf.py` |
+| `/dcf-model` | Institutional 2-sheet DCF model (gross-capitalization `E + D + P` WACC, Bear/Base/Bull `INDEX` blocks, mid-year FCF & `N - 0.5` perpetuity TV, end-of-year exit-multiple TV, `IF(WACC<=g,"NM",...)` `SUMPRODUCT` 5×5 live sensitivities) + `build_dcf_skeleton.py` & `validate_dcf.py` |
 | `/three-statement-model` | Scratch-built or template-populated integrated Income Statement, Balance Sheet, and Cash Flow model (ASC 740 NOL/DTA, revolver sweep, equity roll-forwards) |
 | `/unit-economics` | Public-equity & SaaS recurring-revenue unit economics (ARR/billings bridge, cohorts/proxies, lagged CAC, NDR/GRR, LTV/CAC, Rule of 40) |
 
 ### Quality Assurance & Deliverable Authoring (4)
 | Slash Command | Purpose |
 |---|---|
-| `/audit-xls` | Read-only spreadsheet & model audit (`recalc_xlsx.py --check-only`, balance checks, cash tie-out, hardcode detection) |
+| `/audit-xls` | Read-only spreadsheet & model audit (non-destructive `recalc_xlsx.py` default / `--check-only`, balance checks, cash tie-out, hardcode detection) |
 | `/clean-data-xls` | Clean and normalize raw spreadsheet exports (text-stored numbers, mixed dates, duplicates, errors) |
 | `/xlsx-author` | Programmatic institutional `.xlsx` creation via `openpyxl` + automated LibreOffice formula verification |
 | `/pptx-author` | Programmatic `.pptx` research & pitch deck creation via `python-pptx` + visual PDF/PNG verification |
@@ -122,10 +122,14 @@ Run the built-in validator after editing any rule, skill, or custom agent:
 python3 scripts/validate_harness.py
 ```
 
-Recalculate and audit any generated Excel model for formula errors (use `--check-only` for read-only audits or `--output <PATH>` for non-destructive writes):
+Recalculate and audit Excel models for formula errors (`recalc_xlsx.py` is **non-destructive by default** / `--check-only`; pass `--in-place` on newly Python-generated `.xlsx` files or `--output <PATH>` to write recalculated cached values to disk before running `validate_dcf.py`):
 
 ```bash
-python3 scripts/recalc_xlsx.py research/companies/MSFT/models/MSFT_DCF_2026-03-15.xlsx 30
+# Non-destructive read-only audit of an untouched workbook:
+python3 scripts/recalc_xlsx.py research/companies/MSFT/models/MSFT_DCF_2026-03-15.xlsx
+
+# Recalculate a newly openpyxl-generated workbook in place so cached values are populated on disk:
+python3 scripts/recalc_xlsx.py research/companies/MSFT/models/MSFT_DCF_2026-03-15.xlsx 30 --in-place
 python3 .agents/skills/dcf-model/scripts/validate_dcf.py research/companies/MSFT/models/MSFT_DCF_2026-03-15.xlsx
 ```
 

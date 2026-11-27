@@ -63,7 +63,7 @@ DPI = 300
 
 ### Step 2: Load Verified Numbers from Excel (`data_only=True`)
 
-Always read reconciled cached values from `<TICKER>_Financial_Model_<Date>.xlsx` after running `scripts/recalc_xlsx.py` — never re-type numbers manually when they exist in Excel. Use dynamic fiscal year labels pulled directly from the workbook headers (e.g., `[FY-4]A`..`[FY]A`, `LTM`, `[FY+1]E`..`[FY+5]E`).
+Always read reconciled cached values from `<TICKER>_Financial_Model_<Date>.xlsx` after running `scripts/recalc_xlsx.py <model.xlsx> 30 --in-place` (or `--output <recalc.xlsx>`) — never re-type numbers manually when they exist in Excel. Use dynamic fiscal year labels pulled directly from the workbook headers (e.g., `[FY-4]A`..`[FY]A`, `LTM`, `[FY+1]E`..`[FY+5]E`).
 
 ### Step 3: Core Chart Implementation Snippets
 

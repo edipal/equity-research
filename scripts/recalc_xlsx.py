@@ -4,7 +4,12 @@
 
 Usage:
     python3 scripts/recalc_xlsx.py <path-to-workbook.xlsx> [timeout_seconds]
-        [--allow-unrecalculated] [--check-only | --output PATH]
+        [--allow-unrecalculated] [--check-only | --in-place | --output PATH]
+
+By default (and with --check-only), recalculates in an isolated temporary directory
+and scans for formula errors without modifying the input file on disk. Pass --in-place
+to atomically replace an .xlsx file with its LibreOffice-recalculated copy, or
+--output PATH to write the recalculated .xlsx to a separate path.
 
 Outputs a JSON report to stdout and exits:
     0 - status "success" (zero errors, all formula cells verified or --allow-unrecalculated)
@@ -30,14 +35,8 @@ if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
 from xlsx_scan import (  # noqa: E402
-    EXCEL_ERRORS,
     OOXML_ZIP_SUFFIXES,
-    STRING_LITERAL_RE,
     WorkbookLoadError,
-    detect_cell_error,
-    extract_formula_text,
-    is_data_table_formula,
-    is_uncached_formula,
     scan_workbook_formulas,
     workbook_has_data_tables,
 )
@@ -94,12 +93,23 @@ def build_parser() -> argparse.ArgumentParser:
     mode_group.add_argument(
         "--check-only",
         action="store_true",
-        help="Recalculate in a temporary directory and scan for errors without modifying or writing any file.",
+        help=(
+            "Explicit alias for the default non-destructive mode: recalculate in a temporary "
+            "directory and scan for errors without modifying or writing any file."
+        ),
+    )
+    mode_group.add_argument(
+        "--in-place",
+        action="store_true",
+        help=(
+            "Atomically overwrite the input .xlsx file with the LibreOffice-recalculated copy "
+            "(refuses non-.xlsx files and workbooks containing Excel What-If data tables)."
+        ),
     )
     mode_group.add_argument(
         "--output",
         metavar="PATH",
-        help="Write the recalculated workbook to PATH without modifying the input file.",
+        help="Write the recalculated .xlsx workbook to PATH without modifying the input file.",
     )
     return parser
 
@@ -283,15 +293,23 @@ def run_libreoffice_convert(
     return True, recalculated, None
 
 
-def scan_workbook(xlsx_path: Path) -> dict:
+def check_openpyxl_available() -> str | None:
+    """Return an actionable error message if openpyxl is not importable, else None."""
     try:
         import openpyxl  # noqa: F401
     except ImportError as exc:
+        return f"openpyxl is required: {exc}. Install with `pip install -r requirements.txt`."
+    return None
+
+
+def scan_workbook(xlsx_path: Path) -> dict:
+    openpyxl_err = check_openpyxl_available()
+    if openpyxl_err is not None:
         print(
             json.dumps(
                 {
                     "status": "error",
-                    "message": f"openpyxl is required: {exc}. Install with `pip install -r requirements.txt`.",
+                    "message": openpyxl_err,
                 },
                 indent=2,
             )
@@ -306,6 +324,23 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     xlsx_path = Path(args.path).resolve()
+
+    # Check openpyxl upfront before spawning LibreOffice or performing any file write
+    openpyxl_err = check_openpyxl_available()
+    if openpyxl_err is not None:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "file": str(xlsx_path),
+                    "recalculated_with_libreoffice": False,
+                    "message": openpyxl_err,
+                },
+                indent=2,
+            )
+        )
+        return 1
+
     preflight_err = preflight_validate_input(xlsx_path)
     if preflight_err is not None:
         print(
@@ -315,6 +350,35 @@ def main(argv: list[str] | None = None) -> int:
                     "file": str(xlsx_path),
                     "recalculated_with_libreoffice": False,
                     "message": preflight_err,
+                },
+                indent=2,
+            )
+        )
+        return 1
+
+    # Determine execution mode: default (and explicit --check-only) is non-destructive
+    if args.in_place:
+        mode = "in_place"
+    elif args.output:
+        mode = "output"
+    else:
+        mode = "check_only"
+    is_check_only = mode == "check_only"
+
+    # Validate --in-place extension before invoking LibreOffice
+    if args.in_place and xlsx_path.suffix.lower() != ".xlsx":
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "file": str(xlsx_path),
+                    "recalculated_with_libreoffice": False,
+                    "message": (
+                        f"Refusing --in-place on '{xlsx_path.name}' (extension '{xlsx_path.suffix or '(none)'}'): "
+                        "LibreOffice --convert-to xlsx produces macro-free .xlsx bytes. "
+                        "Use the default non-destructive check (--check-only) for read-only auditing, "
+                        "or pass --output <new.xlsx> to write a converted .xlsx copy."
+                    ),
                 },
                 indent=2,
             )
@@ -357,8 +421,24 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 1
 
-    # Detect LibreOffice BEFORE checking sibling overwrite so scan-only runs never refuse
+    # Detect LibreOffice and enforce its presence for write modes (--in-place / --output)
     soffice = find_soffice()
+    if soffice is None and args.in_place:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "file": str(xlsx_path),
+                    "recalculated_with_libreoffice": False,
+                    "message": (
+                        "Cannot update workbook --in-place because "
+                        "LibreOffice (soffice) is not installed on PATH."
+                    ),
+                },
+                indent=2,
+            )
+        )
+        return 1
     if soffice is None and args.output:
         assert output_path is not None
         print(
@@ -379,43 +459,39 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     dest_path: Path | None
-    if args.check_only or soffice is None:
+    if is_check_only or soffice is None:
         dest_path = None
     elif output_path is not None:
         dest_path = output_path
-    elif xlsx_path.suffix.lower() == ".xlsx":
-        dest_path = xlsx_path
     else:
-        sibling = xlsx_path.with_suffix(".xlsx")
-        if sibling.exists():
-            print(
-                json.dumps(
-                    {
-                        "status": "error",
-                        "file": str(sibling),
-                        "source_file": str(xlsx_path),
-                        "recalculated_with_libreoffice": False,
-                        "message": (
-                            f"Refusing to overwrite existing sibling workbook '{sibling}' when "
-                            f"converting '{xlsx_path.name}'. Pass --output <path> or --check-only."
-                        ),
-                    },
-                    indent=2,
-                )
-            )
-            return 1
-        dest_path = sibling
+        dest_path = xlsx_path
 
     is_in_place = dest_path is not None and _is_same_file(dest_path, xlsx_path)
 
-    # Protect Excel What-If data tables (<f t="dataTable">) from in-place LibreOffice corruption
-    data_table_locs = workbook_has_data_tables(xlsx_path)
+    # Protect Excel What-If data tables (<f t="dataTable">) from in-place LibreOffice corruption;
+    # fail closed on corrupt OOXML zip/XML rather than assuming no data tables exist.
+    try:
+        data_table_locs = workbook_has_data_tables(xlsx_path)
+    except WorkbookLoadError as exc:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "file": str(xlsx_path),
+                    "recalculated_with_libreoffice": False,
+                    "message": str(exc),
+                },
+                indent=2,
+            )
+        )
+        return 1
+
     warnings: list[str] = []
     if data_table_locs:
         locs_preview = ", ".join(data_table_locs[:5])
         if len(data_table_locs) > 5:
             locs_preview += f" (+{len(data_table_locs) - 5} more)"
-        if soffice is not None and not args.check_only and is_in_place:
+        if soffice is not None and not is_check_only and is_in_place:
             print(
                 json.dumps(
                     {
@@ -427,8 +503,8 @@ def main(argv: list[str] | None = None) -> int:
                             f"Refusing to overwrite '{xlsx_path.name}' in place because it contains "
                             f"Excel What-If data table(s) ({locs_preview}). LibreOffice re-export "
                             "converts Excel What-If data tables into incompatible TABLE(...) formulas. "
-                            "Use --check-only for safe read-only auditing, or pass --output <new.xlsx> "
-                            "if a re-exported copy is explicitly desired."
+                            "Use the default non-destructive check (--check-only) for safe read-only "
+                            "auditing, or pass --output <new.xlsx> if a re-exported copy is explicitly desired."
                         ),
                     },
                     indent=2,
@@ -441,19 +517,14 @@ def main(argv: list[str] | None = None) -> int:
                 "LibreOffice re-export converts What-If data tables into Calc TABLE(...) formulas "
                 "in the --output copy (the original input file was left untouched)."
             )
-        elif soffice is not None and args.check_only:
+        elif soffice is not None and is_check_only:
             warnings.append(
                 f"Input workbook contains Excel What-If data table(s) ({locs_preview}); "
                 "audited in a temporary copy without modifying the input file."
             )
-        elif soffice is not None and dest_path is not None and not is_in_place:
-            warnings.append(
-                f"Input workbook contains Excel What-If data table(s) ({locs_preview}); "
-                "LibreOffice re-export converts What-If data tables into Calc TABLE(...) formulas "
-                f"in '{dest_path.name}'."
-            )
 
     recalculated = False
+    modified_file = False
 
     with tempfile.TemporaryDirectory(prefix="xlsx_recalc_") as tmpdir:
         tmp_path = Path(tmpdir)
@@ -483,7 +554,7 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
 
             recalculated = True
-            if args.check_only:
+            if is_check_only:
                 scan_target = lo_output
                 reported_file = xlsx_path
             else:
@@ -503,13 +574,9 @@ def main(argv: list[str] | None = None) -> int:
                         )
                     )
                     return 1
+                modified_file = True
                 scan_target = dest_path
                 reported_file = dest_path
-                if not is_in_place and not args.output:
-                    warnings.append(
-                        f"Converted non-.xlsx input '{xlsx_path.name}' to '{dest_path.name}' "
-                        "without overwriting the original file."
-                    )
         else:
             warnings.append("LibreOffice (soffice) not found on PATH; scanning existing cached values only.")
             if xlsx_path.suffix.lower() not in OOXML_ZIP_SUFFIXES:
@@ -560,13 +627,16 @@ def main(argv: list[str] | None = None) -> int:
     result: dict = {
         "status": status,
         "file": str(reported_file),
+        "mode": mode,
+        "modified_file": modified_file,
         "recalculated_with_libreoffice": recalculated,
         "total_errors": scan["total_errors"],
         "total_formulas": scan["total_formulas"],
         "uncached_formulas": scan["uncached_formulas"],
+        "data_table_formulas": scan["data_table_formulas"],
         "error_summary": scan["error_summary"],
     }
-    if args.check_only:
+    if is_check_only:
         result["check_only"] = True
     if not _is_same_file(reported_file, xlsx_path):
         result["source_file"] = str(xlsx_path)

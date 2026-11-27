@@ -7,12 +7,12 @@
 ## 1. Recalculation & Validation Failures
 
 ### `status: "unverified"` (Exit Code 2) or Uncached Formulas
-- **Cause:** LibreOffice (`soffice`) is not installed on `PATH`, so `openpyxl`-written formulas have no cached values (`val_v is None`).
-- **Fix:** Install LibreOffice (`sudo apt-get install libreoffice-calc` or macOS `brew install --cask libreoffice`) and re-run `python3 scripts/recalc_xlsx.py <model.xlsx> 30`. Only pass `--allow-unrecalculated` when the analyst explicitly accepts unverified cached values, and disclose `recalculated_with_libreoffice: false`.
+- **Cause:** Either LibreOffice (`soffice`) is not installed on `PATH`, OR `recalc_xlsx.py` was run in its default non-destructive (`--check-only`) mode on an `openpyxl`-written file so cached values were never written back to disk before `validate_dcf.py` ran.
+- **Fix:** Ensure LibreOffice is installed (`sudo apt-get install libreoffice-calc` or macOS `brew install --cask libreoffice`) and run `python3 scripts/recalc_xlsx.py <model.xlsx> 30 --in-place` (for newly generated `.xlsx` files) or `--output <recalc.xlsx>` (when preserving the original file), then run `validate_dcf.py` on that recalculated file. Only pass `--allow-unrecalculated` when the analyst explicitly accepts unverified cached values, and disclose `recalculated_with_libreoffice: false`.
 
 ### `Refusing to overwrite ... Excel What-If data table(s)` (Exit Code 1)
-- **Cause:** An existing user workbook contains Excel What-If data tables (`<f t="dataTable">`), which LibreOffice re-export converts into incompatible Calc `TABLE(...)` formulas.
-- **Fix:** Use `python3 scripts/recalc_xlsx.py <model.xlsx> --check-only` for safe read-only auditing without mutating the workbook, or pass `--output <new.xlsx>` if a re-exported copy is explicitly desired. For newly built DCF models, always use live `SUMPRODUCT` sensitivity formulas (never Excel What-If data tables).
+- **Cause:** `--in-place` (or `--output` pointing to the same file) was passed on an existing workbook containing Excel What-If data tables (`<f t="dataTable">`), which LibreOffice re-export converts into incompatible Calc `TABLE(...)` formulas.
+- **Fix:** Run `python3 scripts/recalc_xlsx.py <model.xlsx>` (default non-destructive / `--check-only`) for safe read-only auditing without mutating the workbook, or pass `--output <new.xlsx>` if a re-exported copy is explicitly desired. For newly built DCF models, always use live `IF(WACC<=g,"NM", SUMPRODUCT(...))` sensitivity formulas (never Excel What-If data tables).
 
 ### `#REF!` Errors
 - **Cause:** Formulas reference wrong or deleted rows (usually from inserting headers after writing formulas).
@@ -35,12 +35,12 @@
 - Check **TV `%` of EV** (`DCF!C113`): target `50%–70%` (`validate_dcf.py` warns if `< 50%` or `> 70%`). If `> 70%`, review `g` (must be `<= 3.5%` and `< WACC`) or extend explicit projection horizon to 7–10 years.
 - Confirm Exit Multiple TV is discounted strictly at `(1 + WACC)^N` (NOT `N - 0.5`; only mid-year Perpetuity Growth TV uses `N - 0.5`).
 - Confirm SBC is NOT added back to UFCF without modeling full dilution/repurchase offset.
-- Check whether `Net Debt / EV` was accidentally used in WACC (must use gross-debt weights `E/(E+D)` and `D/(E+D)`).
+- Check whether `Net Debt / EV` was accidentally used in WACC (must use gross-capitalization weights `E/(E+D+P)`, `D/(E+D+P)`, `P/(E+D+P)`).
 
 ### Implied Share Price Far Too Low
 - Verify the **Enterprise-to-Equity bridge** signs (`- Gross Debt - Preferred - NCI + Cash + Equity Investments`).
 - Confirm **ASC 842 operating lease liabilities** were not double-counted (do not deduct them from EV if FCF already deducts operating lease rent).
-- Check WACC (`WACC!C27`) against peer range (`5%–20%`) and verify CapEx / NWC signs.
+- Check WACC (`WACC!C30`) against peer range (`5%–20%`) and verify CapEx / NWC signs.
 
 ## 3. Case Selector Not Working
 
@@ -48,4 +48,4 @@
 - Confirm `DCF!B4` holds an integer (`1`, `2`, or `3`) with `1..3` `DataValidation`, and `wb.defined_names["Case"]` points to `DCF!$B$4`.
 - Verify `DCF!C4` uses `=CHOOSE(INT(Case),"Bear Case","Base Case","Bull Case")`.
 - Confirm Active Case formulas use `INT($B$4)` and match the exact vertical stride of the Bear/Base/Bull blocks: `=INDEX(C$26:C$58,(INT($B$4)-1)*12+offset)`.
-- Test switching `--case 1`, `--case 2`, `--case 3` and recalculating via `recalc_xlsx.py` to confirm Bear < Base < Bull implied share prices.
+- Test switching `--case 1`, `--case 2`, `--case 3` and recalculating via `recalc_xlsx.py <model.xlsx> 30 --in-place` to confirm Bear < Base < Bull implied share prices.

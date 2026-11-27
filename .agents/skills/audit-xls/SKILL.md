@@ -11,11 +11,12 @@ Audit formulas and data in `.xlsx` workbooks (or exported Google Sheets) for acc
 
 ## Execution in Antigravity (Read-Only by Default)
 
-1. Run **`python3 scripts/recalc_xlsx.py <path-to-workbook.xlsx> --check-only`** first — `--check-only` recalculates in a temporary directory and scans every sheet for all 7 Excel errors (`#REF!`, `#DIV/0!`, `#VALUE!`, `#NAME?`, `#N/A`, `#NUM!`, `#NULL!`) **without modifying or overwriting the audited file on disk**.
+1. Run **`python3 scripts/recalc_xlsx.py <path-to-workbook.xlsx>`** (non-destructive by default; `--check-only` is an explicit alias) first — it recalculates in a temporary directory and scans every sheet for all 7 Excel errors (`#REF!`, `#DIV/0!`, `#VALUE!`, `#NAME?`, `#N/A`, `#NUM!`, `#NULL!`) **without modifying or overwriting the audited file on disk** (preserving charts, pivots, slicers, What-If data tables, and VBA).
    - Exit `0` (`"status": "success"`): zero formula errors, all formulas verified.
    - Exit `1` (`"status": "errors_found"` / `"error"`): formula errors found or file/LibreOffice failure — inspect `error_summary`.
    - Exit `2` (`"status": "unverified"`): LibreOffice is not installed and the workbook has uncached formulas. Report `unverified` explicitly; only pass `--allow-unrecalculated` if the user explicitly accepts unverified cached values.
-2. For DCF workbooks, also run `python3 .agents/skills/dcf-model/scripts/validate_dcf.py <path-to-workbook.xlsx>` (read-only).
+   - *(Note: If the workbook was just written/modified by `openpyxl` so cached values were stripped, first write a recalculated copy via `--output <recalc.xlsx>` — or `--in-place` on a newly Python-generated `.xlsx` — before running `validate_dcf.py` or reading `data_only=True`.)*
+2. For DCF workbooks, also run `python3 .agents/skills/dcf-model/scripts/validate_dcf.py <path-to-workbook.xlsx>` (read-only; requires cached formula values on disk).
 3. Inspect formulas (`data_only=False`) and cached values (`data_only=True`) programmatically with Python (`openpyxl`) across the requested file, sheet(s), and cell range(s). Never modify the workbook until the user explicitly approves fixes.
 
 ## Step 1: Determine scope
@@ -113,7 +114,7 @@ If BS doesn't balance, **quantify the gap per period and trace where it breaks**
 **DCF:**
 - Discount rate applied to wrong period (mid-year `t - 0.5` for explicit FCFs, mid-year `N - 0.5` for perpetuity-growth TV, and strictly end-of-year `(1 + WACC)^N` for exit-multiple TV — NOT `N - 0.5`)
 - Terminal value not discounted back, or terminal growth `g >= WACC` / `g > 3.5%`
-- WACC uses `Net Debt / EV` (producing negative debt weight) or book equity instead of gross-debt market weights `E/(E+D)` and `D/(E+D)`
+- WACC uses `Net Debt / EV` (producing negative debt weight) or book equity instead of gross-capitalization market weights `E/(E+D+P)`, `D/(E+D+P)`, `P/(E+D+P)` (excluding NCI, which is deducted in the equity bridge)
 - ASC 842 operating lease liabilities deducted from EV when UFCF already expenses lease rent (double-counting)
 - SBC added back to UFCF without dilution reconciliation; basic shares used instead of TSM/if-converted diluted shares
 - FCF includes interest expense (should be unlevered) or tax shield double-counted

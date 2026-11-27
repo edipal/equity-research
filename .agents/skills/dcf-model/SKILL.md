@@ -21,7 +21,7 @@ Build institutional-grade, two-sheet (`DCF` + `WACC`) Excel valuation models pro
 ## Non-Negotiable Rules
 
 1. **Live Excel formulas only:** Every projection, subtotal, NOPAT, UFCF, discount factor, PV, terminal value, valuation bridge line, WACC calculation, and sensitivity cell MUST be a live Excel formula (`ws["C74"] = "=B74*(1+C62)"`). Never pre-compute results in Python and write numbers.
-2. **Gross-debt WACC weights (never negative):** Compute WACC weights on **Market Cap (`E`) + Total Gross Debt (`D`)**: `Equity Weight = E / (E + D)`, `Debt Weight = D / (E + D)` (bounded `0%–100%`). Never use `Net Debt / EV`. Link `DCF!C21 = WACC!C27` as the single source of WACC.
+2. **Gross-capitalization WACC weights (never negative):** Compute WACC weights on **Market Cap (`E`) + Total Gross Debt (`D`) + Preferred Stock (`P`)**: `Equity Weight = E / (E + D + P)`, `Debt Weight = D / (E + D + P)`, `Preferred Weight = P / (E + D + P)` (all bounded `0%–100%`, sum `= 100%`). Exclude NCI from parent WACC (consolidated UFCFs discounted at consolidated WACC; NCI deducted in the equity bridge). Never use `Net Debt / EV`. Link `DCF!C21 = WACC!C30` as the single source of WACC.
 3. **Discounting & terminal growth discipline:**
    - Discount explicit annual UFCFs using the **mid-year convention** (`t - 0.5`: `0.5, 1.5, ..., N - 0.5`).
    - Discount **Perpetuity Growth Terminal Value** consistently at **mid-year `N - 0.5`** (`1 / (1 + WACC)^(N - 0.5)`, dynamically referencing the final cell of the `Period` row `$G$87`), because `UFCF_N * (1 + g) / (WACC - g)` values a mid-year terminal cash-flow stream one period prior to Year `N + 0.5`.
@@ -35,7 +35,7 @@ Build institutional-grade, two-sheet (`DCF` + `WACC`) Excel valuation models pro
 5. **Single canonical layout (aligned with `build_dcf_skeleton.py`):**
    - Named `Case` cell at `DCF!B4` (`1=Bear, 2=Base, 3=Bull`) guarded by whole-number `1..3` Excel `DataValidation`, with display label `=CHOOSE(INT(Case),"Bear Case","Base Case","Bull Case")` in `DCF!C4`.
    - Vertically stacked Bear / Base / Bull assumption blocks (uniform 12-row stride, explicit projection year headers) consolidated via `=INDEX(..., (INT($B$4)-1)*12 + offset)` into an Active Case block — zero scattered nested `IF`s, zero hardcoded OpEx percentages in formulas.
-   - Live horizon-independent 5×5 `WACC × Terminal Growth` sensitivity table at the bottom of `DCF` (`B124:G129`) using `SUMPRODUCT` over the UFCF and Period ranges, with formula-driven axes centered on live `WACC` (`C21`) and live `Terminal Growth` (`C69`), full DCF recalculation in all 25 cells, and highlighted center cell (`E127`) matching `DCF!C108`.
+   - Live horizon-independent 5×5 `WACC × Terminal Growth` sensitivity table at the bottom of `DCF` (`B124:G129`) using `=IF($B{row}<={col}${hdr},"NM", ...)` around `SUMPRODUCT` over the UFCF and Period ranges, with formula-driven axes centered on live `WACC` (`C21`) and live `Terminal Growth` (`C69`), full DCF recalculation in all 25 cells, and highlighted center cell (`E127`) matching `DCF!C108`.
 6. **Cell comments on creation:** Attach `"Source: [System/Document], [Date], [Reference]"` to every blue hardcoded input as it is written; tag analyst assumptions `[ASSUMPTION]` and unverified items `[UNSOURCED]`.
 7. **Lock row layout before writing formulas:** Define every section's row constants before writing any formula cell to eliminate off-by-one and `#REF!` bugs.
 
@@ -66,9 +66,9 @@ Confirm: most recent reported quarter, fiscal year-end month, 3–5 years of his
 ### Step 2: Build the `WACC` Sheet
 Follow [references/wacc-and-valuation-bridge.md](references/wacc-and-valuation-bridge.md):
 - CAPM Cost of Equity (`Rf + Beta * ERP`)
-- After-Tax Cost of Debt (`Pre-Tax Kd * (1 - Marginal Tax Rate)`)
-- Gross-debt weights (`E / (E + D)` and `D / (E + D)`, sum check `= 100.00%`), linking `E = DCF!C14` and `D = DCF!C15`
-- Output cell `WACC!C27` highlighted in `#BDD7EE`
+- After-Tax Cost of Debt (`Pre-Tax Kd * (1 - Marginal Tax Rate)`) and Cost of Preferred Stock (`Kp`, non-tax-deductible; `0.0%` if Preferred `= $0M`)
+- Gross-capitalization weights (`E / (E + D + P)`, `D / (E + D + P)`, `P / (E + D + P)`, sum check `= 100.00%`), linking `E = DCF!C14`, `D = DCF!C15`, and `P = DCF!C16` (excluding NCI, which is deducted in the equity bridge)
+- Output cell `WACC!C30` highlighted in `#BDD7EE`
 
 ### Step 3: Build Scenario Blocks & Active Case Consolidation
 Follow [references/dcf-layout-and-formulas.md](references/dcf-layout-and-formulas.md):
@@ -79,7 +79,7 @@ Follow [references/dcf-layout-and-formulas.md](references/dcf-layout-and-formula
 ### Step 4: Project Unlevered Free Cash Flow (UFCF)
 - Model every OpEx, D&A, and CapEx line as a `% of Revenue` referencing the Active Case block (never `% of Gross Profit`, never hardcoded percentages).
 - Compute `EBIT → Cash Taxes → NOPAT + D&A - CapEx - ΔNWC = UFCF` (retaining SBC as an operating expense).
-- Apply mid-year discount periods (`0.5, 1.5, ..., N - 0.5`) and discount factors `=1/(1+$C$21)^Period` using `DCF!C21 = WACC!C27`.
+- Apply mid-year discount periods (`0.5, 1.5, ..., N - 0.5`) and discount factors `=1/(1+$C$21)^Period` using `DCF!C21 = WACC!C30`.
 
 ### Step 5: Compute Terminal Value, Valuation Bridge & Comps Cross-Check
 - **Primary (Perpetuity Growth):** `Undiscounted TV = UFCF_N * (1 + g) / (WACC - g)`, discounted consistently at mid-year `1 / (1 + WACC)^(N - 0.5)` (`=1/(1+$C$21)^$G$87`).
@@ -99,12 +99,14 @@ Apply institutional styling from `.agents/rules/financial-modeling.md` (`#1F4E79
 Run BOTH automated QA checks before delivering:
 
 ```bash
-# 1. Recalculate via LibreOffice and audit all formula cells
-python3 scripts/recalc_xlsx.py research/companies/<TICKER>/models/<TICKER>_DCF_YYYY-MM-DD.xlsx 30
+# 1. Recalculate the newly openpyxl-generated workbook via LibreOffice (--in-place populates cached values on disk)
+python3 scripts/recalc_xlsx.py research/companies/<TICKER>/models/<TICKER>_DCF_YYYY-MM-DD.xlsx 30 --in-place
 
 # 2. Validate DCF structure, WACC bounds, g < WACC, TV % of EV, and cached values
 python3 .agents/skills/dcf-model/scripts/validate_dcf.py research/companies/<TICKER>/models/<TICKER>_DCF_YYYY-MM-DD.xlsx
 ```
+
+*(Note: `recalc_xlsx.py` is **non-destructive by default** — running it without `--in-place` or `--output` checks a temporary copy and leaves an `openpyxl`-saved file uncached on disk, which would cause `validate_dcf.py` to fail on uncached formulas. Always pass `--in-place` for newly Python-generated `.xlsx` files or `--output <recalc.xlsx>` when preserving an original workbook, then run `validate_dcf.py` on that recalculated file.)*
 
 #### `scripts/recalc_xlsx.py` Exit Codes, Statuses & Flags
 
@@ -114,9 +116,10 @@ python3 .agents/skills/dcf-model/scripts/validate_dcf.py research/companies/<TIC
 | `1` | `"errors_found"` or `"error"` | One or more Excel errors (`#REF!`, `#DIV/0!`, `#VALUE!`, `#NAME?`, `#N/A`, `#NUM!`, `#NULL!`), corrupt/missing file, or LibreOffice timeout/failure. Inspect `error_summary`, consult [TROUBLESHOOTING.md](TROUBLESHOOTING.md), fix, and re-run. |
 | `2` | `"unverified"` (or CLI usage error) | LibreOffice (`soffice`) is not installed and the workbook has uncached formula values. Install LibreOffice to recalculate, or pass `--allow-unrecalculated` only if the user explicitly accepts unverified cached values. |
 
-Useful `recalc_xlsx.py` flags:
-- `--check-only` — Recalculate in a temp directory and audit without mutating the file on disk (ideal for read-only audits).
-- `--output <PATH>` — Write the recalculated workbook to a new path without modifying the original input.
+`recalc_xlsx.py` mode flags:
+- *(default)* / `--check-only` — Non-destructive read-only check: recalculates in a temp directory and audits without mutating the file on disk (ideal for read-only audits of untouched workbooks).
+- `--in-place` — Atomically replaces a newly generated `.xlsx` file with its LibreOffice-recalculated copy so cached formula values are populated on disk for `validate_dcf.py` and `openpyxl(data_only=True)` reads (refuses non-`.xlsx` files and What-If data tables).
+- `--output <PATH>` — Writes the recalculated `.xlsx` workbook to a new path without modifying the original input.
 - `--allow-unrecalculated` — Opt-in override returning exit `0` when LibreOffice is unavailable (always disclose `recalculated_with_libreoffice: false` to the analyst).
 
 ---
@@ -127,10 +130,10 @@ Useful `recalc_xlsx.py` flags:
 - **Starter skeleton test:** You can bootstrap or compare against `python3 .agents/skills/dcf-model/scripts/build_dcf_skeleton.py --output <path.xlsx> --case 2`.
 
 Before handing off the model, confirm:
-- [ ] `scripts/recalc_xlsx.py` exits `0` (`"status": "success"`, `total_errors: 0`, `uncached_formulas: 0`)
+- [ ] `scripts/recalc_xlsx.py <file.xlsx> 30 --in-place` (or `--output <recalc.xlsx>`) exits `0` (`"status": "success"`, `total_errors: 0`, `uncached_formulas: 0`)
 - [ ] `validate_dcf.py` exits `0` (`"status": "PASS"`)
 - [ ] Two sheets (`DCF` + `WACC`), named `Case` at `DCF!B4` with `1..3` `DataValidation`, working Bear/Base/Bull toggle
-- [ ] Gross-debt WACC weights (`0%–100%`, sum `= 100%`), `g < WACC`, `g <= 3.5%`
+- [ ] Gross-capitalization WACC weights (`E + D + P`, all `0%–100%`, sum `= 100%`), `g < WACC`, `g <= 3.5%`
 - [ ] Mid-year explicit FCF (`t - 0.5`) and mid-year perpetuity TV (`N - 0.5`) discounting; strict end-of-year `(1 + WACC)^N` exit-multiple TV discounting
 - [ ] Complete equity bridge (Gross Debt, Preferred, NCI, Cash, Equity Investments), separate RSU + option TSM diluted shares, SBC kept as expense
 - [ ] Live `SUMPRODUCT` 5×5 sensitivity table with center cell (`E127`) matching `DCF!C108`

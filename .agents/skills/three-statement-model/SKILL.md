@@ -12,7 +12,7 @@ Build integrated 3-statement financial models **from scratch** OR **populate exi
 ## ⚠️ CRITICAL PRINCIPLES — Read Before Building or Populating
 
 **Execution Environment (Antigravity / Python `openpyxl`):**
-- Build or update `.xlsx` workbooks programmatically with Python (`openpyxl`). Write live Excel formula strings (`ws["D15"] = "=D14*(1+Assumptions!$B$5)"`), then run `python3 scripts/recalc_xlsx.py <path-to-model.xlsx> 30` (exit `0`, `"status": "success"`) and run the `audit-xls` checklist before delivery.
+- Build or update `.xlsx` workbooks programmatically with Python (`openpyxl`). Write live Excel formula strings (`ws["D15"] = "=D14*(1+Assumptions!$B$5)"`), then run `python3 scripts/recalc_xlsx.py <path-to-model.xlsx> 30 --in-place` (for newly generated `.xlsx` files) or `--output <recalc.xlsx>` (when preserving an existing template/file; exit `0`, `"status": "success"`) so cached formula values are populated on disk, and run the `audit-xls` checklist before delivery.
 - **Template Preservation Warning (`openpyxl`):** Loading and re-saving a complex user template via `openpyxl` can **strip existing Excel charts, embedded images, ActiveX controls, and VBA macros** (`.xlsm`). Always back up the original template first, inspect `wb.defined_names` and sheet structure programmatically, and prefer building a clean workbook from scratch when no strict template layout is required.
 - **Default output path** (aligned with `AGENTS.md` / `.agents/rules/research-outputs.md`): save to `research/companies/<TICKER>/models/<TICKER>_3Statement_YYYY-MM-DD.xlsx`.
 
@@ -22,7 +22,7 @@ Build integrated 3-statement financial models **from scratch** OR **populate exi
 
 **Verify step-by-step (Interactive vs. Subagent Mode):**
 - **Interactive mode:** Confirm at major milestones — (1) architecture/template mapping, (2) historical actuals, (3) IS projections, (4) BS balance check `= 0` every period, (5) CF cash tie-out — before finalizing.
-- **Subagent mode (e.g., invoked by `model-builder`):** Do not stall waiting for mid-build confirmation. Build the complete integrated 3-statement model end-to-end, tag all assumed drivers `[ASSUMPTION]`, run `python3 scripts/recalc_xlsx.py <file.xlsx> 30`, verify BS balance `= 0` and CF cash tie-out `= 0` across all scenarios, and present the full audit summary and assumption table in the handoff.
+- **Subagent mode (e.g., invoked by `model-builder`):** Do not stall waiting for mid-build confirmation. Build the complete integrated 3-statement model end-to-end, tag all assumed drivers `[ASSUMPTION]`, run `python3 scripts/recalc_xlsx.py <file.xlsx> 30 --in-place` (or `--output <recalc.xlsx>`), verify BS balance `= 0` and CF cash tie-out `= 0` across all scenarios, and present the full audit summary and assumption table in the handoff.
 
 ## Formatting — Professional Blue/Grey Palette (Default unless template/user specifies otherwise)
 
@@ -180,7 +180,7 @@ If the template specifically requires pulling data from SEC filings (10-K, 10-Q)
 Inspect formula integrity in Python rather than manual GUI steps:
 - **Formula consistency across columns:** Iterate across forecast columns in Python to confirm identical relative/absolute formula structure across projection years (replacing manual `Ctrl+\`).
 - **Precedent / hardcode audit:** Parse formula strings to verify projection cells contain `=` formulas referencing `Assumptions` / schedule cells (no embedded hardcoded percentages or constants).
-- **Recalculation & error audit:** Run `python3 scripts/recalc_xlsx.py <model.xlsx> 30` and verify exit `0` (`"status": "success"`, zero `#REF!`, `#DIV/0!`, `#VALUE!`, `#NAME?`, `#N/A`, `#NUM!`, `#NULL!`, zero uncached formulas).
+- **Recalculation & error audit:** Run `python3 scripts/recalc_xlsx.py <model.xlsx> 30 --in-place` (or `--output <recalc.xlsx>`) to populate LibreOffice-recalculated cached values on disk, and verify exit `0` (`"status": "success"`, zero `#REF!`, `#DIV/0!`, `#VALUE!`, `#NAME?`, `#N/A`, `#NUM!`, `#NULL!`, zero uncached formulas).
 
 ### Step 4: Quality Checks by Sheet
 

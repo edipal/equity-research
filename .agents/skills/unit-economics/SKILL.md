@@ -78,7 +78,7 @@ Stage deliverables under `research/companies/<TICKER>/` (aligned with `model-bui
   3. `Cohort & Proxy Panel` — Disclosed customer cohorts (absolute `$` & `%` indexed) OR transparent public-filing proxies (customer tiers `$100K+`/`$1M+`, implied ACV, DBNRR) tagged `[ASSUMPTION]` where derived
   4. `Unit Economics & Waterfall` — Lagged CAC, Payback, LTV/CAC, subscription vs. services gross margin, contribution margin waterfall
   5. `Sources & Notes` — Filing dates, GAAP/Non-GAAP reconciliations, SBC treatment, and proxy methodology
-- **Mandatory QA Gate:** Run `python3 scripts/recalc_xlsx.py research/companies/<TICKER>/models/<TICKER>_UnitEconomics_YYYY-MM-DD.xlsx 30` (exit `0`, `"status": "success"`).
+- **Mandatory QA Gate:** Run `python3 scripts/recalc_xlsx.py research/companies/<TICKER>/models/<TICKER>_UnitEconomics_YYYY-MM-DD.xlsx 30 --in-place` (or `--output <recalc.xlsx>`) to populate cached formula values on disk (exit `0`, `"status": "success"`).
 - **Analytical summary note:** `research/companies/<TICKER>/notes/<TICKER>_UnitEconomics_YYYY-MM-DD.md` (with optional slides via `pptx-author` under `research/companies/<TICKER>/reports/`).
 
 ## Public-Filing Data Reality

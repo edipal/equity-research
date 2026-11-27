@@ -8,7 +8,7 @@ Reference guide for the `dcf-model` skill. Every formula and convention here mat
 
 ## 1. Weighted Average Cost of Capital (WACC)
 
-Build WACC on a dedicated `WACC` worksheet and link `DCF!C21 = WACC!C27` as the single source of truth (`WACC!C19 = DCF!C14` for Market Cap and `WACC!C20 = DCF!C15` for Total Gross Debt).
+Build WACC on a dedicated `WACC` worksheet and link `DCF!C21 = WACC!C30` as the single source of truth (`WACC!C20 = DCF!C14` for Market Cap, `WACC!C21 = DCF!C15` for Total Gross Debt, and `WACC!C22 = DCF!C16` for Preferred Stock).
 
 ### 1.1 Cost of Equity (CAPM)
 
@@ -34,29 +34,40 @@ Determine Pre-Tax `Kd` in priority order:
 
 Use the **marginal** corporate tax rate (typically `21%–28%` for US filers combining federal statutory and state taxes) rather than a distorted one-off GAAP effective tax rate.
 
-### 1.3 Capital Structure Weights — Gross Debt Basis (MANDATORY)
+### 1.3 Cost of Preferred Stock (`Kp`)
 
-Always weight WACC using **Market Value of Equity (`E`)** and **Total Gross Debt (`D`)** (market value of debt preferred; book value of short-term + long-term gross debt + finance leases as fallback):
+```text
+Cost of Preferred Stock (Kp) = Annual Preferred Dividend / Market (or Liquidation) Value of Preferred Stock
+```
+
+- Preferred dividends are **not tax-deductible** (do NOT multiply `Kp` by `(1 - t)`).
+- When the company has no preferred stock (`P = $0M`), set `Kp = 0.0%` (its weight is `0.00%`, so WACC collapses cleanly to Equity + Debt).
+
+### 1.4 Capital Structure Weights — Gross Capitalization Basis (`E + D + P`, MANDATORY)
+
+Always weight WACC using **Market Value of Equity (`E`)**, **Total Gross Debt (`D`)** (market value of debt preferred; book value of short-term + long-term gross debt + finance leases as fallback), and **Preferred Stock (`P`)** (market or liquidation value):
 
 ```text
 Market Value of Equity (E) = Current Share Price × Fully Diluted Shares (TSM)
 Total Gross Debt (D)       = Short-Term Debt + Current Portion of LT Debt + Long-Term Debt + Finance Leases  (D >= 0)
-Total Capitalization       = E + D
+Preferred Stock (P)        = Liquidation / Market Value of Preferred Stock                                    (P >= 0)
+Total Capitalization       = E + D + P
 
-Equity Weight              = E / (E + D)        [bounded 0% to 100%]
-Debt Weight                = D / (E + D)        [bounded 0% to 100%, NEVER negative]
-Weight Sum Check           = Equity Weight + Debt Weight = 100.00%
+Equity Weight              = E / (E + D + P)    [bounded 0% to 100%]
+Debt Weight                = D / (E + D + P)    [bounded 0% to 100%, NEVER negative]
+Preferred Weight           = P / (E + D + P)    [bounded 0% to 100%, NEVER negative]
+Weight Sum Check           = Equity Weight + Debt Weight + Preferred Weight = 100.00%
 
-WACC                       = (Ke × Equity Weight) + (After-Tax Kd × Debt Weight)
+WACC                       = (Ke × Equity Weight) + (After-Tax Kd × Debt Weight) + (Kp × Preferred Weight)
 ```
 
-**Why Gross Debt (NOT Net Debt / EV):**
+**Why Gross Debt & Preferred (NOT Net Debt / EV), and Why NCI Is Excluded:**
 - Cash is a non-operating asset added back in the Enterprise-to-Equity bridge — it is NOT "negative debt" in the capital structure.
 - Using `Net Debt / EV` for a net-cash company creates a **negative debt weight** and an equity weight `> 100%`, mechanically distorting WACC above `Ke` (or below `Kd`).
-- If the company has **zero gross debt** (`D = 0`), then `Debt Weight = 0%`, `Equity Weight = 100%`, and `WACC = Ke`.
-- If preferred stock is material, add a third capital tranche (`Preferred Weight × Cost of Preferred`) to Total Capitalization (`E + D + P`).
+- If the company has **zero gross debt and zero preferred stock** (`D = 0, P = 0`), then `Debt Weight = 0%`, `Preferred Weight = 0%`, `Equity Weight = 100%`, and `WACC = Ke`.
+- **Non-Controlling Interest (NCI) convention:** Exclude NCI from parent WACC weights. Because GAAP consolidated financial statements include 100% of partially owned subsidiaries' operating cash flows, discount 100% consolidated UFCFs at the consolidated WACC (`E + D + P`), and deduct NCI at market/fair value in the Enterprise-to-Equity bridge (`DCF!C103`).
 
-### 1.4 Typical WACC Sanity Ranges
+### 1.5 Typical WACC Sanity Ranges
 - Large-cap, stable cash-generative business: `7.0%–9.0%`
 - Mature growth / mid-cap: `9.0%–12.0%`
 - High-growth, small-cap, or elevated business risk: `12.0%–15.0%`

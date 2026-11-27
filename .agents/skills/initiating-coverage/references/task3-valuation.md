@@ -14,12 +14,12 @@ Step-by-step instructions for executing Task 3 (Valuation Analysis) of the `init
 
 **Core Methodology Delegation:**
 - **DCF Mechanics:** Delegate ALL core DCF methodology, formulas, and layout conventions to the **`dcf-model`** skill (`.agents/skills/dcf-model/SKILL.md`, `references/wacc-and-valuation-bridge.md`, `references/dcf-layout-and-formulas.md`, and `scripts/build_dcf_skeleton.py`). Do NOT deviate from:
-  - **Gross-debt WACC weights:** `Total Capital = Market Cap (E) + Total Gross Debt (D)`; `Equity Weight = E/(E+D)`, `Debt Weight = D/(E+D)` (bounded `0%–100%`, never negative).
+  - **Gross-capitalization WACC weights:** `Total Capital = Market Cap (E) + Total Gross Debt (D) + Preferred Stock (P)`; `Equity Weight = E/(E+D+P)`, `Debt Weight = D/(E+D+P)`, `Preferred Weight = P/(E+D+P)` (all bounded `0%–100%`, sum `= 100%`; NCI excluded from parent WACC and deducted in the equity bridge).
   - **Mid-year explicit UFCF & Perpetuity TV discounting:** Discount explicit annual UFCFs at `t - 0.5` (`0.5, 1.5, ..., N - 0.5`) and **Perpetuity Growth TV** consistently at **`(1 + WACC)^(N - 0.5)`** (`4.5` for a 5-year model). Discount **Exit Multiple TV** strictly at **end-of-year `(1 + WACC)^N`** (`5.0` — NEVER `N - 0.5` for exit multiple).
   - **Terminal growth `g`:** Strictly `< WACC` and `<= long-term nominal GDP / Rf` (typically `2.0%–3.5%`).
   - **TV `%` of EV:** Target `50%–70%` (`validate_dcf.py` warns if `< 50%` or `> 70%`).
   - **Complete Equity Bridge & Diluted Shares:** `EV - Total Gross Debt - Preferred Stock - NCI + Cash & Marketable Securities + Equity Investments ÷ Fully Diluted Shares (Basic + Unvested RSUs + ITM Option TSM + if-converted)`. Never deduct ASC 842 operating lease liabilities when UFCF already expenses lease rent. Keep SBC as a real economic expense in UFCF.
-  - **Centered Odd Sensitivity Grid (5×5):** Formula-driven axes centered on live `WACC` and `Terminal Growth`, horizon-independent `SUMPRODUCT` full DCF recalculation in all 25 cells, highlighted center cell matching Base DCF price.
+  - **Centered Odd Sensitivity Grid (5×5):** Formula-driven axes centered on live `WACC` and `Terminal Growth`, horizon-independent `=IF(WACC<=g,"NM", ... SUMPRODUCT(...) ...)` full DCF recalculation in all 25 cells, highlighted center cell matching Base DCF price.
 - **Comps Mechanics:** Follow **`comps-analysis`** for EV construction, NTM calendarization, `"NM"` error handling (`IFERROR(..., "NM")`), and mandatory Max / 75th / Median / 25th / Min statistics.
 - **Valuation Theory Reference:** See [valuation-methodologies.md](valuation-methodologies.md).
 
@@ -150,8 +150,8 @@ Include 3–5 dated catalysts and 3–5 quantified upside/downside risks in `<TI
 After adding the 4 canonical valuation tabs (`WACC`, `DCF`, `Comparable Companies`, `Valuation Summary` — plus inline 5×5 sensitivity on `DCF` or optional `Sensitivity` tab) to `<TICKER>_Financial_Model_<Date>.xlsx`, run BOTH QA scripts:
 
 ```bash
-# 1. Recalculate via LibreOffice and verify zero formula errors / zero uncached formulas
-python3 scripts/recalc_xlsx.py research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx 30
+# 1. Recalculate via LibreOffice (--in-place populates cached values on disk; or use --output <recalc.xlsx>)
+python3 scripts/recalc_xlsx.py research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx 30 --in-place
 
 # 2. Validate DCF sheet structure, WACC range, g < WACC, TV % of EV, and cached values
 python3 .agents/skills/dcf-model/scripts/validate_dcf.py research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx
@@ -171,8 +171,8 @@ Both commands MUST exit `0` (`"status": "success"` and `"status": "PASS"`) befor
    - `Valuation Summary` *(+ optional `Precedent Transactions` cross-check tab)*
 
 **Checklist before proceeding to Task 4:**
-- [ ] `scripts/recalc_xlsx.py` exits `0` (`"status": "success"`) and `validate_dcf.py` exits `0` (`"status": "PASS"`)
-- [ ] Gross-debt WACC, mid-year explicit FCF (`t - 0.5`) and mid-year perpetuity TV (`N - 0.5`) discounting, strict end-of-year `(1+WACC)^N` exit-multiple TV discounting, `g <= 3.5%` and `< WACC`, centered `SUMPRODUCT` 5×5 live sensitivity grid
+- [ ] `scripts/recalc_xlsx.py <model.xlsx> 30 --in-place` (or `--output <recalc.xlsx>`) exits `0` (`"status": "success"`) and `validate_dcf.py` exits `0` (`"status": "PASS"`)
+- [ ] Gross-capitalization (`E + D + P`) WACC, mid-year explicit FCF (`t - 0.5`) and mid-year perpetuity TV (`N - 0.5`) discounting, strict end-of-year `(1+WACC)^N` exit-multiple TV discounting, `g <= 3.5%` and `< WACC`, centered `IF(WACC<=g,"NM", SUMPRODUCT(...))` 5×5 live sensitivity grid
 - [ ] Comps table includes Max / 75th / Median / 25th / Min statistical summary
 - [ ] Precedent M&A assigned `0%` weight (cross-check only) when M&A is unlikely
 - [ ] Standardized `Buy / Hold / Sell` rating consistent with upside/downside threshold

@@ -59,7 +59,7 @@ When a user says *"Create a coverage initiation report for [Company]"* or *"Run 
   3. `Cash Flow Statement` (CFO, CFI, CFF, FCF)
   4. `Balance Sheet` (full BS with balance check `= 0` every period)
   5. `Scenarios` (Bear / Base / Bull drivers & outputs)
-- **QA Gate (MANDATORY):** Run `python3 scripts/recalc_xlsx.py research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx 30` and confirm exit `0` (`"status": "success"`, zero errors, zero uncached formulas, zero balance-check failures).
+- **QA Gate (MANDATORY):** Run `python3 scripts/recalc_xlsx.py research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx 30 --in-place` (or `--output <recalc.xlsx>`) to populate cached formula values on disk and confirm exit `0` (`"status": "success"`, zero errors, zero uncached formulas, zero balance-check failures).
 - **Full workflow:** [references/task2-financial-modeling.md](references/task2-financial-modeling.md).
 
 ### Task 3: Valuation Analysis
@@ -70,8 +70,8 @@ When a user says *"Create a coverage initiation report for [Company]"* or *"Run 
   4. `Valuation Summary` *(reconciliation, weighting, football field inputs; Precedent Transactions tab optional and used as cross-check only unless M&A is an active catalyst)*
 - **Rating Scale (Standardized):** `Buy` (`>= +15%` 12M expected return), `Hold` (`-10%` to `+15%`), `Sell` (`<= -10%`).
 - **QA Gate (MANDATORY):** Run BOTH:
-  - `python3 scripts/recalc_xlsx.py research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx 30` (exit `0`, `"status": "success"`)
-  - `python3 .agents/skills/dcf-model/scripts/validate_dcf.py research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx` (exit `0`, `"status": "PASS"`)
+  - `python3 scripts/recalc_xlsx.py research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx 30 --in-place` (or `--output <recalc.xlsx>`, exit `0`, `"status": "success"`)
+  - `python3 .agents/skills/dcf-model/scripts/validate_dcf.py research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx` on the recalculated file (exit `0`, `"status": "PASS"`)
 - **Full workflow:** [references/task3-valuation.md](references/task3-valuation.md) & [references/valuation-methodologies.md](references/valuation-methodologies.md).
 
 ### Task 4: Chart Generation
@@ -85,7 +85,7 @@ When a user says *"Create a coverage initiation report for [Company]"* or *"Run 
 - **Full workflow:** [references/task4-chart-generation.md](references/task4-chart-generation.md).
 
 ### Task 5: Report Assembly
-- **Scope:** Assemble `research/companies/<TICKER>/reports/<TICKER>_Initiation_Report_<Date>.docx` programmatically via `python-docx` + `openpyxl` (`data_only=True` after `recalc_xlsx.py`):
+- **Scope:** Assemble `research/companies/<TICKER>/reports/<TICKER>_Initiation_Report_<Date>.docx` programmatically via `python-docx` + `openpyxl` (`data_only=True` on the LibreOffice-recalculated workbook after `recalc_xlsx.py --in-place` / `--output`):
   - Page 1: **INITIATING COVERAGE** header (with prominent `DRAFT — FOR INTERNAL ANALYST REVIEW ONLY` banner), rating box, `[ANALYST NAME — REVIEW REQUIRED]`, Figure 1 stock chart, 3–4 quantified `■` bullets, financial summary table.
   - Reuse Task 1 prose verbatim for Company 101 sections, embed Task 4 PNG charts at `<= 6.0"` width (matching default `python-docx` text width), extract Task 2/3 tables directly from Excel, and write deep Projection Assumptions, Scenario Analysis, and Valuation sections.
   - Mandatory appendices: **Data Sources & References** (clickable hyperlinks with dates) and **Disclosures & Important Disclaimers** (draft status, not investment advice, analyst review sign-off).

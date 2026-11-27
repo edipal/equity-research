@@ -11,7 +11,7 @@ Reference specification for `.agents/skills/dcf-model/SKILL.md`. All row coordin
 | Sheet | Role | Key Outputs |
 |---|---|---|
 | `DCF` | Main valuation sheet: named `Case` selector (`B4`) with `1..3` validation, market/bridge inputs (separate RSU and option rows), stacked Bear/Base/Bull assumption blocks, `INDEX`-driven Active Case consolidation block, 5Y UFCF build, Terminal Value & Equity Bridge, Exit-Multiple cross-check, and inline `SUMPRODUCT` 5×5 live-formula sensitivity table(s) at bottom | `DCF!C108` (Implied Share Price — Perpetuity), `DCF!C119` (Implied Share Price — Exit Multiple), `DCF!E127` (Sensitivity center cell = `DCF!C108`) |
-| `WACC` | Single source of truth for CAPM Cost of Equity, After-Tax Cost of Debt, and Gross-Debt Capital Structure Weights | `WACC!C27` (linked into `DCF!C21`) |
+| `WACC` | Single source of truth for CAPM Cost of Equity, After-Tax Cost of Debt, Cost of Preferred Stock, and Gross-Capitalization (`E + D + P`) Weights | `WACC!C30` (linked into `DCF!C21`) |
 
 Generate a clean, verified starting workbook anytime via:
 
@@ -29,9 +29,9 @@ python3 .agents/skills/dcf-model/scripts/build_dcf_skeleton.py \
 |---|---|---|
 | `1–2` | Title & units note | `$ millions` basis |
 | `4–9` | **1. Cost of Equity (CAPM)** | `C6` Risk-Free Rate, `C7` Levered Beta, `C8` ERP → `C9` Ke `=C6+C7*C8` |
-| `11–15` | **2. After-Tax Cost of Debt** | `C13` Pre-Tax Kd, `C14` Marginal Tax Rate → `C15` `=C13*(1-C14)` |
-| `17–24` | **3. Capital Structure (Gross Debt)** | `C19` Market Cap `=DCF!C14` (green link), `C20` Total Gross Debt `=DCF!C15` (green link), `C21` Total Capital `=C19+C20`, `C22` Equity Weight `=C19/C21`, `C23` Debt Weight `=C20/C21`, `C24` Check `=C22+C23` (`100.00%`) |
-| `26–27` | **4. WACC Output** | `C27` `=C9*C22+C15*C23` (bold, `#BDD7EE` highlight) |
+| `11–16` | **2. After-Tax Cost of Debt & Preferred** | `C13` Pre-Tax Kd, `C14` Marginal Tax Rate → `C15` After-Tax Kd `=C13*(1-C14)`; `C16` Cost of Preferred Stock (`Kp`, non-tax-deductible; `0.0%` if Preferred `= $0M`) |
+| `18–27` | **3. Capital Structure (Gross Cap `E + D + P`)** | `C20` Market Cap `=DCF!C14` (green link), `C21` Total Gross Debt `=DCF!C15` (green link), `C22` Preferred Stock `=DCF!C16` (green link), `C23` Total Capital `=SUM(C20:C22)`, `C24` Equity Weight `=C20/C23`, `C25` Debt Weight `=C21/C23`, `C26` Preferred Weight `=C22/C23`, `C27` Check `=SUM(C24:C26)` (`100.00%`) |
+| `29–31` | **4. WACC Output & NCI Note** | `C30` `=C9*C24+C15*C25+C16*C26` (bold, `#BDD7EE` highlight); `A31:D31` NCI convention note (NCI excluded from parent WACC, deducted in equity bridge) |
 
 ---
 
@@ -49,7 +49,7 @@ python3 .agents/skills/dcf-model/scripts/build_dcf_skeleton.py \
 - `C14` Market Capitalization: `=C8*C13`
 - `C15` Total Gross Debt, `C16` Preferred Stock, `C17` Non-Controlling Interest, `C18` Cash & Marketable Securities, `C19` Equity Investments
 - `C20` Historical Anchor / Base-Year Revenue (e.g., LTM or latest FY actual)
-- `C21` Discount Rate (WACC): `=WACC!C27` (green cross-sheet link)
+- `C21` Discount Rate (WACC): `=WACC!C30` (green cross-sheet link)
 - `C22` Effective Tax Rate: `=WACC!C14` (green cross-sheet link)
 
 ### Section 2 — Stacked Bear / Base / Bull Assumption Blocks (Rows 24–58)
@@ -153,10 +153,10 @@ Never use Excel's manual Data Table feature (LibreOffice re-export converts `<f 
 - **Formula-driven axes** anchored on the model's live `WACC` (`C21`) and live `Terminal Growth` (`C69`):
   - Column header row `124` (`C124:G124`): `=E124-0.01`, `=E124-0.005`, **`=C69`**, `=E124+0.005`, `=E124+0.01`
   - Row header col `B` (`B125:B129`): `=B127-0.01`, `=B127-0.005`, **`=C21`**, `=B127+0.005`, `=B127+0.01`
-- **Live horizon-independent `SUMPRODUCT` full-DCF formula in every cell (`C125:G129`)**:
+- **Live horizon-independent `SUMPRODUCT` full-DCF formula in every cell (`C125:G129`)** — wrapped with `IF($B{row}<={col}${hdr},"NM",...)` so low-WACC / high-`g` corners where `WACC <= g` evaluate cleanly to `"NM"` instead of `#DIV/0!` or negative terminal values:
 
 ```excel
-=(SUMPRODUCT($C$86:$G$86/((1+$B125)^$C$87:$G$87))+(($G$86*(1+C$124)/($B125-C$124))/((1+$B125)^$G$87))+(-$C$15-$C$16-$C$17+$C$18+$C$19))/$C$13
+=IF($B125<=C$124,"NM",(SUMPRODUCT($C$86:$G$86/((1+$B125)^$C$87:$G$87))+(($G$86*(1+C$124)/($B125-C$124))/((1+$B125)^$G$87))+(-$C$15-$C$16-$C$17+$C$18+$C$19))/$C$13)
 ```
 
 - **Center-cell verification:** `DCF!E127` MUST equal `DCF!C108` to floating-point precision. Highlight `E127` with `#BDD7EE` fill + bold black font.
@@ -195,7 +195,7 @@ Aligned with `.agents/rules/financial-modeling.md` and `xlsx-author`:
 
 | Mistake | Why It Fails | Correct Pattern |
 |---|---|---|
-| Using `Net Debt / EV` in WACC | Produces negative debt weight for net-cash firms | Gross debt weights: `E/(E+D)` and `D/(E+D)` |
+| Using `Net Debt / EV` in WACC | Produces negative debt weight for net-cash firms | Gross capitalization weights: `E/(E+D+P)`, `D/(E+D+P)`, `P/(E+D+P)` |
 | Grouping RSUs with Options under a single strike check | Drops RSUs when Share Price `<` Option Strike | Separate `Unvested RSUs` (`$0` strike, always dilutive) from `Options Outstanding` |
 | Hardcoded selector mismatch (`$B$6` vs `$B$4`) or float `Case` | Scenario switcher breaks or `CHOOSE`/`INDEX` diverge | Lock named cell `Case` at `DCF!$B$4`, add `1..3` `DataValidation`, and wrap in `INT()` |
 | Discounting Mid-Year Perpetuity TV at `N` instead of `N - 0.5` | Introduces a half-year gap between Year `N` mid-year cash flow and Year `N+1` perpetuity stream | Discount Perpetuity TV at `(1 + WACC)^(N - 0.5)` (`^$G$87`) when explicit FCFs are mid-year |
@@ -204,5 +204,5 @@ Aligned with `.agents/rules/financial-modeling.md` and `xlsx-author`:
 | Deducting ASC 842 operating lease liabilities when FCF deducts rent | Double-counts lease obligations | Exclude ASC 842 operating lease liabilities from EV bridge unless rent is removed from OpEx |
 | Adding back SBC to Unlevered FCF | Overstates economic FCF | Treat SBC as real operating expense (or reconcile explicitly) |
 | Writing OpEx as `% of Gross Profit` or hardcoding `%` inside formulas | Breaks operating leverage and auditability | Model every OpEx line as `=Rev * Active_OpEx_%_Cell` |
-| Hardcoded `0.5..4.5` exponents or Excel What-If Data Tables in sensitivities | Breaks when extending horizon or re-exporting via LibreOffice | Use dynamic `SUMPRODUCT($C$86:$G$86/((1+$B125)^$C$87:$G$87))` formulas in all 25 grid cells |
+| Hardcoded `0.5..4.5` exponents, unguarded `WACC - g` division, or Excel What-If Data Tables in sensitivities | Breaks when extending horizon, produces `#DIV/0!` / negative TV when `WACC <= g`, or corrupts on LibreOffice re-export | Use dynamic `=IF($B125<=C$124,"NM", ... SUMPRODUCT($C$86:$G$86/((1+$B125)^$C$87:$G$87)) ...)` formulas in all 25 grid cells |
 | Inserting rows after writing formulas | Shifts references → `#REF!` or silent wrong-row links | Lock all section row constants before writing any formulas |

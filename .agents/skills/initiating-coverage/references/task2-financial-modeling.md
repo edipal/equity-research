@@ -108,8 +108,9 @@ Create structured **Bear / Base / Bull** parameter and output comparisons (linke
 Before handing off Task 2, run the LibreOffice recalculation & formula audit gate:
 
 ```bash
-python3 scripts/recalc_xlsx.py research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx 30
+python3 scripts/recalc_xlsx.py research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx 30 --in-place
 ```
+*(Or pass `--output <recalc.xlsx>` to write a recalculated copy without modifying the input file; default mode without flags is non-destructive `--check-only` and does not populate cached values on disk.)*
 
 - **Required result:** Exit code `0`, `"status": "success"`, `"total_errors": 0`, `"uncached_formulas": 0`.
 - If `"status": "errors_found"` or `"error"` (exit `1`), fix every error and re-run.

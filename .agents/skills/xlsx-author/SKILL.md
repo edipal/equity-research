@@ -54,17 +54,18 @@ wb.save(out_path)
 
 ## Mandatory Verification Step
 
-After saving the `.xlsx` file, always run:
+After saving a newly generated `.xlsx` file with `openpyxl`, always populate cached formula values via LibreOffice and scan for errors by running:
 
 ```bash
-python3 scripts/recalc_xlsx.py <path-to-workbook.xlsx> 30
+python3 scripts/recalc_xlsx.py <path-to-workbook.xlsx> 30 --in-place
 ```
 
+*(Because `recalc_xlsx.py` is **non-destructive by default** / `--check-only`, omitting `--in-place` or `--output <PATH>` leaves `openpyxl`-written files uncached on disk. Use `--in-place` for newly Python-generated `.xlsx` files, `--output <recalc.xlsx>` when preserving an existing workbook, and the default non-destructive mode / `--check-only` for read-only audits of untouched workbooks.)*
+
 This recalculates cached formula values via LibreOffice and scans every sheet for all 7 Excel errors (`#REF!`, `#DIV/0!`, `#VALUE!`, `#NAME?`, `#N/A`, `#NUM!`, `#NULL!`):
-- Exit `0` (`"status": "success"`): zero errors and verified formulas.
+- Exit `0` (`"status": "success"`): zero errors and verified formulas (`uncached_formulas: 0`).
 - Exit `1` (`"status": "errors_found"` / `"error"`): formula errors or load/LibreOffice failure — fix and re-run.
 - Exit `2` (`"status": "unverified"`): LibreOffice unavailable and workbook contains uncached formulas (install LibreOffice or pass `--allow-unrecalculated` only if explicitly accepted).
-- Use `--check-only` for read-only audits or `--output <PATH>` to write a recalculated copy without mutating the source file.
 
 Then apply the `audit-xls` checklist before presenting the workbook.
 

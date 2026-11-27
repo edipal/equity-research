@@ -73,4 +73,4 @@ For each shortlisted candidate (target **5–10 candidates**, from which `market
 
 Save as an internal draft under `research/screens/`:
 - **Primary screen memo:** `research/screens/YYYY-MM-DD_<screen-name>.md` — explicit universe, filter rules, data sources/dates, shortlist of 5–10 candidates (with `[NOT SCREENED — ANALYST IDEA]` tags where applicable), cross-idea comparison table, and prioritized research queue.
-- **Optional quantitative screen export:** `research/screens/YYYY-MM-DD_<screen-name>.xlsx` via `xlsx-author` with live screening formulas and verified via `scripts/recalc_xlsx.py`.
+- **Optional quantitative screen export:** `research/screens/YYYY-MM-DD_<screen-name>.xlsx` via `xlsx-author` with live screening formulas and recalculated via `scripts/recalc_xlsx.py <file.xlsx> 30 --in-place` (or `--output <recalc.xlsx>`).

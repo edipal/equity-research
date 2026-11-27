@@ -35,16 +35,28 @@ if _REPO_SCRIPTS_DIR is not None:
 
 _XLSX_SCAN_IMPORT_ERROR: Optional[str] = None
 try:
-    from xlsx_scan import (  # noqa: E402
-        EXCEL_ERRORS,
-        extract_formula_text as _extract_formula_text,
-        scan_workbook_formulas,
-    )
+    from xlsx_scan import scan_workbook_formulas  # noqa: E402
 except ModuleNotFoundError:
-    EXCEL_ERRORS = ()
-    _extract_formula_text = None  # type: ignore[assignment]
     scan_workbook_formulas = None  # type: ignore[assignment]
     _XLSX_SCAN_IMPORT_ERROR = _MISSING_XLSX_SCAN_MESSAGE
+
+
+def _missing_xlsx_scan_result(excel_path: str) -> dict:
+    """Build a structured ERROR validation payload when scripts/xlsx_scan.py is unavailable."""
+    from datetime import datetime
+
+    msg = _XLSX_SCAN_IMPORT_ERROR or _MISSING_XLSX_SCAN_MESSAGE
+    return {
+        'file': excel_path,
+        'validation_date': datetime.now().isoformat(),
+        'status': 'ERROR',
+        'error': msg,
+        'error_count': 1,
+        'warning_count': 0,
+        'errors': [msg],
+        'warnings': [],
+        'info': [],
+    }
 
 SENSITIVITY_VS_RE = re.compile(r'\bvs\.?\b')
 OF_EV_RE = re.compile(r'\bof\s+ev\b')
@@ -216,15 +228,6 @@ class DCFModelValidator:
         self.warnings: list[str] = []
         self.info: list[str] = []
 
-    def close(self) -> None:
-        """No-op cleanup retained for context-manager backwards compatibility."""
-
-    def __enter__(self) -> "DCFModelValidator":
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        self.close()
-
     def validate_all(self) -> dict:
         """
         Run all validation checks
@@ -235,19 +238,9 @@ class DCFModelValidator:
         from datetime import datetime
 
         if scan_workbook_formulas is None:
-            msg = _XLSX_SCAN_IMPORT_ERROR or _MISSING_XLSX_SCAN_MESSAGE
-            self.errors.append(msg)
-            return {
-                'file': self.excel_path,
-                'validation_date': datetime.now().isoformat(),
-                'status': 'ERROR',
-                'error': msg,
-                'error_count': len(self.errors),
-                'warning_count': len(self.warnings),
-                'errors': self.errors,
-                'warnings': self.warnings,
-                'info': self.info,
-            }
+            result = _missing_xlsx_scan_result(self.excel_path)
+            self.errors.append(result['error'])
+            return result
 
         self.check_sheet_structure()
         self.check_formula_errors()
@@ -296,28 +289,26 @@ class DCFModelValidator:
                 "Sensitivity analysis not found (expected inline on DCF sheet or on a Sensitivity sheet)"
             )
 
-    def check_formula_errors(self):
+    def check_formula_errors(self) -> None:
         """Check for Excel formula errors and uncached formulas in all worksheets using read_only=True."""
         if scan_workbook_formulas is None:
             self.errors.append(_XLSX_SCAN_IMPORT_ERROR or _MISSING_XLSX_SCAN_MESSAGE)
-            return {}, 0
+            return
 
         scan = scan_workbook_formulas(Path(self.excel_path))
-        error_details = {err: [] for err in EXCEL_ERRORS}
         total_errors = scan['total_errors']
         total_formulas = scan['total_formulas']
         uncached_formulas = scan['uncached_formulas']
 
         for err_tok, bucket in scan['error_summary'].items():
-            locs = bucket['locations']
-            error_details.setdefault(err_tok, []).extend(locs)
-            for location in locs:
+            for location in bucket['locations']:
                 self.errors.append(f"{err_tok} at {location}")
 
         if uncached_formulas > 0:
             self.errors.append(
                 f"Uncached formula values detected ({uncached_formulas} of {total_formulas} formula "
-                "cell(s) have no cached value). Recalculate workbook via scripts/recalc_xlsx.py first."
+                "cell(s) have no cached value). Recalculate workbook via "
+                "scripts/recalc_xlsx.py <file.xlsx> --in-place (or --output <recalc.xlsx>) first."
             )
 
         # Record summary metrics in self.info so self.errors holds only distinct errors
@@ -327,8 +318,6 @@ class DCFModelValidator:
             self.info.append("✓ No formula errors found")
         else:
             self.info.append(f"Total formula errors: {total_errors}")
-
-        return error_details, total_errors
 
     def check_dcf_logic(self):
         """Validate DCF-specific logic and calculations"""
@@ -342,8 +331,13 @@ class DCFModelValidator:
         row_map: dict[int, tuple[Any, str]],
         label_col: int,
         allow_zero: bool = False,
+        allow_negative: bool = False,
     ):
-        """Collect all rate values (0 < v < 1, or 0 <= v < 1) adjacent to a label cell."""
+        """Collect all rate values adjacent to a label cell.
+
+        Accepts 0 < v < 1 by default (WACC), 0 <= v < 1 when allow_zero=True,
+        and -1 < v < 1 when allow_negative=True (e.g., declining terminal growth).
+        """
         entries = []
         for offset in range(1, 6):
             adj = row_map.get(label_col + offset)
@@ -351,7 +345,12 @@ class DCFModelValidator:
                 continue
             val, coord = adj
             if _is_number(val):
-                in_range = (0 <= val < 1) if allow_zero else (0 < val < 1)
+                if allow_negative:
+                    in_range = -1 < val < 1
+                elif allow_zero:
+                    in_range = 0 <= val < 1
+                else:
+                    in_range = 0 < val < 1
                 if in_range:
                     entries.append((label_col + offset, float(val), f"{sheet_title}!{coord}"))
         return entries
@@ -387,11 +386,23 @@ class DCFModelValidator:
                 if not (val and isinstance(val, str)):
                     continue
                 if _is_terminal_growth_label(val):
-                    entries = self._collect_adjacent_rates(sheet_title, row_map, col_idx, allow_zero=True)
+                    entries = self._collect_adjacent_rates(
+                        sheet_title,
+                        row_map,
+                        col_idx,
+                        allow_zero=True,
+                        allow_negative=True,
+                    )
                     if entries:
                         tg_rows.append((row_idx, entries))
                 elif _is_wacc_label(val):
-                    entries = self._collect_adjacent_rates(sheet_title, row_map, col_idx, allow_zero=False)
+                    entries = self._collect_adjacent_rates(
+                        sheet_title,
+                        row_map,
+                        col_idx,
+                        allow_zero=False,
+                        allow_negative=False,
+                    )
                     if entries:
                         wacc_rows.append((row_idx, entries))
 
@@ -584,8 +595,8 @@ def validate_dcf_model(excel_path: str) -> dict:
     Returns:
         Dict with validation results
     """
-    with DCFModelValidator(excel_path) as validator:
-        return validator.validate_all()
+    validator = DCFModelValidator(excel_path)
+    return validator.validate_all()
 
 
 def main():
@@ -607,20 +618,7 @@ def main():
     output_file = sys.argv[2] if len(sys.argv) > 2 else None
 
     if scan_workbook_formulas is None:
-        from datetime import datetime
-
-        msg = _XLSX_SCAN_IMPORT_ERROR or _MISSING_XLSX_SCAN_MESSAGE
-        results = {
-            'file': excel_file,
-            'validation_date': datetime.now().isoformat(),
-            'status': 'ERROR',
-            'error': msg,
-            'errors': [msg],
-            'warnings': [],
-            'info': [],
-            'error_count': 1,
-            'warning_count': 0,
-        }
+        results = _missing_xlsx_scan_result(excel_file)
         print(json.dumps(results, indent=2))
         if output_file:
             with open(output_file, 'w', encoding='utf-8') as f:

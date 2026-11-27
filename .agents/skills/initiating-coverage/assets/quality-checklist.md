@@ -77,10 +77,10 @@ Verify all applicable items below before handing off a `DRAFT — FOR INTERNAL A
 - [ ] Optional tabs (only where disclosed/applicable): `Precedent Transactions` (cross-check)
 
 **Model QA Checks:**
-- [ ] `python3 scripts/recalc_xlsx.py <model.xlsx> 30` → `"status": "success"`, `0` errors, `0` uncached formulas
-- [ ] `python3 .agents/skills/dcf-model/scripts/validate_dcf.py <model.xlsx>` → `"status": "PASS"`
+- [ ] `python3 scripts/recalc_xlsx.py <model.xlsx> 30 --in-place` (or `--output <recalc.xlsx>`) → `"status": "success"`, `0` errors, `0` uncached formulas
+- [ ] `python3 .agents/skills/dcf-model/scripts/validate_dcf.py <recalc_model.xlsx>` → `"status": "PASS"`
 - [ ] Balance Sheet balances (`Assets - (Liabilities + Equity) = 0`) in every historical and projected period
-- [ ] Gross-debt WACC weights (`E/(E+D)` and `D/(E+D)`, `0%–100%`), mid-year explicit UFCF (`t - 0.5`) and mid-year perpetuity TV (`(1 + WACC)^(N - 0.5)`), strict end-of-year `(1 + WACC)^N` exit-multiple TV discounting, `g <= 3.5%` and `< WACC`
+- [ ] Gross-capitalization WACC weights (`E/(E+D+P)`, `D/(E+D+P)`, `P/(E+D+P)`, `0%–100%`, sum `= 100%`), mid-year explicit UFCF (`t - 0.5`) and mid-year perpetuity TV (`(1 + WACC)^(N - 0.5)`), strict end-of-year `(1 + WACC)^N` exit-multiple TV discounting, `g <= 3.5%` and `< WACC`
 - [ ] Complete equity bridge (Gross Debt, Preferred, NCI, Cash, Equity Investments; no ASC 842 operating lease double-counting), TSM diluted shares, SBC kept as real expense
 - [ ] Institutional styling per `.agents/rules/financial-modeling.md` (blue inputs with source comments, black formulas, green cross-sheet links, `#1F4E79` / `#D9E1F2` / `#F2F2F2` / `#BDD7EE` fill palette)
 

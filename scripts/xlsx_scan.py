@@ -48,7 +48,13 @@ def extract_formula_text(val_f) -> str | None:
 
 
 def detect_cell_error(cell_v, val_f) -> str | None:
-    """Return Excel error token for a cell without false-positiving on prose or quoted literals."""
+    """Return Excel error token for a cell without false-positiving on prose or quoted literals.
+
+    Checks cached error values first. When the cached result is not an error, only scans
+    stripped formula text for ``#REF!`` (a broken reference is always a static formula error,
+    whereas ``#N/A`` or other error tokens inside live branches such as
+    ``=IF(ISBLANK(B5),#N/A,B5)`` are valid when the evaluated cached value is non-error).
+    """
     val_v = cell_v.value if cell_v is not None else None
 
     # 1. Cached error value (openpyxl error data_type or exact Excel error token)
@@ -57,13 +63,12 @@ def detect_cell_error(cell_v, val_f) -> str | None:
     if isinstance(val_v, str) and val_v in EXCEL_ERRORS:
         return val_v
 
-    # 2. Embedded error token inside a formula string (ignoring double-quoted string literals)
+    # 2. Static broken reference (#REF!) inside formula text (ignoring double-quoted string literals)
     formula_text = extract_formula_text(val_f)
     if formula_text is not None:
         stripped_formula = STRING_LITERAL_RE.sub("", formula_text)
-        for err in EXCEL_ERRORS:
-            if err in stripped_formula:
-                return err
+        if "#REF!" in stripped_formula:
+            return "#REF!"
 
     return None
 
@@ -90,34 +95,31 @@ def _sheet_titles_by_xml_path(zf: zipfile.ZipFile) -> dict[str, str]:
     mapping: dict[str, str] = {}
     if "xl/workbook.xml" not in zf.namelist() or "xl/_rels/workbook.xml.rels" not in zf.namelist():
         return mapping
-    try:
-        rels_root = ET.fromstring(zf.read("xl/_rels/workbook.xml.rels"))
-        rel_targets: dict[str, str] = {}
-        for rel in rels_root:
-            if _local_tag(rel.tag) != "Relationship":
-                continue
-            rid = rel.attrib.get("Id")
-            target = rel.attrib.get("Target")
-            if rid and target:
-                norm = posixpath.normpath(posixpath.join("xl", target.lstrip("/")))
-                if target.startswith("/"):
-                    norm = target.lstrip("/")
-                rel_targets[rid] = norm
+    rels_root = ET.fromstring(zf.read("xl/_rels/workbook.xml.rels"))
+    rel_targets: dict[str, str] = {}
+    for rel in rels_root:
+        if _local_tag(rel.tag) != "Relationship":
+            continue
+        rid = rel.attrib.get("Id")
+        target = rel.attrib.get("Target")
+        if rid and target:
+            norm = posixpath.normpath(posixpath.join("xl", target.lstrip("/")))
+            if target.startswith("/"):
+                norm = target.lstrip("/")
+            rel_targets[rid] = norm
 
-        wb_root = ET.fromstring(zf.read("xl/workbook.xml"))
-        for elem in wb_root.iter():
-            if _local_tag(elem.tag) != "sheet":
-                continue
-            name = elem.attrib.get("name")
-            rid = None
-            for attr_k, attr_v in elem.attrib.items():
-                if _local_tag(attr_k) == "id":
-                    rid = attr_v
-                    break
-            if name and rid and rid in rel_targets:
-                mapping[rel_targets[rid]] = name
-    except (ET.ParseError, KeyError, zipfile.BadZipFile, OSError):
-        return mapping
+    wb_root = ET.fromstring(zf.read("xl/workbook.xml"))
+    for elem in wb_root.iter():
+        if _local_tag(elem.tag) != "sheet":
+            continue
+        name = elem.attrib.get("name")
+        rid = None
+        for attr_k, attr_v in elem.attrib.items():
+            if _local_tag(attr_k) == "id":
+                rid = attr_v
+                break
+        if name and rid and rid in rel_targets:
+            mapping[rel_targets[rid]] = name
     return mapping
 
 
@@ -126,12 +128,11 @@ def workbook_has_data_tables(xlsx_path: Path) -> list[str]:
 
     Uses streaming XML inspection inside the zip archive so it works in O(1) memory
     without invoking LibreOffice or loading full openpyxl worksheet DOMs.
+    Fails closed by raising WorkbookLoadError on corrupt archives or malformed XML.
     """
     if xlsx_path.suffix.lower() not in OOXML_ZIP_SUFFIXES:
         return []
     try:
-        if not zipfile.is_zipfile(xlsx_path):
-            return []
         locations: list[str] = []
         with zipfile.ZipFile(xlsx_path, "r") as zf:
             titles = _sheet_titles_by_xml_path(zf)
@@ -157,8 +158,10 @@ def workbook_has_data_tables(xlsx_path: Path) -> list[str]:
                                 current_cell_ref = None
                             elem.clear()
         return locations
-    except (zipfile.BadZipFile, ET.ParseError, KeyError, OSError):
-        return []
+    except (zipfile.BadZipFile, ET.ParseError, KeyError, OSError) as exc:
+        raise WorkbookLoadError(
+            f"Failed to inspect workbook '{xlsx_path}' for What-If data tables: {exc}"
+        ) from exc
 
 
 def scan_workbook_formulas(xlsx_path: Path) -> dict:

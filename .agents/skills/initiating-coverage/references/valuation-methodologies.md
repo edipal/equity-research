@@ -89,15 +89,17 @@ PV of TV        = Undiscounted TV / (1 + WACC)^N    (ALWAYS N, never N - 0.5)
 #### 6. Calculate Weighted Average Cost of Capital (WACC)
 
 ```
-Total Capitalization (V) = Market Value of Equity (E) + Total Gross Debt (D)
-Equity Weight            = E / (E + D)   [0%–100%]
-Debt Weight              = D / (E + D)   [0%–100%, NEVER negative]
-WACC                     = (E/V × Cost of Equity) + (D/V × Pre-Tax Cost of Debt × (1 - Marginal Tax Rate))
+Total Capitalization (V) = Market Value of Equity (E) + Total Gross Debt (D) + Preferred Stock (P)
+Equity Weight            = E / (E + D + P)   [0%–100%]
+Debt Weight              = D / (E + D + P)   [0%–100%, NEVER negative]
+Preferred Weight         = P / (E + D + P)   [0%–100%, NEVER negative]
+WACC                     = (E/V × Cost of Equity) + (D/V × Pre-Tax Cost of Debt × (1 - Marginal Tax Rate)) + (P/V × Cost of Preferred)
 ```
 
 - **Cost of Equity (CAPM):** `Rf (10Y US Treasury) + Beta (5Y monthly) × ERP (5.0%–6.0%)`.
 - **Cost of Debt:** Bond YTM or `Rf + Credit Spread`; multiply by `(1 - Marginal Tax Rate)`.
-- **Gross Debt Basis:** Always use gross debt (`D >= 0`), NEVER `Net Debt / EV` (which creates negative debt weights for net-cash companies). See `dcf-model` (`references/wacc-and-valuation-bridge.md`).
+- **Cost of Preferred (`Kp`):** Preferred dividend yield (non-tax-deductible; `0.0%` if `P = $0M`).
+- **Gross Capitalization Basis & NCI:** Always use gross debt (`D >= 0`) and preferred (`P >= 0`), NEVER `Net Debt / EV` (which creates negative debt weights for net-cash companies). Exclude NCI from parent WACC (100% consolidated UFCFs are discounted at consolidated WACC, and NCI is deducted at market/fair value in the equity bridge). See `dcf-model` (`references/wacc-and-valuation-bridge.md`).
 
 #### 7. Discount Cash Flows to Present Value
 

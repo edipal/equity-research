@@ -38,7 +38,7 @@ Step-by-step instructions for executing Task 5 (Report Assembly) of the `initiat
 ## Programmatic Assembly Workflow (`python-docx` + `openpyxl`)
 
 ### Step 1: Verify & Load Inputs
-1. Run `python3 scripts/recalc_xlsx.py research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx --check-only` to verify zero formula errors and zero uncached values before reading `openpyxl.load_workbook(..., data_only=True)`.
+1. Run `python3 scripts/recalc_xlsx.py research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx` (non-destructive default / `--check-only`) to verify zero formula errors and zero uncached values on the Task 3 recalculated workbook before reading `openpyxl.load_workbook(..., data_only=True)` (if any `openpyxl` edit was made since Task 3, first repopulate cached values with `--in-place` or `--output <recalc.xlsx>`).
 2. Read Task 1 and Task 3 markdown files with `Path.read_text(encoding="utf-8")`.
 3. Parse `research/companies/<TICKER>/reports/charts/chart_index.txt` to map every generated PNG (and confirm any disclosure-driven omissions).
 

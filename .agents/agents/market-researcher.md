@@ -28,7 +28,7 @@ Given a sector, sub-industry, or investment theme and an analytical angle, deliv
 1. **Scope the ask**: Confirm sector/theme, geographic/market-cap boundaries, analytical angle, and the 8–15 public names defining the space (in subagent mode, apply caller scope + documented `[ASSUMPTION]` defaults).
 2. **Write the sector overview**: Load `sector-overview` to establish sizing, structure, value chain, and key drivers.
 3. **Map the competitive landscape**: Load `competitive-analysis` to structure competitor deep-dives, positioning matrices, and moat comparisons.
-4. **Spread the peer group**: Pull peer financials and multiples via connected MCPs, SEC EDGAR, or verified market sources, and execute `comps-analysis` + `xlsx-author`. Verify formulas with `python3 scripts/recalc_xlsx.py <file.xlsx> 30` and `audit-xls` (`--check-only`).
+4. **Spread the peer group**: Pull peer financials and multiples via connected MCPs, SEC EDGAR, or verified market sources, and execute `comps-analysis` + `xlsx-author`. Recalculate the newly generated `.xlsx` with `python3 scripts/recalc_xlsx.py <file.xlsx> 30 --in-place` (or `--output <recalc.xlsx>`) and run the `audit-xls` checklist (default non-destructive `recalc_xlsx.py` / `--check-only` on untouched workbooks).
 5. **Surface investment ideas**: Run `idea-generation` to screen `5–10` candidates, then narrow to the `3–5` highest-conviction ideas backed by landscape positioning and comps dispersion.
 6. **Assemble & checkpoint**: Save clean Markdown reports and verified `.xlsx` comps (plus `.pptx` via `pptx-author` if requested). Stop for human analyst review after the comps spread and after the draft primer when running interactively; surface all assumptions and audit outputs in the handoff when running as a subagent.
 

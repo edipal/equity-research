@@ -83,7 +83,7 @@ Recalculate valuation with updated estimates:
 
 ### Step 6: Output
 
-- Updated Excel model: `research/companies/<TICKER>/models/<TICKER>_Model_YYYY-MM-DD.xlsx` (use `python3 scripts/recalc_xlsx.py <file.xlsx> --check-only` when auditing an **existing** coverage/user workbook so Excel-only features like charts, What-If data tables, and VBA remain untouched; run default in-place `python3 scripts/recalc_xlsx.py <file.xlsx> 30` or `--output <new.xlsx>` only on newly Python-generated `.xlsx` models; plus `python3 .agents/skills/dcf-model/scripts/validate_dcf.py <file.xlsx>` whenever a `DCF` tab is present)
+- Updated Excel model: save the `openpyxl`-updated copy to a new versioned file `research/companies/<TICKER>/models/<TICKER>_Model_YYYY-MM-DD.xlsx` and run `python3 scripts/recalc_xlsx.py <updated.xlsx> 30 --output <updated_recalc.xlsx>` (or `--in-place` on the newly written copy if no What-If data tables/Excel-only features need preservation) so LibreOffice populates cached formula values on disk. Then run `python3 .agents/skills/dcf-model/scripts/validate_dcf.py <recalc.xlsx>` whenever a `DCF` tab is present, and read all note/summary metrics strictly from **that recalculated file**. *(For read-only audits of untouched existing workbooks without `openpyxl` edits, use the default non-destructive `python3 scripts/recalc_xlsx.py <file.xlsx>` / `--check-only`.)*
 - Estimate change summary & updated price target derivation (`DRAFT — FOR INTERNAL ANALYST REVIEW ONLY`): `research/companies/<TICKER>/notes/<TICKER>_Model_Update_YYYY-MM-DD.md` (markdown or Word)
 
 ## Important Notes

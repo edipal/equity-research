@@ -11,7 +11,7 @@ Clean messy data in a target `.xlsx`/`.csv` file and sheet (or a specified Googl
 
 ## Environment
 
-- **Standalone `.xlsx` / `.csv` files (default in Antigravity):** Use Python (`openpyxl` / `pandas`) to inspect and write formula-based helper columns or cleaned sheets, then verify with `python3 scripts/recalc_xlsx.py <file.xlsx> --check-only` (read-only) or `--output <cleaned.xlsx>` (non-destructive). Confirm exit `0` (`"status": "success"`); if exit `2` (`"status": "unverified"`, LibreOffice absent), disclose clearly or pass `--allow-unrecalculated` only with user approval.
+- **Standalone `.xlsx` / `.csv` files (default in Antigravity):** Use Python (`openpyxl` / `pandas`) to inspect and write formula-based helper columns or cleaned sheets to a new versioned file, then recalculate cached formula values with `python3 scripts/recalc_xlsx.py <cleaned.xlsx> 30 --output <cleaned_recalc.xlsx>` (or `--in-place` on the newly written copy). For read-only audits of untouched input files, use `python3 scripts/recalc_xlsx.py <file.xlsx>` (non-destructive default / `--check-only`). Confirm exit `0` (`"status": "success"`); if exit `2` (`"status": "unverified"`, LibreOffice absent), disclose clearly or pass `--allow-unrecalculated` only with user approval.
 - **Google Sheets (when `gsheets` plugin is connected):** Export/read sheet ranges, inspect data quality, and write cleaned helper formulas cleanly.
 
 ## Workflow
