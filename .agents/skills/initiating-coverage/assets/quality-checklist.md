@@ -1,252 +1,94 @@
-# Quality Control Checklist for Initiation Reports
+<!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/equity-research/skills/initiating-coverage/assets/quality-checklist.md), Apache-2.0; modified for Google Antigravity. -->
 
-Before delivering an initiation report, verify all items below are complete.
+# Quality Control Checklist for Initiation Report Drafts
 
-## Critical Minimums - Reports Must Meet These
+Verify all applicable items below before handing off a `DRAFT — FOR INTERNAL ANALYST REVIEW ONLY` initiation report package.
 
-**CRITICAL DO NOT DELIVER IF:**
-- ❌ DOCX report fewer than 30 pages → INCOMPLETE
-- ❌ Fewer than 25 embedded charts → INCOMPLETE
-- ❌ Fewer than 12 comprehensive tables → INCOMPLETE
-- ❌ Fewer than 10,000 words → INCOMPLETE
-- ❌ No XLS financial model → MISSING DELIVERABLE
-- ❌ Charts are text descriptions, not actual PNG/JPG files → MAJOR FAILURE
+> **No-Fabrication Rule:** Target counts below (pages, charts, tables, rows, words) are **target ranges where disclosed in primary filings**. NEVER fabricate segments, geographies, cohorts, precedent deals, or analyst credentials to hit a numerical target. Document any primary-filing disclosure gaps explicitly and tag analyst estimates `[ASSUMPTION]` and unverified items `[UNSOURCED]`.
 
-## Deliverables Checklist
+---
 
-- [ ] DOCX report file created
-- [ ] XLS financial model file created
-- [ ] Both files named and located properly: `research/companies/<TICKER>/reports/<TICKER>_Initiation_Report_<Date>.docx` and `research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx`
+## 1. Compliance, Draft Status & Integrity Checks (MANDATORY)
 
-## DOCX Report - Length & Content
+- [ ] Report prominently labeled **`DRAFT — FOR INTERNAL ANALYST REVIEW ONLY (NOT INVESTMENT ADVICE)`** on Page 1 and in footer
+- [ ] **Page 1 header reads `INITIATING COVERAGE`** (NOT `"Company Update"` or `"Investment Update"`)
+- [ ] **No fabricated analyst identities:** Uses `[ANALYST NAME — REVIEW REQUIRED]` and `[DATE]` placeholders (no invented names, CFA/Ph.D. credentials, emails, phone numbers, or firm names)
+- [ ] **Disclosures & Important Disclaimers appendix included** (draft notice, not investment advice, `[ASSUMPTION]`/`[UNSOURCED]` notice, analyst review sign-off block)
+- [ ] **GAAP vs. Non-GAAP clearly separated** and reconciled wherever both appear
+- [ ] **Timeliness verified:** Latest reported 10-K/10-Q quarter, fiscal year-end month, and share price as-of date explicitly stated
+- [ ] **Balanced objectivity:** Bull, Base, and Bear cases + disconfirming evidence and risks honestly presented
 
-**Length Verification:**
-- [ ] Report is 30-50 pages (count pages in final document)
-- [ ] Word count is 10,000-15,000 words
-- [ ] If under 30 pages: STOP and add more content
+---
 
-**Visual Elements:**
-- [ ] 25-35 charts embedded (count them: _____ charts)
-- [ ] All charts are actual PNG/JPG image files (NOT text descriptions)
-- [ ] 12-20 comprehensive tables included (count them: _____ tables)
-- [ ] Charts and tables interspersed throughout, not grouped at end
+## 2. Deliverables & File Paths
 
-**Chart Requirements:**
-- [ ] Revenue by product chart: Stacked Area format ✓
-- [ ] Revenue by geography chart: Stacked Bar format ✓
-- [ ] DCF sensitivity: 2-way Heat Map with color coding ✓
-- [ ] Valuation football field: Horizontal bar chart ✓
-- [ ] All other charts are actual image files ✓
+- [ ] DOCX draft report: `research/companies/<TICKER>/reports/<TICKER>_Initiation_Report_<Date>.docx`
+- [ ] Excel model (Task 2 + Task 3 tabs): `research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx`
+- [ ] Charts directory: `research/companies/<TICKER>/reports/charts/` (300 DPI PNGs + `chart_index.txt`)
+- [ ] `scripts/recalc_xlsx.py` passed with exit `0` (`"status": "success"`, `0` formula errors, `0` uncached formulas)
+- [ ] `.agents/skills/dcf-model/scripts/validate_dcf.py` passed with exit `0` (`"status": "PASS"`)
 
-**Table Requirements:**
-- [ ] Full Income Statement (40-50 rows) with 5 years historical + 5 years projected
-- [ ] Full Cash Flow Statement (30-40 rows)
-- [ ] Full Balance Sheet (35-45 rows)
-- [ ] Revenue by product table (20-30 rows)
-- [ ] Revenue by geography table (15-20 rows)
-- [ ] Revenue by channel table (10-15 rows)
-- [ ] Comparable companies table with statistical summary (max/75th/median/25th/min)
-- [ ] DCF calculation table (30-40 rows)
-- [ ] WACC calculation table (8-10 rows)
-- [ ] Two sensitivity tables
-- [ ] 2-3 additional financial/competitive tables
+---
 
-## DOCX Report - Structure
+## 3. DOCX Report — Content, Length & Visual Density
 
-**Page 1 Requirements:**
-- [ ] "INITIATING COVERAGE" header present (NOT "Company Update")
-- [ ] Thesis-focused title (NOT event-driven like "Strong Q4 Results")
-- [ ] Rating box with rating, price, target price, 52-week range, market cap, EV
-- [ ] 3-4 paragraph-length bullets with ■ character and bold headers
-- [ ] Financial & valuation metrics table with 2-3 years historical, 2 years projected
-- [ ] Table shows "A" suffix for actuals, "E" suffix for estimates
-- [ ] Source lines on all visuals
+**Target Length & Density (adjust proportionally to primary-filing complexity — never pad or fabricate):**
+- [ ] Target length: ~30–50 pages (verified via LibreOffice PDF export + `pypdf` page count: `_____` pages)
+- [ ] Target word count: ~10,000–15,000 words (`_____` words)
+- [ ] Target charts: ~20–30+ embedded 300 DPI PNG images (`_____` charts; NO text-only chart placeholders)
+- [ ] Target tables: ~12–20 structured tables (`_____` tables)
+- [ ] Charts sized `<= 6.0"` wide (fitting within standard margins) and interspersed with text (no orphaned headers or chart-dump pages)
 
-**Content Sections:**
+**Core Visuals (verify all that are supported by primary disclosures):**
+- [ ] Figure 1: Stock price performance chart on Page 1
+- [ ] Revenue by product/segment (stacked area) — *where multiple products/segments are disclosed in 10-K/10-Q*
+- [ ] Revenue by geography (stacked bar) — *where geographic breakdown is disclosed in 10-K/10-Q*
+- [ ] DCF sensitivity 2-way heatmap (formatted with float annotations, e.g., `$XX.XX`, centered on Base WACC & `g`)
+- [ ] Valuation football field horizontal bar chart (showing current price & target price)
+
+**Page 1 & Structure Checks:**
+- [ ] Standardized rating scale (`Buy / Hold / Sell`) with explicit upside/downside thresholds
+- [ ] Rating box: Rating, Price (as-of date), 12M Price Target, Upside/Downside `%`, 52-week range, Market Cap, EV
+- [ ] 3–4 quantified `■` bullets with bold headers
+- [ ] Financial summary table with `A` (actual) and `E` (estimate) suffixes matching the company's fiscal calendar
 - [ ] Table of Contents (Page 2)
-- [ ] Investment Thesis & Risks (3-5 pages)
-- [ ] Company Overview (6-12 pages) including:
-  - [ ] Company description
-  - [ ] History and milestones
-  - [ ] Management bios (300-400 words EACH for 3-4 executives)
-  - [ ] Products/services detail
-  - [ ] Competitive landscape
-- [ ] Financial Analysis & Projections (10-15 pages)
-- [ ] Valuation Analysis (8-12 pages)
-- [ ] Assumptions section (2,000-3,000 words documenting ALL projection assumptions)
-- [ ] Scenario Analysis (1,500-2,000 words with Bull/Base/Bear parameters)
-- [ ] Appendices including Data Sources & References page
+- [ ] Investment Thesis & Risks (8–12 distinct risks across 4 categories)
+- [ ] Company 101 (overview, history, 3–4 executive bios from DEF 14A, products, GTM, industry, 5–10 peers where applicable)
+- [ ] Financial Analysis, Projection Assumptions (product/geography/margin/OpEx/CapEx/NWC), and Bear/Base/Bull Scenarios
+- [ ] Valuation Analysis (DCF, Comps with statistical summary, Precedents cross-check if applicable, Reconciliation, Catalysts & Risks)
+- [ ] Appendices: Extended model tables, Data Sources & References, and Disclosures & Important Disclaimers
 
-## DOCX Report - Formatting
+---
 
-**Figure & Table Formatting:**
-- [ ] Every figure has caption above: "Figure X - [Company] [Descriptive Title]"
-- [ ] Every figure has source line below: "Source: [Specific sources with dates]"
-- [ ] Sequential figure numbering (Figure 1, 2, 3... no gaps)
-- [ ] Every table has header row with shading
-- [ ] Every table has source line at bottom
-- [ ] All years use "A" for actual, "E" for estimate notation
+## 4. Citations & Hyperlinks
 
-**Professional Formatting:**
-- [ ] Consistent font throughout (Calibri, unless user specifies otherwise)
-- [ ] Headers and footers with page numbers
-- [ ] Dense layout: 60-80% page coverage, minimal white space
-- [ ] Every page has both text AND visuals (charts or tables)
-- [ ] Professional business report template used
+- [ ] Every figure and table has a specific source line (filing name + date, not generic `"Company data"`)
+- [ ] All public URLs (SEC EDGAR, IR press releases, transcripts) are clickable hyperlinks in `.docx` (no bare raw URLs pasted in prose)
+- [ ] Subscription sources (FactSet, Bloomberg, S&P Capital IQ) explicitly noted as `(subscription required)`
+- [ ] Data Sources & References appendix lists all sources by category with dates
 
-## Citations & Sources ⭐⭐⭐ CRITICAL
+---
 
-**Source Attribution:**
-- [ ] Every figure has specific source with document name and date
-- [ ] Every table has specific source with document reference
-- [ ] Key statistics throughout text have footnotes with sources
-- [ ] NOT just generic "Company data" - must be specific
+## 5. Excel Financial Model — Structure & Integrity
 
-**Hyperlinks:** ⭐⭐⭐ MANDATORY
-- [ ] ALL URLs are CLICKABLE HYPERLINKS (not plain text)
-- [ ] SEC filings hyperlinked to EDGAR viewer
-- [ ] Earnings transcripts hyperlinked (Seeking Alpha or company IR)
-- [ ] Press releases hyperlinked to company IR page
-- [ ] Presentations hyperlinked to PDF URLs
-- [ ] Industry reports hyperlinked (if publicly available)
-- [ ] Subscription data (Bloomberg, FactSet) noted as "(subscription required)"
-- [ ] No raw URLs displayed anywhere - all formatted as hyperlinks
-- [ ] Test 3-5 sample hyperlinks to ensure they work (Ctrl+Click)
+**Canonical Tab Architecture (9 core tabs + optional tabs):**
+- [ ] Task 2 operating tabs: `Revenue Model`, `Income Statement`, `Cash Flow Statement`, `Balance Sheet`, `Scenarios`
+- [ ] Task 3 valuation tabs: `WACC`, `DCF` *(inline 5×5 sensitivity table per `dcf-model`, or optional `Sensitivity` tab)*, `Comparable Companies`, `Valuation Summary`
+- [ ] Optional tabs (only where disclosed/applicable): `Precedent Transactions` (cross-check)
 
-**Reference Page:**
-- [ ] "Data Sources & References" page at end of report
-- [ ] Lists ALL sources used in report
-- [ ] Sources organized by category (SEC Filings, Earnings Transcripts, etc.)
-- [ ] Every source has date
-- [ ] Every source has clickable hyperlink (where applicable)
+**Model QA Checks:**
+- [ ] `python3 scripts/recalc_xlsx.py <model.xlsx> 30` → `"status": "success"`, `0` errors, `0` uncached formulas
+- [ ] `python3 .agents/skills/dcf-model/scripts/validate_dcf.py <model.xlsx>` → `"status": "PASS"`
+- [ ] Balance Sheet balances (`Assets - (Liabilities + Equity) = 0`) in every historical and projected period
+- [ ] Gross-debt WACC weights (`E/(E+D)` and `D/(E+D)`, `0%–100%`), mid-year explicit UFCF, end-of-year `(1+WACC)^N` terminal value discounting, `g <= 3.5%` and `< WACC`
+- [ ] Complete equity bridge (Gross Debt, Preferred, NCI, Cash, Equity Investments; no ASC 842 operating lease double-counting), TSM diluted shares, SBC kept as real expense
+- [ ] Institutional styling per `.agents/rules/financial-modeling.md` (blue inputs with source comments, black formulas, green cross-sheet links, `#1F4E79` / `#D9E1F2` / `#F2F2F2` / `#BDD7EE` fill palette)
 
-## XLS Financial Model - Structure
+---
 
-**File Structure:**
-- [ ] 10 core tabs in Excel workbook (6 Task 2 model tabs + 4 Task 3 valuation tabs)
-- [ ] Core tabs include: Revenue Model, Income Statement, Cash Flow Statement, Balance Sheet, Scenarios, DCF Inputs, DCF, Sensitivity Analysis, Comparable Companies, Valuation Summary
-- [ ] Optional additions (when applicable): Executive Summary, Assumptions, Historical Financials, Operating Expenses, Supporting Schedules, Precedent Transactions, Charts
+## 6. Cross-File Consistency & Writing Quality
 
-**Formatting:**
-- [ ] Blue text for hardcoded inputs
-- [ ] Black text for formulas
-- [ ] Green text for links to other sheets
-- [ ] Professional formatting with borders and shading
-- [ ] Clear section headers and labels
-
-**Model Functionality:**
-- [ ] All numbers flow (change assumption → entire model updates)
-- [ ] DCF links to assumptions and projections
-- [ ] No circular references or errors
-- [ ] All important cells/ranges are named
-- [ ] Sensitivity tables work dynamically
-
-## XLS Financial Model - Content
-
-**Projections:**
-- [ ] 3-5 years historical data
-- [ ] 5 years forward projections (FY+1 through FY+5)
-- [ ] Revenue broken down by product, geography, channel
-- [ ] Full P&L with 40-50 line items
-- [ ] Full cash flow with 30-40 line items
-- [ ] Full balance sheet with 35-45 line items
-
-**Valuation:**
-- [ ] Complete DCF model with all calculations shown
-- [ ] WACC calculation with all components
-- [ ] Terminal value calculation
-- [ ] Comparable companies analysis (5-10 companies)
-- [ ] Precedent transactions analysis (5-10 deals)
-- [ ] Scenario analysis (Bull/Base/Bear)
-- [ ] Two sensitivity tables
-
-## Cross-File Consistency
-
-**CRITICAL**: Numbers must match EXACTLY between DOCX and XLS
-
-- [ ] Revenue numbers match across both files
-- [ ] EPS numbers match across both files
-- [ ] Margin percentages match across both files
-- [ ] Valuation numbers match across both files
-- [ ] Price target matches across both files
-- [ ] All projected years match across both files
-
-**Verification Method**: Spot check 10-15 key numbers between DOCX report and XLS model.
-
-## Content Quality
-
-**Investment Thesis:**
-- [ ] 3-5 clear thesis pillars
-- [ ] Each pillar supported with specific data and quantification
-- [ ] Financial impact quantified for each pillar
-- [ ] Catalysts identified with timelines
-
-**Analysis Depth:**
-- [ ] Comprehensive business model analysis
-- [ ] Detailed competitive assessment
-- [ ] 3-5 year financial trends analyzed
-- [ ] 8-12 risks identified and quantified
-- [ ] Management team analyzed (300-400 words per executive)
-
-**Assumptions:**
-- [ ] 2,000-3,000 words documenting ALL assumptions
-- [ ] Revenue growth assumptions by category/geography
-- [ ] Margin assumptions with bridge showing drivers
-- [ ] Working capital assumptions
-- [ ] CapEx assumptions
-- [ ] Each assumption has specific quantification
-
-**Scenarios:**
-- [ ] 1,500-2,000 words on scenario analysis
-- [ ] Bull case with specific parameters and catalysts
-- [ ] Base case with detailed rationale
-- [ ] Bear case with specific triggers
-- [ ] Probability assessments for each scenario
-
-## Writing Quality
-
-**Style:**
-- [ ] Lead with numbers ("Revenue grew 15% to $1.2B" not "Strong revenue")
-- [ ] Use "vs." not "versus"
-- [ ] Be direct and concise
-- [ ] Professional institutional tone throughout
-- [ ] No informal language
-
-**Accuracy:**
-- [ ] No typos in ticker symbol
-- [ ] No typos in company name
-- [ ] All dates accurate
-- [ ] All calculations verified
-- [ ] Charts match text descriptions
-- [ ] All numbers properly formatted ($ signs, % signs, commas)
-
-## Pre-Delivery Final Check
-
-Run through this quick final review:
-
-1. **Deliverables**: Both DOCX and XLS files created ✓
-2. **Length**: DOCX is 30-50 pages ✓
-3. **Charts**: 25-35 actual PNG/JPG files embedded ✓
-4. **Tables**: 12-20 comprehensive tables included ✓
-5. **Words**: 10,000-15,000 words ✓
-6. **Hyperlinks**: Test 3-5 hyperlinks - all work ✓
-7. **Cross-check**: Spot check 10 numbers match between DOCX and XLS ✓
-8. **Page 1**: "INITIATING COVERAGE" header present ✓
-
-If ANY item fails, DO NOT DELIVER. Go back and fix.
-
-## Actual Count Verification
-
-**Before delivery, fill in actual counts:**
-
-DOCX Report:
-- Page count: _____ pages (MUST BE 30-50)
-- Chart count: _____ charts (MUST BE 25-35)
-- Table count: _____ tables (MUST BE 12-20)
-- Word count: _____ words (MUST BE 10,000-15,000)
-
-XLS Model:
-- Tab count: _____ tabs (MUST BE 10+ core tabs: 6 Task 2 + 4 Task 3; supporting tabs optional)
-- Model years: _____ historical + _____ projected
-
-If any count is below minimum, STOP and add content before delivery.
+- [ ] Spot-check 10–15 key metrics between `.docx` and `.xlsx` (Revenue, EBITDA, Margins, Diluted EPS, WACC, DCF Price, Comps Price, Price Target, Rating) — exact match
+- [ ] Lead with numbers (`"Revenue grew 15% YoY to $1.2B"` vs. vague adjectives); use `"vs."` not `"versus"`
+- [ ] Zero visible markdown syntax (`#`, `**`, backticks) in `.docx`; Calibri font, headers/footers, and page numbers verified in rendered PDF
+- [ ] All disclosure omissions documented cleanly in `chart_index.txt` / model notes rather than fabricated

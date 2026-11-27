@@ -1,19 +1,70 @@
 Equity Research AI Harness (Google Antigravity)
+Copyright 2026 edipal contributors
 
 This repository includes skills, workflows, and agent patterns extracted and
 adapted from Anthropic's `financial-services` repository:
   https://github.com/anthropics/financial-services
+  Pinned upstream commit: 3e32c22
   Licensed under the Apache License, Version 2.0.
 
-Summary of modifications for Google Antigravity:
-- Reorganized skills into Google Antigravity's native `.agents/skills/<name>/SKILL.md`
-  layout (auto-discovered and invocable as `/<name>` slash commands).
-- Added Antigravity workspace root guidance (`AGENTS.md`), modular rules
-  (`.agents/rules/*.md` with `always_on`, `model_decision`, and `glob` triggers),
-  and custom agents (`.agents/agents/*.md`).
-- Adapted tool and authoring instructions from Claude/Office JS/Cowork conventions
-  to Antigravity's native Python (`openpyxl`, `python-docx`, `python-pptx`,
-  `matplotlib`) workflow and added `scripts/recalc_xlsx.py` and
-  `scripts/validate_harness.py`.
-- Added opt-in institutional MCP template (`config/mcp_config.example.json`) and
-  open-access data guidance (`docs/data-sources.md`).
+Per Apache-2.0 Section 4(b), derived Markdown and Python files carry prominent
+modification notices referencing their upstream path at commit 3e32c22.
+
+1. Derived Components (adapted from anthropics/financial-services@3e32c22):
+   - Skills under `.agents/skills/` (18 skills, including reference guides,
+     report templates, checklists, and `.agents/skills/dcf-model/scripts/validate_dcf.py`)
+   - Three adapted custom agents under `.agents/agents/`:
+     * `earnings-reviewer.md` (from `managed-agent-cookbooks/earnings-reviewer/agent.yaml`)
+     * `market-researcher.md` (from `managed-agent-cookbooks/market-researcher/agent.yaml`)
+     * `model-builder.md` (from `managed-agent-cookbooks/model-builder/agent.yaml`)
+
+2. Original / Newly Authored Components (independent Apache-2.0 contributions):
+   - Custom lead agent: `.agents/agents/equity-analyst.md`
+   - Workspace root guidance & modular Antigravity rules: `AGENTS.md`,
+     `.agents/rules/research-integrity.md`, `.agents/rules/financial-modeling.md`,
+     `.agents/rules/research-outputs.md`
+   - Automation, validation, skeleton generator & regression test suite:
+     * `scripts/recalc_xlsx.py`
+     * `scripts/validate_harness.py`
+     * `.agents/skills/dcf-model/scripts/build_dcf_skeleton.py`
+     * `tests/test_scripts.py`
+   - Documentation & opt-in connector templates: `README.md`,
+     `docs/data-sources.md`, `config/mcp_config.example.json`, `research/README.md`
+
+3. Summary of Substantive Modifications for Google Antigravity:
+   - Antigravity Schema & Orchestration: Reorganized skills into native
+     `.agents/skills/<name>/SKILL.md` (auto-discovered + `/<name>` slash commands),
+     added trigger-scoped rules (`always_on`, `model_decision`, `glob`), fixed
+     single-revision post-earnings agent order, restored interactive/subagent
+     human review checkpoints, and sharpened overlapping skill descriptions.
+   - DCF & Valuation Methodology Fixes: Replaced `Net Debt / EV` WACC weights
+     with gross-debt market weights `E/(E+D)` and `D/(E+D)`, unified the canonical
+     2-sheet `DCF` + `WACC` layout (`Case` at `DCF!B4`, vertically stacked
+     Bear/Base/Bull blocks + `INDEX` consolidation, live centered 5x5 sensitivity
+     formulas matching `build_dcf_skeleton.py`), enforced mid-year explicit UFCF
+     and end-of-year `(1 + WACC)^N` exit-multiple/perpetuity TV discounting,
+     capped terminal growth to `<= 3.5%` / long-term nominal GDP, completed the
+     EV-to-equity bridge with ASC 842 operating lease double-counting warnings,
+     required TSM/if-converted diluted shares and SBC expense treatment, and
+     fixed worked-example arithmetic and precedent-transaction weighting in
+     `initiating-coverage`.
+   - 3-Statement & GAAP Accounting Fixes: Added scratch-build support alongside
+     template completion, GAAP ASC 740 NOL/DTA accounting, complete equity
+     roll-forwards (SBC/APIC, Treasury Stock/buybacks, AOCI), revolver minimum-cash
+     sweep, explicit SBC/D&A functional OpEx double-counting prevention, and
+     Python/`openpyxl` iterative/non-circular handling.
+   - Comps & Unit Economics Fixes: Enforced full EV formula, NTM calendarization,
+     `IFERROR(..., "NM")` denominator guards, corrected decimal PEG scaling,
+     replaced impossible illustrative benchmark margins, adapted `unit-economics`
+     for public equities with lagged CAC, explicit GRR/NDR/payback/Rule of 40
+     alignment, and a 5-tab `.xlsx` architecture.
+   - Research Integrity, Drafts-Only & Consensus Guardrails: Enforced drafts-only
+     labeling (`DRAFT — FOR INTERNAL ANALYST REVIEW ONLY`), mandatory Disclosures
+     appendix, non-fabricated analyst review placeholders, no-fabrication target
+     ranges, strict pre-print consensus source hierarchy (prohibiting post-print
+     Yahoo Finance and unverified whisper numbers), explicit in-line thresholds,
+     and `[ASSUMPTION]` / `[UNSOURCED]` / `[NOT SCREENED — ANALYST IDEA]` tags.
+   - Python Programmatic Authoring & QA Tooling: Replaced Claude/Office JS/Cowork
+     GUI flows with Python (`openpyxl`, `python-docx`, `python-pptx`, `matplotlib`,
+     `seaborn`, `pypdf`), LibreOffice recalculation/audit (`recalc_xlsx.py` with
+     `--check-only`, `--output`, and `unverified` exit 2), and CI regression tests.

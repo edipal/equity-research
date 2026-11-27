@@ -3,14 +3,20 @@ name: audit-xls
 description: Audit a spreadsheet workbook for formula accuracy, errors, and common mistakes. Scopes to a specified cell range, a single named sheet, or the entire model (including financial-model integrity checks like BS balance, cash tie-out, and logic sanity). Triggers on "audit this sheet", "check my formulas", "find formula errors", "QA this spreadsheet", "sanity check this", "debug model", "model check", "model won't balance", "something's off in my model", "model review".
 ---
 
+<!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/financial-analysis/skills/audit-xls/SKILL.md), Apache-2.0; modified for Google Antigravity. -->
+
 # Audit Spreadsheet
 
 Audit formulas and data in `.xlsx` workbooks (or exported Google Sheets) for accuracy and mistakes. Scope determines depth — from quick formula checks on a target range up to full financial-model integrity audits.
 
-## Execution in Antigravity
+## Execution in Antigravity (Read-Only by Default)
 
-1. Run `python3 scripts/recalc_xlsx.py <path-to-workbook.xlsx>` first to recalculate cached values via LibreOffice (when installed) and flag formula errors or uncached formula cells.
-2. Inspect formulas (`data_only=False`) and cached values (`data_only=True`) programmatically with Python (`openpyxl`) across the requested file, sheet(s), and cell range(s).
+1. Run **`python3 scripts/recalc_xlsx.py <path-to-workbook.xlsx> --check-only`** first — `--check-only` recalculates in a temporary directory and scans every sheet for all 7 Excel errors (`#REF!`, `#DIV/0!`, `#VALUE!`, `#NAME?`, `#N/A`, `#NUM!`, `#NULL!`) **without modifying or overwriting the audited file on disk**.
+   - Exit `0` (`"status": "success"`): zero formula errors, all formulas verified.
+   - Exit `1` (`"status": "errors_found"` / `"error"`): formula errors found or file/LibreOffice failure — inspect `error_summary`.
+   - Exit `2` (`"status": "unverified"`): LibreOffice is not installed and the workbook has uncached formulas. Report `unverified` explicitly; only pass `--allow-unrecalculated` if the user explicitly accepts unverified cached values.
+2. For DCF workbooks, also run `python3 .agents/skills/dcf-model/scripts/validate_dcf.py <path-to-workbook.xlsx>` (read-only).
+3. Inspect formulas (`data_only=False`) and cached values (`data_only=True`) programmatically with Python (`openpyxl`) across the requested file, sheet(s), and cell range(s). Never modify the workbook until the user explicitly approves fixes.
 
 ## Step 1: Determine scope
 
@@ -105,11 +111,12 @@ If BS doesn't balance, **quantify the gap per period and trace where it breaks**
 ### 3g. Model-type-specific bugs
 
 **DCF:**
-- Discount rate applied to wrong period (mid-year vs end-of-year)
-- Terminal value not discounted back
-- WACC uses book values instead of market values
-- FCF includes interest expense (should be unlevered)
-- Tax shield double-counted
+- Discount rate applied to wrong period (mid-year `t - 0.5` for explicit FCFs; strictly end-of-year `(1 + WACC)^N` for exit-multiple TV — NOT `N - 0.5`)
+- Terminal value not discounted back, or terminal growth `g >= WACC` / `g > 3.5%`
+- WACC uses `Net Debt / EV` (producing negative debt weight) or book equity instead of gross-debt market weights `E/(E+D)` and `D/(E+D)`
+- ASC 842 operating lease liabilities deducted from EV when UFCF already expenses lease rent (double-counting)
+- SBC added back to UFCF without dilution reconciliation; basic shares used instead of TSM/if-converted diluted shares
+- FCF includes interest expense (should be unlevered) or tax shield double-counted
 
 **LBO:**
 - Debt paydown doesn't match cash sweep mechanics

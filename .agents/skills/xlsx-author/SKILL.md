@@ -3,6 +3,8 @@ name: xlsx-author
 description: Build institutional-quality Excel (.xlsx) financial models and schedules programmatically on disk using Python (openpyxl) with live formulas, institutional color coding, balance checks, and LibreOffice formula verification. Use when generating or updating standalone .xlsx workbooks in Antigravity.
 ---
 
+<!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/financial-analysis/skills/xlsx-author/SKILL.md), Apache-2.0; modified for Google Antigravity. -->
+
 # xlsx-author
 
 Build institutional-grade Excel (`.xlsx`) workbooks programmatically in Antigravity using Python (`openpyxl`), with verified live formulas and zero hardcoded calculation cells.
@@ -21,8 +23,9 @@ Build institutional-grade Excel (`.xlsx`) workbooks programmatically in Antigrav
 Write a clean Python script using `openpyxl` and execute it in the terminal:
 
 ```python
+from pathlib import Path
 from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Font
 
 wb = Workbook()
 ws = wb.active
@@ -34,7 +37,10 @@ ws["C2"].font = Font(color="0000FF")          # Blue = hardcoded input
 calc = wb.create_sheet("DCF")
 calc["C5"] = "=Inputs!C2*(1+Inputs!C3)"       # Green/Black = live formula
 calc["C5"].font = Font(color="008000")        # Green = cross-sheet link
-wb.save("research/companies/TICKER/models/model.xlsx")
+
+out_path = Path("research/companies/TICKER/models/model.xlsx")
+out_path.parent.mkdir(parents=True, exist_ok=True)
+wb.save(out_path)
 ```
 
 ## Institutional Conventions (Mirror `audit-xls`)
@@ -51,10 +57,16 @@ wb.save("research/companies/TICKER/models/model.xlsx")
 After saving the `.xlsx` file, always run:
 
 ```bash
-python3 scripts/recalc_xlsx.py <path-to-workbook.xlsx>
+python3 scripts/recalc_xlsx.py <path-to-workbook.xlsx> 30
 ```
 
-This recalculates cached formula values via LibreOffice (when installed) and scans every sheet for `#REF!`, `#DIV/0!`, `#VALUE!`, `#NAME?`, `#N/A`, and `#NUM!`. Then apply the `audit-xls` checklist before presenting the workbook.
+This recalculates cached formula values via LibreOffice and scans every sheet for all 7 Excel errors (`#REF!`, `#DIV/0!`, `#VALUE!`, `#NAME?`, `#N/A`, `#NUM!`, `#NULL!`):
+- Exit `0` (`"status": "success"`): zero errors and verified formulas.
+- Exit `1` (`"status": "errors_found"` / `"error"`): formula errors or load/LibreOffice failure — fix and re-run.
+- Exit `2` (`"status": "unverified"`): LibreOffice unavailable and workbook contains uncached formulas (install LibreOffice or pass `--allow-unrecalculated` only if explicitly accepted).
+- Use `--check-only` for read-only audits or `--output <PATH>` to write a recalculated copy without mutating the source file.
+
+Then apply the `audit-xls` checklist before presenting the workbook.
 
 ## Optional Google Sheets Sync
 

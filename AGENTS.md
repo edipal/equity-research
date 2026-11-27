@@ -47,9 +47,9 @@ Use the matching skill (or invoke directly with `/<skill-name>`):
 
 For multi-skill workflows, select a primary agent (`/agents` or `agy --agent <name>`) or delegate in parallel via `invoke_subagent`:
 - `equity-analyst` — Lead analyst for full-lifecycle single-name coverage and subagent coordination
-- `earnings-reviewer` — End-to-end post-earnings update (`earnings-analysis` → `model-update` → `audit-xls` → `morning-note`)
-- `market-researcher` — Sector & thematic primer (`sector-overview` → `competitive-analysis` → `comps-analysis` → `idea-generation`)
-- `model-builder` — Scratch financial model build (`three-statement-model` / `dcf-model` / `comps-analysis` / `unit-economics` → `audit-xls`)
+- `earnings-reviewer` — End-to-end post-earnings update (variance read → `model-update` → `audit-xls` → `earnings-analysis` / `morning-note` → `thesis-tracker`)
+- `market-researcher` — Sector & thematic primer (`sector-overview` → `competitive-analysis` → `comps-analysis` → `idea-generation` shortlisting `3–5` high-conviction ideas from `5–10` candidates)
+- `model-builder` — Scratch financial model build (`three-statement-model` / `dcf-model` / `comps-analysis` / `unit-economics` → `audit-xls`, with human review checkpoint)
 
 ## Data Source Hierarchy
 
@@ -61,13 +61,18 @@ Always follow this priority order when gathering financial data:
 
 Never invent or silently estimate missing historical financials. Mark unverified figures `[UNSOURCED]` and explicit analyst estimates `[ASSUMPTION]`.
 
-## Default Output Paths
+## Default Output Paths & Canonical File Naming
 
-Save persistent research outputs inside `research/`:
-- Single-company work: `research/companies/<TICKER>/` (`thesis.md`, `models/`, `notes/`, `reports/`, `data/`)
-- Sector & competitive work: `research/sectors/<sector-slug>/` (`overview.md`, `competitive-landscape.md`, `comps/`, `decks/`)
-- Stock screens & ideas: `research/screens/`
-- Daily morning notes: `research/morning-notes/YYYY-MM-DD.md`
-- Coverage catalyst calendar: `research/catalysts.md`
+Stage all research drafts inside `research/` using these canonical paths and filenames (detailed formatting standards also load automatically via `.agents/rules/research-outputs.md` once working in `research/`):
+- **Single-company coverage (`research/companies/<TICKER>/`):**
+  - Living thesis: `thesis.md`
+  - Models (`models/`): `<TICKER>_3Statement_YYYY-MM-DD.xlsx`, `<TICKER>_DCF_YYYY-MM-DD.xlsx`, `<TICKER>_Comps_YYYY-MM-DD.xlsx`, `<TICKER>_UnitEconomics_YYYY-MM-DD.xlsx`, `<TICKER>_Financial_Model_YYYY-MM-DD.xlsx`, `<TICKER>_Model_YYYY-MM-DD.xlsx`
+  - Notes (`notes/`): `<TICKER>_Q[X]FY[YY]_Earnings_YYYY-MM-DD.md`, `<TICKER>_Q[X]FY[YY]_Earnings_Preview_YYYY-MM-DD.md`, `<TICKER>_Model_Update_YYYY-MM-DD.md`, `<TICKER>_UnitEconomics_YYYY-MM-DD.md`
+  - Reports (`reports/`): `<TICKER>_Research_Document_YYYY-MM-DD.md`, `<TICKER>_Valuation_Analysis_YYYY-MM-DD.md`, `charts/chart_##_<desc>.png` + `charts/chart_index.txt`, `<TICKER>_Initiation_Report_YYYY-MM-DD.docx`, `<TICKER>_Q[X]FY[YY]_Earnings_YYYY-MM-DD.docx`
+  - Raw data (`data/`): extracted filings, CSVs, and source logs
+- **Sector & competitive work (`research/sectors/<sector-slug>/`):** `overview.md`, `competitive-landscape.md`, `comps/<sector-slug>_comps_YYYY-MM-DD.xlsx`, `decks/<sector-slug>_<type>_YYYY-MM-DD.pptx`
+- **Stock screens & ideas:** `research/screens/YYYY-MM-DD_<screen-name>.md` (optional `.xlsx`)
+- **Daily morning notes:** `research/morning-notes/YYYY-MM-DD.md`
+- **Coverage catalyst calendar:** `research/catalysts.md`
 
-See `docs/data-sources.md` for configuring SEC EDGAR access, Python libraries, and optional institutional MCP connectors.
+See [`docs/data-sources.md`](docs/data-sources.md) for configuring SEC EDGAR access, Python libraries, and optional institutional MCP connectors.

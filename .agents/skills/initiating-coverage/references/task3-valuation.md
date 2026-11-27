@@ -1,698 +1,179 @@
+<!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/equity-research/skills/initiating-coverage/references/task3-valuation.md), Apache-2.0; modified for Google Antigravity. -->
+
 # Task 3: Valuation Analysis - Detailed Workflow
 
-This document provides step-by-step instructions for executing Task 3 (Valuation Analysis) of the initiating-coverage skill.
+Step-by-step instructions for executing Task 3 (Valuation Analysis) of the `initiating-coverage` skill. All outputs are staged as `DRAFT — FOR INTERNAL ANALYST REVIEW ONLY (NOT INVESTMENT ADVICE)`.
 
 ## Task Overview
 
-**Purpose**: Perform comprehensive valuation using DCF, comparables, and precedent transactions.
+**Purpose:** Perform multi-methodology valuation (DCF + Trading Comparables, plus Precedent Transactions as cross-check when M&A is relevant), add canonical valuation tabs to Task 2's financial model, and derive a 12-month Price Target and standardized rating (`Buy / Hold / Sell`).
 
-**Prerequisites**: ⚠️ Verify before starting
-- **Required**: Financial model from Task 2
-  - Projected income statements
-  - Projected cash flows
-  - Revenue and EBITDA forecasts
-  - DCF inputs (unlevered FCF)
+**Prerequisites (MANDATORY — stop if Task 2 is incomplete):**
+- Verified Task 2 model at `research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx` containing `Revenue Model`, `Income Statement`, `Cash Flow Statement`, `Balance Sheet`, `Scenarios` and passing `scripts/recalc_xlsx.py`.
+- If Task 2 does not exist, STOP and inform the user to complete Task 2 first.
 
-**⚠️ CRITICAL: DO NOT START THIS TASK UNLESS TASK 2 IS COMPLETE**
-
-This task requires the financial model from Task 2. Starting without it will result in incomplete work.
-
-**IF TASK 2 IS NOT COMPLETE**: Stop immediately and inform the user that Task 2 (Financial Modeling) must be completed first. Do not attempt to proceed or create placeholder valuations.
-
-**Output**: Valuation Analysis (4-6 pages + Excel tabs)
-- DCF analysis with sensitivity tables
-- Comparable companies analysis
-- Precedent transactions (if applicable)
-- Valuation football field
-- Price target and recommendation
+**Core Methodology Delegation:**
+- **DCF Mechanics:** Delegate ALL core DCF methodology, formulas, and layout conventions to the **`dcf-model`** skill (`.agents/skills/dcf-model/SKILL.md`, `references/wacc-and-valuation-bridge.md`, `references/dcf-layout-and-formulas.md`, and `scripts/build_dcf_skeleton.py`). Do NOT deviate from:
+  - **Gross-debt WACC weights:** `Total Capital = Market Cap (E) + Total Gross Debt (D)`; `Equity Weight = E/(E+D)`, `Debt Weight = D/(E+D)` (bounded `0%–100%`, never negative).
+  - **Mid-year explicit UFCF discounting** (`t - 0.5`: `0.5, 1.5, ..., N - 0.5`); **end-of-year `(1 + WACC)^N` discounting for Terminal Value** (both perpetuity growth AND exit multiple — NEVER `N - 0.5` for exit multiple).
+  - **Terminal growth `g`:** Strictly `< WACC` and `<= long-term nominal GDP / Rf` (typically `2.0%–3.5%`).
+  - **TV `%` of EV:** Target `50%–70%`; flag and investigate if `< 40%` or `> 80%`.
+  - **Complete Equity Bridge & Diluted Shares:** `EV - Total Gross Debt - Preferred Stock - NCI + Cash & Marketable Securities + Equity Investments ÷ Fully Diluted Shares (TSM + if-converted)`. Never deduct ASC 842 operating lease liabilities when UFCF already expenses lease rent. Keep SBC as a real economic expense in UFCF.
+  - **Centered Odd Sensitivity Grid (5×5):** Formula-driven axes centered on live `WACC` and `Terminal Growth`, full DCF recalculation in all 25 cells, highlighted center cell matching Base DCF price.
+- **Comps Mechanics:** Follow **`comps-analysis`** for EV construction, NTM calendarization, `"NM"` error handling (`IFERROR(..., "NM")`), and mandatory Max / 75th / Median / 25th / Min statistics.
+- **Valuation Theory Reference:** See [valuation-methodologies.md](valuation-methodologies.md).
 
 ---
 
-## Input Verification
+## Standardized Rating Scale (Use Consistently Across Tasks 3 & 5)
 
-**BEFORE STARTING - CHECK:**
-- [ ] Task 2 complete? (Financial model exists)
-- [ ] Model file path/location known?
-- [ ] Can access projected financials from model?
+| Rating | 12-Month Expected Total Return Threshold | Interpretation |
+|---|---|---|
+| **Buy** | `>= +15.0%` | Risk-adjusted upside exceeds institutional hurdle rate |
+| **Hold** | `-10.0%` to `+15.0%` | Valuation broadly reflects fundamentals; balanced risk/reward |
+| **Sell** | `<= -10.0%` | Material downside risk to intrinsic / peer-implied value |
 
-**Required from model:**
-- [ ] Projected FCF (5 years)
-- [ ] Revenue projections
-- [ ] EBITDA projections
-- [ ] Terminal year metrics
-- [ ] Balance sheet data (debt, cash, shares)
-
-**IF VERIFICATION FAILS**: Stop and complete Task 2 (Financial Modeling) before proceeding.
-
----
-
-## Detailed Methodology Reference
-
-For deep dive on valuation methodologies, formulas, and theory, see:
-**[valuation-methodologies.md](valuation-methodologies.md)**
-
-This workflow document focuses on execution steps. Reference the methodology file for:
-- DCF theory and formulas
-- WACC calculation details
-- Terminal value methods
-- Comparable companies theory
-- Precedent transactions theory
+*(Use `Buy / Hold / Sell` consistently across Task 3, Task 5, and Page 1 — do not mix with `Outperform / Neutral / Underweight` in the same report.)*
 
 ---
 
 ## Step-by-Step Valuation Workflow
 
-### Step 1: Extract Data from Financial Model
+### Step 1: Link Model Projections from Task 2
 
-**From Task 2's financial model, extract:**
+Pull live cross-sheet links from Task 2's workbook (`Income Statement`, `Cash Flow Statement`, `Balance Sheet`, `Scenarios`):
+- 5-year projected Revenue, EBIT, Tax Rate, D&A, EBITDA, CapEx, and ΔNWC (`[FY+1]E–[FY+5]E`)
+- Latest balance sheet Gross Debt, Preferred Stock, Non-Controlling Interest, Cash & Marketable Securities, Equity Investments
+- Diluted share count inputs (basic shares + ITM options/RSUs for TSM + convertibles if-converted test)
+- Bear / Base / Bull scenario trajectories
 
-1. **Projected Financials (5 years)**
-   - Revenue by year (2025E-2029E)
-   - EBITDA by year
-   - EBIT by year
-   - Tax rate
-   - D&A by year
-   - CapEx by year
-   - Change in NWC by year
+### Step 2: Build `WACC` and `DCF` Tabs (Per `dcf-model` Spec)
 
-2. **Unlevered Free Cash Flow**
-   ```
-   Extract from DCF Inputs tab in financial model:
+**Worked Illustrative Example (Every figure mathematically reconciled):**
+Assume illustrative current share price `$42.00`, fully diluted shares `100.0M`, Total Gross Debt `$500.0M`, Cash & Marketable Securities `$50.0M` (`Net Debt = $450.0M`), Preferred `$0`, NCI `$0`, Equity Investments `$0`:
 
-                   2025E   2026E   2027E   2028E   2029E
-   EBIT            $XXX    $XXX    $XXX    $XXX    $XXX
-   × (1 - Tax Rate)
-   = NOPAT         $XXX    $XXX    $XXX    $XXX    $XXX
-   + D&A           $XXX    $XXX    $XXX    $XXX    $XXX
-   - CapEx         ($XX)   ($XX)   ($XX)   ($XX)   ($XX)
-   - Chg in NWC    ($XX)   ($XX)   ($XX)   ($XX)   ($XX)
-   = Unlevered FCF $XXX    $XXX    $XXX    $XXX    $XXX
-   ```
+1. **WACC (Gross-Debt Basis on `WACC` tab):**
+   - `Market Cap (E) = $42.00 × 100.0M = $4,200.0M ($4.2B)`
+   - `Total Gross Debt (D) = $500.0M` → `Total Capitalization (E + D) = $4,700.0M`
+   - `Equity Weight = $4,200.0 / $4,700.0 = 89.36%` | `Debt Weight = $500.0 / $4,700.0 = 10.64%` (sum `= 100.00%`)
+   - `Cost of Equity (Ke) = 4.20% Rf + 1.30 Beta × 5.50% ERP = 11.35%`
+   - `After-Tax Cost of Debt = 6.50% Pre-Tax Kd × (1 - 25.0% Tax Rate) = 4.875%`
+   - `WACC = (89.36% × 11.35%) + (10.64% × 4.875%) = 10.14% + 0.52% = 10.66%`
 
-3. **Balance Sheet Data (current)**
-   - Total debt
-   - Cash & equivalents
-   - Net debt (Debt - Cash)
-   - Diluted shares outstanding
+2. **5-Year Mid-Year UFCF & End-of-Year Terminal Value (`DCF` tab):**
+   - Illustrative 5-year UFCFs (`[FY+1]E–[FY+5]E`): `$250M`, `$320M`, `$390M`, `$450M`, `$500M`
+   - Mid-year discount periods (`0.5, 1.5, 2.5, 3.5, 4.5`) at `WACC = 10.66%`:
+     - PV of Explicit UFCFs: `$237.7M + $274.9M + $302.8M + $315.7M + $317.0M = $1,447.9M`
+   - Perpetuity Growth Terminal Value (`g = 2.50%`):
+     - `Undiscounted TV = $500.0M × (1.025) / (0.1066 - 0.025) = $6,280.6M`
+     - `PV of TV (end of Year 5) = $6,280.6M / (1.1066)^5 = $3,784.9M`
+   - `Enterprise Value = $1,447.9M + $3,784.9M = $5,232.8M` (`TV % of EV = 72.3%` — within `40%–80%` guardrail; close to `50%–70%` target, note in narrative)
+   - Complete Equity Bridge:
+     - `EV $5,232.8M - Gross Debt $500.0M + Cash $50.0M = Implied Equity Value $4,782.8M`
+     - `Implied Share Price (Base DCF) = $4,782.8M / 100.0M = $47.83` (`+13.9%` vs. `$42.00`)
+   - Cross-check Exit Multiple TV (`EBITDA_5 × Exit Multiple`, strictly discounted at `(1 + WACC)^5`, NEVER `4.5`).
 
-4. **Scenario Data**
-   - Bull case revenue CAGR and terminal margin
-   - Base case revenue CAGR and terminal margin
-   - Bear case revenue CAGR and terminal margin
+3. **Centered 5×5 Live-Formula Sensitivity Table (`DCF` inline or optional `Sensitivity` tab):**
+   Axes centered on live `WACC = 10.66%` (`±50bps / ±100bps`) and live `g = 2.50%` (`±50bps / ±100bps`):
 
-### Step 2: Build DCF Analysis
-
-#### A. Calculate WACC
-
-**1. Determine Risk-Free Rate**
-   - Use 10-year Treasury yield (check current rate)
-   - Example: 4.0-4.5% as of late 2024
-
-**2. Determine Cost of Equity (CAPM)**
-   ```
-   Cost of Equity = Risk-Free Rate + Beta × Equity Risk Premium
-
-   Inputs:
-   - Risk-Free Rate: [Current 10-year Treasury, e.g., 4.2%]
-   - Beta: [Company beta from Bloomberg/FactSet or peer average]
-   - Equity Risk Premium: 5-6% (historical average)
-
-   Example:
-   Cost of Equity = 4.2% + 1.3 × 5.5% = 11.35%
-   ```
-
-**3. Determine Cost of Debt**
-   ```
-   Cost of Debt = Current borrowing rate or implied yield on bonds
-
-   For private companies:
-   Cost of Debt = Risk-Free Rate + Credit Spread (based on rating)
-
-   Example:
-   Cost of Debt (pre-tax) = 6.5%
-   Cost of Debt (after-tax) = 6.5% × (1 - 25% tax rate) = 4.875%
-   ```
-
-**4. Determine Capital Structure**
-   ```
-   Use market values (not book values):
-
-   Market Value of Equity (E) = Share Price × Shares Outstanding
-   Market Value of Debt (D) = Total Debt (use book value if bonds not traded)
-   Total Value (V) = E + D
-
-   Weight of Equity = E / V
-   Weight of Debt = D / V
-
-   Example:
-   E = $5,000M (90.9%)
-   D = $500M (9.1%)
-   V = $5,500M (100%)
-   ```
-
-**5. Calculate WACC**
-   ```
-   WACC = (E/V × Cost of Equity) + (D/V × Cost of Debt × (1 - Tax Rate))
-
-   Example:
-   WACC = (90.9% × 11.35%) + (9.1% × 6.5% × (1 - 25%))
-   WACC = 10.32% + 0.44% = 10.76%
-
-   Round to: 10.8% for base case
-   ```
-
-#### B. Calculate Terminal Value
-
-**Method 1: Perpetuity Growth (Preferred)**
-```
-Terminal Value = FCF(2029) × (1 + g) / (WACC - g)
-
-Where:
-- FCF(2029) = Final year unlevered FCF from model
-- g = Perpetual growth rate (typically 2.0-3.0%)
-  - Should not exceed long-term GDP growth
-  - Use 2.5% as base case
-
-Example:
-FCF(2029) = $500M
-g = 2.5%
-WACC = 10.8%
-
-Terminal Value = $500M × (1.025) / (0.108 - 0.025)
-Terminal Value = $512.5M / 0.083 = $6,175M
+```text
+Implied Share Price ($)          Terminal Growth Rate (g)
+WACC        1.50%     2.00%     2.50%     3.00%     3.50%
+ 9.66%     $49.55    $52.32    $55.47    $59.09    $63.31
+10.16%     $46.28    $48.68    $51.40    $54.49    $58.05
+10.66%     $43.37    $45.47   [$47.83]   $50.50    $53.54   <- Base WACC row
+11.16%     $40.76    $42.61    $44.68    $46.99    $49.61
+11.66%     $38.42    $40.06    $41.87    $43.90    $46.18
+                                  ^
+                             Base g col (center cell = $47.83)
 ```
 
-**Method 2: Exit Multiple (Alternative)**
-```
-Terminal Value = EBITDA(2029) × Exit Multiple
+   DCF Low / Base / High range (using `±50bps` WACC & `±50bps` g around base): **`$42.61 – $47.83 – $54.49`**.
 
-Where:
-- Exit Multiple = Current peer trading median (e.g., 12-15x EBITDA)
+### Step 3: Build `Comparable Companies` Tab (Per `comps-analysis` Spec)
 
-Example:
-EBITDA(2029) = $800M
-Exit Multiple = 13x
+Select **5–10 public peers** (where a valid peer group exists; document selection rationale and any peer exclusions). Compute full EV (`Market Cap + Gross Debt + Preferred + NCI - Cash & Short-Term Investments`) and calendarized NTM/LTM multiples (`EV/Revenue`, `EV/EBITDA`, `P/E`). Include the **mandatory statistical summary** (`Max`, `75th Percentile`, `Median`, `25th Percentile`, `Min`) using `IFERROR(..., "NM")`.
 
-Terminal Value = $800M × 13x = $10,400M
-```
+**Worked Illustrative Example (`Target NTM EBITDA = $550.0M`, `Net Debt = $450.0M`, `100.0M` diluted shares):**
+- **25th Percentile (`12.5x` NTM EV/EBITDA):** `EV = $6,875.0M` → `Equity = $6,425.0M` → **`$64.25/sh`**
+- **Median (`13.8x` NTM EV/EBITDA):** `EV = $7,590.0M` → `Equity = $7,140.0M` → **`$71.40/sh`**
+- **75th Percentile (`14.1x` NTM EV/EBITDA):** `EV = $7,755.0M` → `Equity = $7,305.0M` → **`$73.05/sh`**
 
-**Choose one method or average both.**
+Justify any applied premium/discount vs. peer median based on relative revenue growth, EBITDA margin, ROIC, and moat durability.
 
-#### C. Discount Cash Flows to Present Value
+### Step 4: Precedent Transactions (Optional Cross-Check Only)
 
-```
-PV of Projected FCF = Σ [FCFt / (1 + WACC)^t] for t = 1 to 5
+Include precedent M&A deals (target ~5–10 deals **where relevant recent transactions exist** — never invent deals) ONLY when sector M&A provides meaningful valuation context.
 
-Example:
-Year    FCF      Discount    PV of FCF
-        ($M)     Factor      ($M)
-2025    $250     1/(1.108)^1 = 0.9026    $226
-2026    $320     1/(1.108)^2 = 0.8147    $261
-2027    $390     1/(1.108)^3 = 0.7353    $287
-2028    $450     1/(1.108)^4 = 0.6636    $299
-2029    $500     1/(1.108)^5 = 0.5988    $299
-                              Total PV:  $1,372M
+**Worked Illustrative Example (`Target LTM EBITDA = $500.0M`, `Median Precedent = 15.8x LTM EV/EBITDA`):**
+- `Implied EV = $500.0M × 15.8x = $7,900.0M`
+- `Less: Net Debt ($450.0M)` → `Implied Equity Value = $7,450.0M`
+- `Implied Share Price = $7,450.0M / 100.0M = $74.50/sh`
 
-PV of Terminal Value = Terminal Value / (1 + WACC)^5
-PV of Terminal Value = $6,175M / (1.108)^5 = $6,175M × 0.5988 = $3,697M
+**Control-Premium Weighting Guardrail:** Precedent transaction multiples embed a `20%–40%` control premium and buyer synergies. When near-term M&A is **unlikely**, assign **`0%` weight** to Precedent Transactions in the standalone 12-month Price Target and display it strictly as a **cross-check / takeover floor** on the football field. Only assign positive weight (`10%–25%`) when an active strategic review or high-probability M&A catalyst is explicitly part of the investment thesis.
 
-Enterprise Value = $1,372M + $3,697M = $5,069M
-```
+### Step 5: Build `Valuation Summary` Tab & Reconcile Price Target
 
-#### D. Calculate Equity Value and Price Per Share
+Combine standalone methodologies cleanly and cross-check against Bear/Base/Bull scenarios:
 
-```
-Enterprise Value                 $5,069M
-- Net Debt (Debt - Cash)         ($450M)
-+ Non-operating Assets           $0M
-- Minority Interest              $0M
-- Preferred Stock                $0M
-= Equity Value                   $4,619M
+```text
+VALUATION SUMMARY (ILLUSTRATIVE RECONCILIATION)
 
-Diluted Shares Outstanding       100M
+Method                       Low      Base     High     Weight   Weighted Base
+DCF Analysis (Perpetuity)    $42.61   $47.83   $54.49    50%     $23.92
+Trading Comps (NTM EBITDA)   $64.25   $71.40   $73.05    50%     $35.70
+Precedent Trans. (LTM)*      $67.50   $74.50   $81.50     0%      $0.00  (cross-check only; M&A unlikely)
+------------------------------------------------------------------------------
+Blended 12M Price Target     $53.43   $59.62   $63.77   100%     $59.62 -> Rounded: $60.00
 
-Price Per Share = $4,619M / 100M = $46.19
-
-Current Stock Price: $42.00
-Implied Upside: 10.0%
+Current Share Price ([Date]): $42.00
+Implied 12M Upside:           +42.9% ($60.00 / $42.00 - 1) -> Rating: BUY (>= +15% threshold)
 ```
 
-#### E. DCF Sensitivity Analysis **CRITICAL**
-
-**Table 1: WACC vs. Terminal Growth Rate**
-
-Create 2-way sensitivity table:
+**Scenario Probability-Weighted Cross-Check (verify arithmetic exactly):**
+```text
+Scenario    Probability   Rev CAGR   Term. EBITDA Margin   Implied Value   Weighted Contrib.
+Bear Case       20%         18%             28%               $42.00            $8.40
+Base Case       60%         25%             32%               $59.00           $35.40
+Bull Case       20%         32%             36%               $82.00           $16.40
+--------------------------------------------------------------------------------------------
+Probability-Weighted Expected Value (100%):                                    $60.20
 ```
-Price Per Share ($)     Terminal Growth Rate
-WACC        1.5%    2.0%    2.5%    3.0%    3.5%
-9.0%        $52     $55     $59     $63     $68
-9.5%        $48     $51     $54     $58     $62
-10.0%       $45     $48     $51     $54     $57
-10.5%       $42     $45     $47     $50     $53
-11.0%       $40     $42     $44     $47     $50
-11.5%       $38     $40     $42     $44     $47
-12.0%       $36     $38     $40     $42     $44
+*(Always verify `SUMPRODUCT(Probability, Implied Value)` exactly — e.g., `0.20 × $42.00 + 0.60 × $59.00 + 0.20 × $82.00 = $60.20`, aligning closely with the `$60.00` blended target!)*
 
-Base Case: WACC = 10.8%, g = 2.5% → $46
-Format as heatmap: Green (high values) → Yellow → Red (low values)
-```
+### Step 6: Document Catalysts, Risks & Draft Notice
 
-**Table 2: Revenue CAGR vs. Terminal EBITDA Margin**
-```
-Price Per Share ($)     Terminal EBITDA Margin (2029E)
-Revenue CAGR    28%     30%     32%     34%     36%
-15%             $38     $42     $46     $50     $54
-20%             $42     $46     $51     $56     $61
-25%             $46     $51     $56     $62     $68
-30%             $51     $56     $62     $68     $75
-35%             $56     $62     $68     $75     $83
+Include 3–5 dated catalysts and 3–5 quantified upside/downside risks in `<TICKER>_Valuation_Analysis_<Date>.md`, labeled **`DRAFT — FOR INTERNAL ANALYST REVIEW ONLY (NOT INVESTMENT ADVICE)`**, with `[ASSUMPTION]` tags on all analyst projections.
 
-Base Case: Rev CAGR = 25%, EBITDA Margin = 32% → $56
+### Step 7: Mandatory Automated QA Gates
+
+After adding the 4 canonical valuation tabs (`WACC`, `DCF`, `Comparable Companies`, `Valuation Summary` — plus inline 5×5 sensitivity on `DCF` or optional `Sensitivity` tab) to `<TICKER>_Financial_Model_<Date>.xlsx`, run BOTH QA scripts:
+
+```bash
+# 1. Recalculate via LibreOffice and verify zero formula errors / zero uncached formulas
+python3 scripts/recalc_xlsx.py research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx 30
+
+# 2. Validate DCF sheet structure, WACC range, g < WACC, TV % of EV, and cached values
+python3 .agents/skills/dcf-model/scripts/validate_dcf.py research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx
 ```
 
-### Step 3: Comparable Companies Analysis
-
-#### A. Select Comparable Companies
-
-**Selection Criteria:**
-- Same industry/sector (primary requirement)
-- Similar business model
-- Comparable size (market cap, revenue)
-- Similar growth profile
-- Similar geographies
-
-**Identify 5-10 peer companies:**
-1. [Peer 1] - Direct competitor
-2. [Peer 2] - Direct competitor
-3. [Peer 3] - Adjacent player
-4. [Peer 4] - Similar business model
-5. [Peer 5] - Regional competitor
-6. [Add 3-5 more]
-
-**Document rationale for each peer selected.**
-
-#### B. Gather Peer Financial Data
-
-**For each comparable, gather:**
-- Current stock price
-- Shares outstanding (diluted)
-- Market capitalization
-- Total debt and cash (for EV calculation)
-- Enterprise value
-- LTM (Last Twelve Months) financials:
-  - Revenue
-  - EBITDA
-  - EBIT
-  - Net Income
-- NTM (Next Twelve Months) consensus estimates
-- Revenue growth rate
-- EBITDA margin
-
-**Data sources:**
-- FactSet, CapitalIQ, Bloomberg (preferred)
-- Company 10-Ks/10-Qs for actuals
-- Consensus estimates from Yahoo Finance, Seeking Alpha (if pro tools unavailable)
-
-#### C. Calculate Valuation Multiples
-
-**For each peer, calculate:**
-```
-EV/Revenue (LTM) = Enterprise Value / LTM Revenue
-EV/Revenue (NTM) = Enterprise Value / NTM Revenue (est.)
-EV/EBITDA (LTM) = Enterprise Value / LTM EBITDA
-EV/EBITDA (NTM) = Enterprise Value / NTM EBITDA (est.)
-P/E (NTM) = Market Cap / NTM Net Income (est.)
-```
-
-#### D. Create Comparable Companies Table (MANDATORY FORMAT)
-
-```
-COMPARABLE COMPANIES ANALYSIS
-
-Company      Ticker  Mkt Cap  EV/Rev  EV/Rev  EV/EBITDA  EV/EBITDA  P/E   Rev     EBITDA
-                     ($B)     LTM     NTM     LTM        NTM        NTM   Growth  Margin
-Peer A       PRA     45.2     3.5x    3.2x    15.2x      13.8x      25x   18%     23%
-Peer B       PRB     32.8     3.2x    2.9x    14.1x      12.5x      22x   15%     23%
-Peer C       PRC     28.5     2.8x    2.6x    12.8x      11.2x      20x   12%     22%
-Peer D       PRD     52.1     4.1x    3.7x    17.5x      15.2x      29x   22%     23%
-Peer E       PRE     38.9     3.6x    3.3x    15.8x      14.1x      25x   17%     23%
-Peer F       PRF     41.2     3.7x    3.4x    16.1x      13.9x      26x   19%     23%
-Peer G       PRG     35.5     3.3x    3.0x    14.5x      12.8x      23x   16%     22%
-
-[Target]     TRGT    38.0     3.4x    3.1x    14.8x      13.0x      24x   17%     23%
-
-STATISTICAL SUMMARY
-Maximum              52.1     4.1x    3.7x    17.5x      15.2x      29x   22%     23%
-75th Percentile      45.2     3.7x    3.4x    16.1x      14.1x      26x   19%     23%
-Median               38.9     3.5x    3.2x    15.2x      13.8x      25x   17%     23%
-25th Percentile      32.8     3.2x    2.9x    14.1x      12.5x      22x   15%     22%
-Minimum              28.5     2.8x    2.6x    12.8x      11.2x      20x   12%     22%
-
-Note: Market data as of [Date]. LTM = Last Twelve Months. NTM = Next Twelve Months.
-Source: FactSet, company filings, [Analyst] estimates.
-```
-
-**CRITICAL**: The statistical summary (max/75th/median/25th/min) is MANDATORY.
-
-#### E. Apply Multiples to Target Company
-
-**Choose primary multiple (typically EV/EBITDA for mature companies):**
-
-```
-Target Company NTM EBITDA = $550M (from financial model)
-
-Apply Median Peer Multiple:
-Peer Median EV/EBITDA (NTM) = 13.8x
-Implied EV = $550M × 13.8x = $7,590M
-
-Apply 25th Percentile (Conservative):
-25th Percentile EV/EBITDA (NTM) = 12.5x
-Implied EV = $550M × 12.5x = $6,875M
-
-Apply 75th Percentile (Optimistic):
-75th Percentile EV/EBITDA (NTM) = 14.1x
-Implied EV = $550M × 14.1x = $7,755M
-
-Valuation Range (Comps): $6,875M - $7,755M
-Midpoint: $7,315M
-
-Convert to Equity Value:
-Implied EV (Median)        $7,590M
-- Net Debt                 ($450M)
-= Implied Equity Value     $7,140M
-
-Shares Outstanding         100M
-Implied Price/Share        $71.40
-```
-
-**Justify Premium/Discount:**
-- Target is growing 17% vs. peer median 17% → In-line
-- Target EBITDA margin 23% vs. peer median 23% → In-line
-- Target market position → [Justify premium/discount]
-- **Conclusion**: Apply median multiple (no adjustment)
-
-### Step 4: Precedent Transactions (Optional)
-
-**Note**: Only if M&A is relevant for this sector/company.
-
-#### A. Identify Relevant Transactions
-
-**Search for 5-10 M&A deals:**
-- Same industry, last 3-5 years
-- Similar size (0.5x to 2x target's size)
-- Announced and closed deals
-
-**Example:**
-```
-PRECEDENT TRANSACTIONS ANALYSIS
-
-Date     Target        Acquirer      Deal     EV/Rev  EV/EBITDA  Premium  Rationale
-                                    Value($B)  LTM     LTM
-Q1 2024  Comp A       Strategic      $5.2B    4.2x    16.5x      35%      Consolidation
-Q3 2023  Comp B       PE Firm        $3.8B    3.8x    14.2x      28%      Platform
-Q4 2023  Comp C       Strategic      $4.5B    4.0x    15.8x      32%      Geographic
-Q2 2023  Comp D       Strategic      $6.1B    4.5x    17.2x      38%      Strategic fit
-Q1 2023  Comp E       PE Firm        $3.2B    3.5x    13.5x      25%      Carve-out
-
-Median                                        4.0x    15.8x      32%
-
-Source: CapitalIQ, company filings, press releases.
-```
-
-#### B. Apply to Target Company
-
-```
-Target Company LTM EBITDA = $500M
-Precedent Median EV/EBITDA (LTM) = 15.8x
-
-Implied EV (Precedent) = $500M × 15.8x = $7,900M
-
-Note: Precedent multiples typically 10-20% higher than trading comps
-due to control premium and synergies.
-```
-
-### Step 5: Valuation Reconciliation
-
-#### A. Create Valuation Summary Table
-
-```
-VALUATION SUMMARY
-
-Method                  Low     Base    High    Weight  Weighted Value
-DCF Analysis            $42     $46     $51     50%     $23.00
-Trading Comps (NTM)     $64     $71     $78     40%     $28.40
-Precedent Trans.        $70     $79     $88     10%     $7.90
-                                                        -------
-Weighted Average Target                         100%    $59.30
-
-Rounded Price Target: $59.00
-
-Current Price (as of [Date]):    $42.00
-Upside to Target:                40% ($59.00 / $42.00 - 1)
-```
-
-#### B. Determine Weighting Rationale
-
-**Typical Weighting:**
-- DCF: 40-60% (higher when forecasts reliable)
-- Trading Comps: 25-40% (reflects market sentiment)
-- Precedent Trans: 10-25% (lower unless M&A likely)
-
-**For this example:**
-- DCF 50%: High confidence in projections
-- Comps 40%: Robust peer set
-- Precedent 10%: M&A unlikely near-term
-
-#### C. Create Valuation Football Field Chart
-
-```
-VALUATION FOOTBALL FIELD
-
-Method                  Low ◄────────── Range ──────────► High
-
-DCF Analysis            $42 ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ $51
-
-Trading Comps (NTM)     $64 ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ $78
-
-Precedent Trans.        $70 ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ $88
-                                          ↑
-                                    Current: $42
-─────────────────────────────────────────────────────────
-Valuation Range         $42                          $88
-Price Target: $59 (weighted average)
-
-Color code:
-- DCF: Blue
-- Trading Comps: Green
-- Precedent Trans: Orange
-- Vertical line at current price: Red dashed
-- Vertical line at target: Black solid
-```
-
-#### D. Scenario-Based Valuations
-
-```
-VALUATION BY SCENARIO
-
-Scenario    Probability  Revenue  EBITDA    DCF      Comps    Weighted
-                        CAGR     Margin    Value    Multiple  Avg
-Bear Case   20%         18%      28%       $38      11.5x     $42
-Base Case   60%         25%      32%       $46      13.8x     $59
-Bull Case   20%         32%      36%       $58      16.0x     $82
-
-Expected Value (probability-weighted): $59
-```
-
-### Step 6: Final Price Target & Recommendation
-
-```
-═══════════════════════════════════════════════════════════
-INVESTMENT RECOMMENDATION
-═══════════════════════════════════════════════════════════
-
-Current Price:          $42.00 (as of [Date])
-Price Target:           $59.00 (12-month)
-Upside/(Downside):      +40.5%
-
-Rating:                 BUY / OUTPERFORM
-
-Valuation Methodology:  Based on weighted average of DCF (50%),
-                       trading comparables (40%), and precedent
-                       transactions (10%).
-
-Time Horizon:          12 months
-
-───────────────────────────────────────────────────────────
-KEY INVESTMENT CATALYSTS
-───────────────────────────────────────────────────────────
-
-1. New Product Launch (Q2 2025)
-   - Expected to drive 15-20% revenue acceleration
-   - Already seeing strong pre-orders
-
-2. Margin Expansion (FY2025-2026)
-   - Operating leverage from scale
-   - Path to 35% EBITDA margin (from current 28%)
-
-3. Market Share Gains (Ongoing)
-   - Taking share from legacy competitors
-   - Net Promoter Score improvement
-
-4. International Expansion (H2 2025)
-   - Entry into European markets
-   - Potential $200M incremental revenue opportunity
-
-5. Potential M&A Target (12-18 months)
-   - Strategic fit for larger players
-   - Precedent transactions suggest 30-40% premium
-
-───────────────────────────────────────────────────────────
-KEY RISKS TO PRICE TARGET
-───────────────────────────────────────────────────────────
-
-Downside Risks:
-1. Competitive Pressure (High probability, -15% impact)
-   - New entrant launched competing product
-   - Could pressure pricing and market share
-
-2. Execution Risk (Medium probability, -10% impact)
-   - New product launch delays or underperformance
-   - Management turnover
-
-3. Macro Slowdown (Medium probability, -20% impact)
-   - Economic recession would impact customer spending
-   - Operating leverage would reverse
-
-4. Regulatory Risk (Low probability, -25% impact)
-   - Potential new regulations in key market
-   - Would increase compliance costs
-
-Upside Risks:
-1. M&A Bid (Low probability, +35% impact)
-   - Strategic acquirer pays control premium
-
-2. Beat-and-Raise (Medium probability, +10% impact)
-   - Consistent outperformance vs. estimates
-
-═══════════════════════════════════════════════════════════
-```
+Both commands MUST exit `0` (`"status": "success"` and `"status": "PASS"`) before handing off Task 3.
 
 ---
 
-## Quality Standards
+## Output Files & Success Criteria
 
-### DCF Quality Checks
-- [ ] WACC properly calculated with documented components
-- [ ] Terminal value reasonable (< 70% of total enterprise value)
-- [ ] Sensitivity analysis covers realistic ranges (±200-300bps for WACC, ±100bps for terminal growth)
-- [ ] Unlevered FCF properly calculated from EBIT
-- [ ] Enterprise to equity value bridge correct
-- [ ] Share count is diluted shares, not basic
+1. `research/companies/<TICKER>/reports/<TICKER>_Valuation_Analysis_YYYY-MM-DD.md` (target ~4–6 pages, draft notice included)
+2. Canonical tabs added to Task 2's existing workbook (`research/companies/<TICKER>/models/<TICKER>_Financial_Model_YYYY-MM-DD.xlsx`):
+   - `WACC`
+   - `DCF` *(with inline 5×5 live sensitivity table per `dcf-model`, or optional dedicated `Sensitivity` tab)*
+   - `Comparable Companies`
+   - `Valuation Summary` *(+ optional `Precedent Transactions` cross-check tab)*
 
-### Comparables Quality Checks
-- [ ] 5-10 comparable companies selected
-- [ ] Peer selection defensible (document why each peer was chosen)
-- [ ] Statistical summary included (max/75th/median/25th/min) - MANDATORY
-- [ ] Multiple selection appropriate (EV/EBITDA for mature, EV/Revenue for high-growth)
-- [ ] Premium/discount justified with specific factors
-- [ ] Data sourced properly with dates noted
-
-### Overall Valuation Quality Checks
-- [ ] At least 2 valuation methods used (DCF + Comps minimum)
-- [ ] Weighting explained and appropriate
-- [ ] Valuation range provided (low/base/high), not just point estimate
-- [ ] Scenarios analyzed (Bull/Base/Bear)
-- [ ] Sanity checks performed (see below)
-- [ ] All assumptions documented with rationale
-
----
-
-## Sanity Checks
-
-**Always perform these validation checks:**
-
-1. **Historical Multiple Check**
-   - Is implied multiple in line with company's historical trading range?
-   - If not, explain why
-
-2. **Peer Comparison**
-   - Is premium/discount vs. peers justified by fundamentals?
-   - Check: growth, margins, market position
-
-3. **Implied Growth Check**
-   - What growth is market pricing in at current price?
-   - Is that reasonable given company trajectory?
-
-4. **Market Cap Reasonableness**
-   - Does total market cap make sense given company size and peers?
-   - Would company be too large/small relative to industry?
-
-5. **Terminal Value Check**
-   - Is terminal value < 60-70% of total enterprise value?
-   - If > 70%, projections may not be long enough
-
-6. **WACC Reasonableness**
-   - Is WACC 8-14% range for typical companies?
-   - Tech/high-growth: 10-14%
-   - Mature/stable: 7-10%
-
-7. **Implied Returns Check**
-   - What IRR from current price to target over 12 months?
-   - Is that consistent with recommendation rating?
-
----
-
-## Output Files
-
-Create the following deliverables:
-
-### 1. Valuation Analysis Document
-**File**: `research/companies/<TICKER>/reports/<TICKER>_Valuation_Analysis_<Date>.md` (written analysis)
-
-**Contents** (4-6 pages):
-- Executive summary with price target
-- DCF analysis (1 page) with sensitivity table
-- Comparable companies analysis (1 page) with statistical summary
-- Precedent transactions (0.5 page) if applicable
-- Valuation summary and football field (0.5 page)
-- Investment recommendation (1 page)
-- Key catalysts and risks (1 page)
-
-### 2. Excel Valuation Tabs
-**Add to Task 2's financial model file:** `research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx`
-
-**IMPORTANT**: Do NOT create a separate Excel file. Add these tabs to the existing financial model from Task 2. This keeps all quantitative data in one place.
-
-**Tabs to add:**
-- DCF tab with full calculations
-- Sensitivity analysis tab
-- Comps tab with peer data
-- Precedent transactions tab (if applicable)
-- Valuation summary tab
-
----
-
-## Success Criteria
-
-A successful valuation analysis should:
-1. Use at least 2 methods (DCF + Comps minimum)
-2. Include comprehensive DCF sensitivity analysis (2-way tables)
-3. Include statistical summary in comps (max/75th/median/25th/min)
-4. Provide valuation range (low/base/high), not point estimate
-5. Document all key assumptions with clear rationale
-6. Perform sanity checks
-7. Arrive at defensible price target
-8. Provide clear buy/hold/sell recommendation
-9. Identify 3-5 key catalysts
-10. Identify 3-5 key risks
-11. Be auditable and transparent
-
----
-
-## Next Steps
-
-After completing Task 3, the valuation analysis will be used for:
-- **Task 4 (Charts)**: Create DCF sensitivity heatmaps, valuation football field, scenario comparison charts
-- **Task 5 (Report Assembly)**: Integrate valuation analysis into final report
-
-The price target and recommendation are the foundation of the final investment recommendation in the equity research report.
+**Checklist before proceeding to Task 4:**
+- [ ] `scripts/recalc_xlsx.py` exits `0` (`"status": "success"`) and `validate_dcf.py` exits `0` (`"status": "PASS"`)
+- [ ] Gross-debt WACC, mid-year explicit FCF, end-of-year `(1+WACC)^N` TV discounting, `g <= 3.5%` and `< WACC`, centered 5×5 live sensitivity grid
+- [ ] Comps table includes Max / 75th / Median / 25th / Min statistical summary
+- [ ] Precedent M&A assigned `0%` weight (cross-check only) when M&A is unlikely
+- [ ] Standardized `Buy / Hold / Sell` rating consistent with upside/downside threshold
+- [ ] All arithmetic cross-checked and all forward drivers tagged `[ASSUMPTION]`

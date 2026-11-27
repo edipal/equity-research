@@ -1,14 +1,16 @@
+<!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/equity-research/skills/earnings-analysis/references/best-practices.md), Apache-2.0; modified for Google Antigravity. -->
+
 # Best Practices, Examples, and Quality Guidelines
 
-This document provides examples, tips for success, common mistakes to avoid, and comprehensive quality checklists.
+This document provides examples, tips for success, common mistakes to avoid, and quality checklists for earnings update drafts (`DRAFT — FOR INTERNAL ANALYST REVIEW ONLY`).
 
 ## Example Headlines
 
 ### Good Earnings Update Headlines:
-- "Nike Q2 FY24: DTC Strength Offsets Wholesale Weakness - Maintaining OW, PT $95"
-- "Tesla Q3'24: Cybertruck Ramp Ahead of Plan - Raising Estimates, PT to $285"
-- "LVMH Q4'24: Fashion & Leather Resilient, Wines Weak - In-Line, Reiterating Buy"
-- "Apple Q1 FY24: Services Beat, iPhone Miss - Mixed Quarter, Lowering PT to $185"
+- "Nike Q2 FY24: DTC Strength Offsets Wholesale Weakness — Maintaining Buy, PT $95"
+- "Tesla Q3'24: Margin Beat Offsets Delivery Mix — Raising Estimates, PT to $285"
+- "LVMH Q4'24: Fashion & Leather Resilient, Wines Weak — In-Line, Reiterating Buy"
+- "Apple Q1 FY24: Services Beat, iPhone Miss — Mixed Quarter, Lowering PT to $185"
 
 ### Bad Headlines (Avoid):
 - "Nike Quarterly Update" (too generic, no takeaway)
@@ -17,7 +19,7 @@ This document provides examples, tips for success, common mistakes to avoid, and
 
 ## Tips for Success
 
-1. **Speed matters**: Published 24-48hrs post-earnings, not days later
+1. **Speed matters**: Draft within 24-48 hours post-earnings for analyst review, not days later
 
 2. **Lead with conclusion**: Beat or miss? Up or down estimates?
 
@@ -49,7 +51,7 @@ This document provides examples, tips for success, common mistakes to avoid, and
 
 ❌ **Ignoring guidance**: If company guides, analyze it thoroughly
 
-❌ **Too slow**: Publishing 5+ days after earnings loses relevance
+❌ **Too slow**: Drafting 5+ days after earnings loses relevance for live coverage
 
 ❌ **Rehashing basics**: Don't spend 3 pages explaining what the company does
 
@@ -124,10 +126,12 @@ Before delivering earnings update, verify all items below:
 - [ ] Every table has specific source with document reference
 - [ ] Source citations include page numbers or slide numbers where applicable
 
-**Beat/Miss Citations:**
-- [ ] Beat/miss analysis cites consensus source (Bloomberg, FactSet, etc.)
-- [ ] Consensus source includes "as of" date (pre-earnings close)
-- [ ] Company reported results cited to earnings release or 10-Q
+**Beat/Miss & Consensus Citations:**
+- [ ] Beat/miss cites verified pre-print consensus via hierarchy (MCP → pre-release wire → IR-compiled) with provider, as-of date, and `n` — NEVER post-print Yahoo Finance or unverified whisper numbers
+- [ ] If verified pre-print consensus is unavailable, benchmarked against prior guidance / internal model and Street consensus marked `[UNSOURCED]`
+- [ ] GAAP vs. Non-GAAP basis matched strictly between actuals and consensus
+- [ ] In-line thresholds applied (`±1.0%` revenue, `±2.0%` or `±$0.01` EPS)
+- [ ] Company reported results cited to earnings release or Form 10-Q/10-K (EDGAR URL `https://www.sec.gov/edgar/browse/?CIK=...` or `https://www.sec.gov/Archives/edgar/data/...`)
 
 **Guidance Citations:**
 - [ ] Current guidance cited to earnings call transcript or release
@@ -172,16 +176,13 @@ Before delivering earnings update, verify all items below:
 - [ ] Quarter/year references are correct
 - [ ] Year notation correct (A for actual, E for estimate)
 
-### Timeliness Checklist
+### Timeliness & Draft Compliance Checklist
 
-**Publication Timing:**
-- [ ] Report published within 24-48 hours of earnings release
-- [ ] If later than 48 hours, acknowledged as "delayed reaction"
-- [ ] ✅ **VERIFIED all data is from LATEST quarter by searching for recent earnings**
-- [ ] ✅ **Did NOT rely on knowledge cutoff - actively searched for current data**
-- [ ] Consensus estimates are pre-earnings (not post-earnings)
-- [ ] No outdated information included
-- [ ] Earnings release date is within last 1-3 months (not 6+ months old)
+**Draft Timing & Quarter Verification:**
+- [ ] Report labeled `DRAFT — FOR INTERNAL ANALYST REVIEW ONLY (NOT INVESTMENT ADVICE)`
+- [ ] Draft completed within 24–48 hours of earnings release (for live coverage; if later, acknowledge as delayed reaction; if historical quarter explicitly requested, label as historical retrospective)
+- [ ] For "latest quarter" requests, confirmed release is within 3 months of today and not drawn from stale training data
+- [ ] Consensus estimates are strictly pre-earnings (never post-print Yahoo Finance)
 
 ### Writing Style Checklist
 
@@ -200,19 +201,18 @@ Before delivering earnings update, verify all items below:
 
 ## Pre-Delivery Final Check
 
-Run through this quick final check before sending report to user:
+Run through this quick final review before staging the draft for analyst sign-off:
 
 ### 5-Minute Final Review:
-1. **Page 1**: Rating clear? Price target updated? Key takeaways compelling?
-2. **Numbers**: Do reported results match company's press release exactly?
-3. **Citations**: Spot check 3-4 figures/tables - all have sources with clickable hyperlinks?
-4. **Estimates**: Old vs. new clearly shown? Changes explained?
-5. **Charts**: All 8-12 embedded? All numbered and captioned?
-6. **Length**: Is it 8-12 pages (not 6, not 15)?
-7. **Hyperlinks**: Test 3-4 hyperlinks - do they work with Ctrl+Click?
-8. **Timeliness**: Is this being published within 48 hours of earnings?
+1. **Page 1**: Draft banner, rating, price target, and quantified takeaways clear?
+2. **Numbers**: Do reported results match the earnings release / 10-Q exactly, with GAAP vs. Non-GAAP separated?
+3. **Citations**: Spot check 3–4 figures/tables — all have dated sources and clickable hyperlinks?
+4. **Estimates**: Old vs. new clearly shown and tagged `[ASSUMPTION]`?
+5. **Charts**: Target 8–12 charts embedded (where disclosed), numbered, and captioned?
+6. **Consensus**: Pre-print provider, as-of date, `n`, and in-line thresholds verified (or `[UNSOURCED]` fallback noted)?
+7. **Timeliness**: Drafted within 24–48 hours of earnings (for live coverage) or clearly labeled historical retrospective?
 
-If all items check out, the report is ready for delivery.
+If all items check out, stage the draft in `research/companies/<TICKER>/` for human analyst review.
 
 ## Summary Delivery Format
 

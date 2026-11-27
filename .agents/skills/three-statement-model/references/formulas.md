@@ -1,3 +1,5 @@
+<!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/financial-analysis/skills/3-statement-model/references/formulas.md), Apache-2.0; modified for Google Antigravity. -->
+
 # Formula Reference
 
 **IMPORTANT:** Use the formulas outlined in this reference document unless otherwise specified by the user.
@@ -6,15 +8,17 @@
 
 ## Core Linkages
 
-```
-Balance Sheet:        Assets = Liabilities + Equity
-Net Income:           IS Net Income → CF Operations (starting point)
-Cash Flow:            ΔCash = CFO + CFI + CFF
-Cash Tie-Out:         Ending Cash (CF) = Cash (BS Asset)
-Cash Monthly/Annual:  Closing Cash (Monthly) = Closing Cash (Annual)
-Retained Earnings:    Prior RE + Net Income - Dividends = Ending RE
-Common Stock / APIC:  Prior Common Stock/APIC + Equity Issuance (CFF) + SBC (IS) = Ending Common Stock/APIC
-Year 0 Equity:        Equity Raised (Year 0) = Beginning Equity (Year 1)
+```text
+Balance Sheet:           Assets = Liabilities + Equity
+Net Income:              IS Net Income -> CF Operations (starting point)
+Cash Flow:               ΔCash = CFO + CFI + CFF
+Cash Tie-Out:            Ending Cash (CF) = Cash (BS Asset)
+Retained Earnings:       Prior RE + Net Income - Dividends = Ending RE
+Common Stock / APIC:     Prior APIC + Equity Issuance (CFF) + SBC (IS) = Ending APIC
+Treasury Stock:          Prior Treasury Stock - Share Repurchases (CFF) = Ending Treasury Stock
+AOCI:                    Prior AOCI + Other Comprehensive Income (OCI) = Ending AOCI
+Revolver / Min Cash:     Cash Before Revolver < Min Cash -> Revolver Draw; Excess Cash -> Revolver Paydown
+(Startup/Monthly only):  Closing Cash (Monthly) = Closing Cash (Annual); Year 0 Equity = Beg Equity (Y1)
 ```
 
 ## Gross Profit Calculation
@@ -111,50 +115,55 @@ Beginning Accumulated Depreciation
 PP&E (Net) = Gross PP&E - Accumulated Depreciation
 ```
 
-## Debt Schedule Formulas
+## Debt & Revolver Sweep Schedule Formulas
 
+```text
+Term Debt:
+  Beginning Term Debt
+  + New Term Borrowings
+  - Mandatory / Optional Term Repayments
+  = Ending Term Debt
+
+Revolver / Minimum Cash Sweep (prevents negative cash balances):
+  Cash Available for Debt Service = Beginning Cash + CFO + CFI + Term Debt Flow + Equity/Div Flow
+  Excess / (Shortfall) Cash       = Cash Available for Debt Service - Minimum Cash Balance
+  Revolver Draw / (Paydown)       = -MIN(Beginning Revolver, Excess Cash)  [if Excess > 0, pay down up to Beg Revolver]
+                                    or ABS(Shortfall)                       [if Shortfall < 0, draw to maintain Min Cash]
+  Ending Revolver                 = Beginning Revolver + Revolver Draw / (Paydown)
+
+Interest Expense (Default Non-Circular Method):
+  Interest Expense = (Beginning Term Debt × Term Rate) + (Beginning Revolver × Revolver Rate)
+  (Use beginning-of-period balances by default to avoid circularity; only use average balances if
+   wb.calculation.iterate = True and a circuit-breaker toggle is enabled.)
 ```
-Beginning Debt Balance
-+ New Borrowings
-- Repayments
-= Ending Debt Balance
 
-Interest Expense = Avg Debt Balance × Interest Rate
-  (Use beginning balance to avoid circularity, or iterate if circular refs enabled)
-```
+## Equity Roll-Forward Formulas (RE, APIC, Treasury Stock, AOCI)
 
-## Retained Earnings & Common Stock / APIC Formulas
-
-```
+```text
 Retained Earnings:
-  Beginning Retained Earnings
-  + Net Income (from IS)
-  - Dividends
-  = Ending Retained Earnings
+  Beginning Retained Earnings + Net Income (IS) - Dividends Paid (CFF) = Ending Retained Earnings
 
 Common Stock / Additional Paid-In Capital (APIC):
-  Beginning Common Stock / APIC
-  + Equity Issuance (from CFF)
-  + Stock-Based Compensation (SBC) (from IS)
-  = Ending Common Stock / APIC
+  Beginning Common Stock / APIC + Equity Issuance (CFF) + Stock-Based Compensation (IS) = Ending APIC
+
+Treasury Stock (Share Repurchases):
+  Beginning Treasury Stock (negative equity) - Share Repurchases (CFF cash outflow) = Ending Treasury Stock
+
+Accumulated Other Comprehensive Income (AOCI):
+  Beginning AOCI + Other Comprehensive Income (FX / hedging / unrealized gains) = Ending AOCI
 ```
 
 ## NOL (Net Operating Loss) Schedule Formulas
 
-```
+```text
 NOL CARRYFORWARD SCHEDULE
 
-Beginning NOL Balance (Year 1 / Formation = 0)
+Beginning NOL Balance:
+  - Established public company: pull Ending NOL carryforward from latest 10-K Income Tax footnote
+  - New-formation / startup model only: Beginning NOL (Year 1) = 0
 + NOL Generated (if EBT < 0, then ABS(EBT), else 0)
 - NOL Utilized (limited by taxable income and utilization cap)
 = Ending NOL Balance
-
-STARTING BALANCE RULE
-
-For a new business or first modeled period:
-  Beginning NOL Balance = 0
-  NOL can only increase through realized losses (EBT < 0)
-  NOL cannot be created from thin air or assumed
 
 NOL UTILIZATION CALCULATION
 
@@ -188,13 +197,13 @@ Total Income Tax Expense / (Benefit) = Current Tax Expense + Deferred Tax Expens
 
 ## Balance Sheet Structure
 
-```
+```text
 ASSETS
-  Cash (from CF ending cash)
+  Cash (from CF ending cash; >= Minimum Cash via revolver sweep)
   Accounts Receivable (from WC)
   Inventory (from WC)
   Total Current Assets
-  
+
   PP&E, Net (from DA)
   Deferred Tax Asset - NOL (from NOL schedule)
   Total Non-Current Assets
@@ -202,15 +211,17 @@ ASSETS
 
 LIABILITIES
   Accounts Payable (from WC)
-  Current Portion of Debt (from Debt)
+  Revolver & Current Portion of Debt (from Debt & Revolver schedule)
   Total Current Liabilities
-  
-  Long-Term Debt (from Debt)
+
+  Long-Term Debt (from Debt & Revolver schedule)
   Total Liabilities
 
 EQUITY
   Common Stock / APIC (Prior + Equity Issuance + SBC)
-  Retained Earnings (from RE schedule: Prior RE + NI - Dividends)
+  Retained Earnings (Prior RE + NI - Dividends)
+  Treasury Stock (Prior Treasury - Share Repurchases)
+  Accumulated OCI (Prior AOCI + OCI)
   Total Equity
 
 CHECK: Assets - Liabilities - Equity = 0
@@ -218,12 +229,12 @@ CHECK: Assets - Liabilities - Equity = 0
 
 ## Cash Flow Statement Structure
 
-```
+```text
 CASH FROM OPERATIONS (CFO)
   Net Income (LINK: IS)
   + D&A (LINK: DA schedule)
-  + Stock-Based Compensation (SBC) (LINK: IS or Assumptions)
-  - ΔDTA (Deferred Tax Asset) (LINK: NOL schedule; = Deferred Tax Expense/(Benefit) — increase in DTA subtracts non-cash IS tax benefit from NI)
+  + Stock-Based Compensation (SBC) (LINK: IS memo or carved-out line)
+  - ΔDTA (Deferred Tax Asset) (LINK: NOL schedule; = Deferred Tax Expense/(Benefit))
   - ΔAR (LINK: WC)
   - ΔInventory (LINK: WC)
   + ΔAP (LINK: WC)
@@ -234,46 +245,47 @@ CASH FROM INVESTING (CFI)
   = CFI
 
 CASH FROM FINANCING (CFF)
-  + Debt Issuance (LINK: Debt)
-  - Debt Repayment (LINK: Debt)
+  + Term Debt Issuance (LINK: Debt)
+  - Term Debt Repayment (LINK: Debt)
+  + / (-) Revolver Draw / (Paydown) (LINK: Debt & Revolver sweep)
   + Equity Issuance (LINK: BS Common Stock/APIC)
-  - Dividends (LINK: RE schedule)
+  - Share Repurchases (LINK: BS Treasury Stock)
+  - Dividends Paid (LINK: RE schedule)
   = CFF
 
-Net Change in Cash = CFO + CFI + CFF
-Beginning Cash
-+ Net Change in Cash
-= Ending Cash (LINK TO: BS Cash)
+Net Change in Cash = CFO + CFI + CFF (+ FX/OCI cash effect if applicable)
+Beginning Cash + Net Change in Cash = Ending Cash (LINK TO: BS Cash)
 ```
 
-## Income Statement Structure
+## Income Statement Structure (Avoiding SBC & D&A Double-Counting)
 
-```
+> **CRITICAL ACCOUNTING RULE:** Never double-count D&A or SBC! Choose **ONE** presentation consistently across historicals and forecasts and label it explicitly on the sheet:
+> - **Option A — GAAP Functional Presentation (Preferred for 10-K filings):** `COGS`, `S&M`, `G&A`, and `R&D` INCLUDE embedded D&A and SBC. Compute `EBIT = Gross Profit - S&M - G&A - R&D`, and display `Total D&A` and `Total SBC` strictly as **Memo rows** below EBIT (so `EBITDA = EBIT + Memo D&A`; never subtract D&A or SBC twice!).
+> - **Option B — Carved-Out Presentation:** Carve D&A and SBC out of historical `COGS`/`S&M`/`G&A`/`R&D` first (labeling them `S&M (ex-D&A/SBC)`, etc.), THEN subtract separate `D&A` and `SBC` lines to arrive at `EBIT`.
+
+```text
 Net Revenue
   Growth %
-(-) Cost of Revenue
+(-) Cost of Revenue (state whether incl. or excl. D&A/SBC)
   % of Net Revenue
 ────────────────
 Gross Profit (= Net Revenue - Cost of Revenue)
   Gross Margin %
 
-(-) S&M
-  % of Net Revenue
-(-) G&A
-  % of Net Revenue
-(-) R&D
-  % of Net Revenue
-(-) D&A
-(-) SBC
-  % of Net Revenue
+(-) S&M (state whether incl. or excl. D&A/SBC)
+(-) G&A (state whether incl. or excl. D&A/SBC)
+(-) R&D (state whether incl. or excl. D&A/SBC)
+[Only if Option B carved-out: (-) D&A and (-) SBC]
 ────────────────
-EBIT
+EBIT (= Gross Profit - Total OpEx)
   EBIT Margin %
-
-EBITDA
+Memo: Total D&A (linked from PP&E/D&A schedule)
+Memo: Total SBC (linked to CF add-back & BS APIC)
+Memo: EBITDA (= EBIT + Total D&A; label GAAP vs. Non-GAAP/SBC basis explicitly)
   EBITDA Margin %
 
-(-) Interest Expense
+(-) Interest Expense (linked to Beginning Debt & Revolver balance)
+(+) Interest Income
 ────────────────
 EBT (Pre-Tax Income)
 (-) Current Tax Expense (MAX(0, Taxable Income × Tax Rate), from NOL schedule)
@@ -287,16 +299,17 @@ Net Income (= EBT - Total Income Tax Expense)
 
 ## Check Formulas
 
-```
-BS Balance Check:       = Assets - Liabilities - Equity  (must = 0)
-Cash Tie-Out:           = BS Cash - CF Ending Cash       (must = 0)
-RE Roll-Forward:        = Prior RE + NI - Div - BS RE    (must = 0)
-DTA Tie-Out:            = NOL Schedule DTA - BS DTA      (must = 0)
-Common Stock/APIC:      = ΔCommon Stock/APIC (BS) - Equity Issuance (CFF) - SBC (IS)  (must = 0)
-Year 0 Equity Tie-Out:  = Equity Raised (Year 0) - Beginning Equity (Year 1)  (must = 0)
-Cash Monthly vs Annual: = Closing Cash (Monthly) - Closing Cash (Annual)  (must = 0)
-NOL Utilization Cap:    = NOL Utilized ≤ EBT × 80%       (must be TRUE for post-2017)
-NOL Non-Negative:       = Ending NOL Balance ≥ 0         (must be TRUE)
-NOL Starting Balance:   = Beginning NOL (Year 1) = 0     (must be TRUE for new business)
-NOL Accumulation:       = NOL increases only when EBT < 0 (losses generate NOL)
+```text
+BS Balance Check:        = Assets - Liabilities - Equity                             (must = 0)
+Cash Tie-Out:            = BS Cash - CF Ending Cash                                  (must = 0)
+Min Cash Floor:          = BS Cash >= Minimum Cash Balance                           (must be TRUE)
+RE Roll-Forward:         = Prior RE + NI - Dividends - BS Ending RE                  (must = 0)
+Common Stock / APIC:     = ΔCommon Stock/APIC (BS) - Equity Issuance (CFF) - SBC     (must = 0)
+Treasury Stock Tie-Out:  = ΔTreasury Stock (BS) + Share Repurchases (CFF)            (must = 0)
+AOCI Tie-Out:            = Prior AOCI + OCI - BS Ending AOCI                         (must = 0)
+DTA Tie-Out:             = NOL Schedule DTA - BS DTA                                 (must = 0)
+NOL Utilization Cap:     = NOL Utilized <= EBT × 80%                                 (must be TRUE post-2017)
+NOL Non-Negative:        = Ending NOL Balance >= 0                                   (must be TRUE)
+NOL Accumulation:        = NOL increases only when EBT < 0                           (must be TRUE)
+(Startup/Monthly only):  = Closing Cash (Monthly) - Closing Cash (Annual) = 0; Beg NOL (Y1) = 0
 ```

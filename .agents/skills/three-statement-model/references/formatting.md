@@ -1,16 +1,20 @@
+<!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/financial-analysis/skills/3-statement-model/references/formatting.md), Apache-2.0; modified for Google Antigravity. -->
+
 # Formatting Standards Reference
 
 | Element | Format |
 |---------|--------|
-| Hard-coded inputs | Blue font |
-| Formulas | Black font |
-| Links to other sheets | Green font |
-| Check cells | Red if error, green if balanced |
-| Negative values | Parentheses, not minus signs |
-| Currency | No decimals for large figures, 2 decimals for per-share |
-| Percentages | 1 decimal place |
+| Hard-coded inputs | Blue font (`#0000FF`), optional `#F2F2F2` light grey fill |
+| Formulas | Black font (`#000000`) |
+| Links to other sheets | Green font (`#008000`) |
+| Section / column headers | `#1F4E79` dark navy (white bold) / `#D9E1F2` light blue (black bold) |
+| Key totals / check highlights | `#BDD7EE` medium blue fill, bold font |
+| Check cells | Red if error (`≠ 0`), black/standard if balanced (`= 0`) |
+| Negative values & zeros | Parentheses & dash for zero: `#,##0;(#,##0);"-"` (currency: `$#,##0;($#,##0);"-"`) |
+| Currency | `$#,##0;($#,##0);"-"` for millions; `$#,##0.00;($#,##0.00);"-"` for per-share |
+| Percentages | `0.0%` (1 decimal place) |
 | Headers | Bold, bottom border |
-| Units row | Include units row below headers ($ millions, %, etc.) |
+| Units row | Include units row below headers (`$ millions`, `%`, `x`, etc.) |
 
 ## Visual Separation Guidelines
 

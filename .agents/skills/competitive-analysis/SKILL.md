@@ -1,7 +1,9 @@
 ---
 name: competitive-analysis
-description: Framework for building competitive landscape decks — market positioning, competitor deep-dives, comparative analysis, strategic synthesis. Use when the user asks for a competitive landscape, competitor analysis, peer comparison, market positioning assessment, strategic review, or investment memo deck. Also triggers on "who are the competitors to X", "benchmark X against peers", "build a market map", or any request to systematically evaluate competitive dynamics across an industry.
+description: Build competitive landscape reports and market-positioning decks — moat assessment, competitor deep-dives, comparative frameworks, and strategic synthesis. Triggers on "competitive landscape", "who are the competitors to X", "benchmark X against peers", or "build a market map". Not for quantitative trading-multiples workbooks (use comps-analysis) or broad macro industry primers (use sector-overview).
 ---
+
+<!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/financial-analysis/skills/competitive-analysis/SKILL.md), Apache-2.0; modified for Google Antigravity. -->
 
 # Competitive Landscape Mapping
 
@@ -14,24 +16,19 @@ This skill produces file-based research deliverables under `research/sectors/<se
 - **Default Markdown report**: `research/sectors/<sector-slug>/competitive-landscape.md` (with structured tables, positioning frameworks, and citations).
 - **Optional presentation deck**: When slides are requested, build a `.pptx` deck via the `pptx-author` skill (`python-pptx` + 300 DPI `matplotlib` charts) saved to `research/sectors/<sector-slug>/decks/<sector-slug>_competitive_landscape_YYYY-MM-DD.pptx` (or update a user-supplied `.pptx` template).
 
-## Phase 1 — Scope the analysis
+## Phase 1 — Scope the analysis (Interactive vs. Subagent Mode)
 
-Competitive analysis means different things to different people. Before any research or slide-building, ask the user directly to pin down what they actually want. Don't guess — a 20-slide peer benchmarking deck and a 5-slide market map are both "competitive analysis" and take completely different shapes.
+- **Interactive mode:** Before researching or building slides, gather scope in one concise round of clarifying questions:
+  - **Scope** — Single target company with competitors around it, or multi-company side-by-side?
+  - **Competitor set** — Specific companies in scope (propose a set and confirm if unspecified).
+  - **Audience and depth** — Quick read or full primer?
+  - **Investment context** — Include Bull/Base/Bear scenarios and signposts (Step 9), or strategic review only?
+  - If an Excel/CSV is uploaded, confirm column mappings and preserve exact source values.
+- **Subagent mode (e.g., invoked by `market-researcher`):** Do not stall waiting for outline approval. Use the caller's sector/competitor scope, default to a 5–8 public peer map with a 2×2 positioning matrix and moat assessment, tag any inferred defaults `[ASSUMPTION]`, and surface the chosen framing in the final handoff.
 
-Gather in one concise round of clarifying questions:
+## Phase 2 — Outline, approve, then build (Interactive Mode)
 
-- **Scope** — Single target company with competitors around it? Or multi-company side-by-side with no protagonist?
-- **Competitor set** — Which companies are in scope? If the user names them, use exactly those. If they say "the usual suspects," propose a set and confirm.
-- **Audience and depth** — Quick read for someone already in the space, or a full primer? This drives whether you need market sizing, industry economics, and history — or can skip to the comparison.
-- **Investment context** — Do they need bull/base/bear scenarios and signposts? That's Step 9 below; skip it if this is a strategic review rather than an investment thesis.
-
-If they've uploaded an Excel/CSV with competitor data, confirm which columns map to which metrics before you start pulling numbers. Source-file fidelity matters: use values exactly as given, don't recalculate or re-round.
-
-## Phase 2 — Outline, approve, then build
-
-**Do not build the final deck or full report until the outline is approved.** Propose section/slide titles and one-line content notes, present them to the user, and get explicit confirmation. A competitive deck is 10-20 slides of interlocking content — rebuilding because slide 4 was wrong is expensive. The outline is the cheap iteration point.
-
-When proposing the outline, ask the user to confirm key structural choices: which positioning visualization (2×2 matrix / radar / tier diagram — Step 5 below) and how to group competitors (by business model / segment / posture — Step 4). These are taste calls the user likely has an opinion on.
+In interactive sessions, propose section/slide titles, positioning visualization (2×2 matrix / radar / tier diagram), and competitor grouping before building the full 10–20 slide deck or report. In subagent mode, proceed directly after documenting the outline at the top of the deliverable.
 
 ---
 

@@ -1,33 +1,28 @@
 ---
 name: three-statement-model
-description: Complete, populate and fill out 3-statement financial model templates (Income Statement, Balance Sheet, Cash Flow Statement). Use when asked to fill out model templates, complete existing model frameworks, populate financial models with data, complete a partially filled IS/BS/CF framework, or link integrated financial statements within an existing template structure. Triggers include requests to fill in, complete, or populate a 3-statement model template.
+description: Build from scratch or populate integrated 3-statement financial models (Income Statement, Balance Sheet, Cash Flow Statement, working capital, PP&E/D&A, debt/revolver, and tax/NOL schedules) in Excel (.xlsx) using Python/openpyxl. Use when constructing or completing linked historical and projected IS/BS/CF workbooks. Not for standalone intrinsic valuation (use dcf-model) or peer multiples (use comps-analysis).
 ---
 
-# 3-Statement Financial Model Template Completion
+<!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/financial-analysis/skills/3-statement-model/SKILL.md), Apache-2.0; modified for Google Antigravity. -->
 
-Complete and populate integrated financial model templates with proper linkages between Income Statement, Balance Sheet, and Cash Flow Statement.
+# 3-Statement Financial Model Builder & Template Completion
 
-## ⚠️ CRITICAL PRINCIPLES — Read Before Populating Any Template
+Build integrated 3-statement financial models **from scratch** OR **populate existing Excel templates** with full cross-statement linkages (Income Statement, Balance Sheet, Cash Flow Statement, and supporting schedules).
 
-**Execution Environment (Antigravity):**
-- Build and populate `.xlsx` workbooks programmatically with Python (`openpyxl`). Write live Excel formula strings (`ws["D15"] = "=D14*(1+Assumptions!$B$5)"`), then run `python3 scripts/recalc_xlsx.py <path-to-model.xlsx>` and run the `audit-xls` checklist before delivery.
-- **Default output path** (aligned with `.agents/rules/research-outputs.md`): save completed models to `research/companies/<TICKER>/models/<TICKER>_3Statement_YYYY-MM-DD.xlsx`.
-- All principles below apply to every tab and schedule.
+## ⚠️ CRITICAL PRINCIPLES — Read Before Building or Populating
+
+**Execution Environment (Antigravity / Python `openpyxl`):**
+- Build or update `.xlsx` workbooks programmatically with Python (`openpyxl`). Write live Excel formula strings (`ws["D15"] = "=D14*(1+Assumptions!$B$5)"`), then run `python3 scripts/recalc_xlsx.py <path-to-model.xlsx> 30` (exit `0`, `"status": "success"`) and run the `audit-xls` checklist before delivery.
+- **Template Preservation Warning (`openpyxl`):** Loading and re-saving a complex user template via `openpyxl` can **strip existing Excel charts, embedded images, ActiveX controls, and VBA macros** (`.xlsm`). Always back up the original template first, inspect `wb.defined_names` and sheet structure programmatically, and prefer building a clean workbook from scratch when no strict template layout is required.
+- **Default output path** (aligned with `AGENTS.md` / `.agents/rules/research-outputs.md`): save to `research/companies/<TICKER>/models/<TICKER>_3Statement_YYYY-MM-DD.xlsx`.
 
 **Formulas over hardcodes (non-negotiable):**
-- Every projection cell, roll-forward, linkage, and subtotal MUST be an Excel formula — never a pre-computed value
-- When using Python/openpyxl: write formula strings (`ws["D15"] = "=D14*(1+Assumptions!$B$5)"`), NOT computed results (`ws["D15"] = 12500`)
-- The ONLY cells that should contain hardcoded numbers are: (1) historical actuals, (2) assumption drivers in the Assumptions tab
-- If you find yourself computing a value in Python and writing the result to a cell — STOP. Write the formula instead.
-- Why: the model must flex when scenarios toggle or assumptions change. Hardcodes break every downstream integrity check silently.
+- Every projection cell, roll-forward, linkage, subtotal, and check MUST be a live Excel formula — never a pre-computed Python value.
+- The ONLY hardcoded numbers permitted are: (1) historical actuals (with filing citations in cell comments) and (2) assumption drivers (tagged `[ASSUMPTION]` in cell comments).
 
-**Verify step-by-step with the user:**
-1. **After mapping the template** → show the user which tabs/sections you've identified and confirm before touching any cells
-2. **After populating historicals** → show the user the historical block and confirm values/periods match source data
-3. **After building IS projections** → run the subtotal checks, show the user the projected IS, confirm before moving to BS
-4. **After building BS** → show the user the balance check (Assets = L+E) for every period, confirm before moving to CF
-5. **After building CF** → show the user the cash tie-out (CF ending cash = BS cash), confirm before finalizing
-6. **Do NOT populate the entire model end-to-end and present it complete** — break at each statement, show the work, catch errors early
+**Verify step-by-step (Interactive vs. Subagent Mode):**
+- **Interactive mode:** Confirm at major milestones — (1) architecture/template mapping, (2) historical actuals, (3) IS projections, (4) BS balance check `= 0` every period, (5) CF cash tie-out — before finalizing.
+- **Subagent mode (e.g., invoked by `model-builder`):** Do not stall waiting for mid-build confirmation. Build the complete integrated 3-statement model end-to-end, tag all assumed drivers `[ASSUMPTION]`, run `python3 scripts/recalc_xlsx.py <file.xlsx> 30`, verify BS balance `= 0` and CF cash tie-out `= 0` across all scenarios, and present the full audit summary and assumption table in the handoff.
 
 ## Formatting — Professional Blue/Grey Palette (Default unless template/user specifies otherwise)
 
@@ -88,11 +83,9 @@ Before populating a template, familiarize yourself with its existing layout to e
 - Note the visual border separating historical from projected periods
 - Check for consistent column order across all tabs
 
-**Working with Named Ranges**
-Templates often use named ranges for key inputs and outputs. Before entering data:
-- Review existing named ranges in the template (Formulas → Name Manager in Excel)
-- Common named ranges include: Revenue growth rates, cost percentages, key outputs (Net Income, EBITDA, Total Debt, Cash), scenario selector cell
-- Ensure inputs are entered in cells that feed into these named ranges
+**Working with Named Ranges (Python `openpyxl`):**
+- When populating a template, inspect `wb.defined_names` programmatically (`{k: v.attr_text for k, v in wb.defined_names.items()}`) before modifying cells so you preserve every defined range.
+- When building from scratch, define clean named ranges for key controls (e.g., `Scenario` / `Case` selector, `MinCash`) via `openpyxl.workbook.defined_name.DefinedName`.
 
 ### Projection Period
 - Templates typically project 5 years forward from last historical year
@@ -169,75 +162,25 @@ Use a scenario toggle (dropdown) in the Assumptions tab with CHOOSE or INDEX/MAT
 
 If the template specifically requires pulling data from SEC filings (10-K, 10-Q), see [references/sec-filings.md](references/sec-filings.md) for detailed extraction guidance. This reference is only needed when populating templates with public company data from regulatory filings.
 
-## Completing Model Templates
+## Building from Scratch vs. Populating Templates (Python / `openpyxl`)
 
-This section provides general guidance for completing any 3-statement financial model template while preserving existing formulas and ensuring data integrity.
+### Step 1: Analyze Structure (or Design Clean Scratch Architecture)
 
-### Step 1: Analyze the Template Structure
+- **When building from scratch:** Create canonical tabs — `Assumptions` (with Scenario toggle), `Income Statement`, `Balance Sheet`, `Cash Flow Statement`, `Working Capital`, `PP&E & D&A`, `Debt & Revolver`, `Tax & NOL` (if applicable), and `Checks`. Lock all row coordinates before writing any formulas.
+- **When populating a template:** Inspect all sheets, formulas, and `wb.defined_names` via `openpyxl.load_workbook(path, data_only=False)`. Map blue inputs vs. black formulas vs. green cross-sheet links, document units and sign conventions, and NEVER overwrite existing formula cells unless explicitly repairing a bug.
 
-Before entering any data, thoroughly review the template to understand its architecture:
+### Step 2: Programmatic Data Entry & Accounting Rules
 
-**Identify Input vs. Formula Cells**
-- Look for visual cues (font color, cell shading) that distinguish input cells from formula cells
-- Common conventions: Blue font = inputs, Black font = formulas, Green font = links to other sheets
-- Use Excel's Trace Precedents/Dependents (Formulas → Trace Precedents) to understand cell relationships
-- Check for named ranges that may control key inputs (Formulas → Name Manager)
+- **Avoid SBC & D&A Double-Counting:** In standard US GAAP filings, D&A and Stock-Based Compensation are typically **embedded inside** functional lines (`COGS`, `R&D`, `S&M`, `G&A`). State explicitly on the `Income Statement` whether functional OpEx lines are shown **inclusive** of D&A and SBC (in which case do NOT subtract D&A or SBC again — show them as memo rows fed from schedules/CF) OR **exclusive** of D&A and SBC (in which case carve them out of historical functional OpEx before subtracting D&A and SBC separately).
+- **Complete Equity Roll-Forward:** Track **Share Repurchases (Treasury Stock)** (`Prior Treasury - Buybacks`) and **Other Comprehensive Income (AOCI)** (`Prior AOCI + OCI`) alongside Retained Earnings (`Prior RE + NI - Dividends`) and Common Stock/APIC (`Prior APIC + Equity Issuance + SBC`) so Total Equity ties cleanly to the Balance Sheet.
+- **Minimum Cash & Revolver Sweep:** Include a **revolver / minimum cash sweep** in the `Debt & Revolver` schedule (`Minimum Cash Balance` input; draw revolver when `Cash Before Financing < Min Cash`, pay down revolver with excess cash up to outstanding revolver balance) so Cash never goes silently negative.
 
-**Map the Template's Flow**
-- Identify which tabs feed into others (e.g., Assumptions → IS → BS → CF)
-- Note any supporting schedules and their linkages to main statements
-- Document the template's specific line items and structure before populating
+### Step 3: Programmatic Formula & Linkage Validation
 
-### Step 2: Filling in Data Without Breaking Formulas
-
-**Golden Rules for Data Entry**
-
-| Rule | Description |
-|------|-------------|
-| Only edit input cells | Never overwrite cells containing formulas unless intentionally replacing the formula |
-| Preserve cell references | When copying data, use Paste Values (Ctrl+Shift+V) to avoid overwriting formulas with source formatting |
-| Match the template's units | Verify if template uses thousands, millions, or actual values before entering data |
-| Respect sign conventions | Follow the template's existing sign convention (e.g., expenses as positive or negative) |
-| Check for circular references | If the template uses iterative calculations, ensure Enable Iterative Calculation is turned on |
-
-**Safe Data Entry Process**
-1. Identify the exact cells designated for input (usually highlighted or labeled)
-2. Enter historical data first, then verify formulas are calculating correctly for those periods
-3. Enter assumption drivers that feed forecast calculations
-4. Review calculated outputs to confirm formulas are working as intended
-5. If a formula cell must be modified, document the original formula before making changes
-
-**Handling Pre-Built Formulas**
-- If formulas reference cells you haven't populated yet, expect temporary errors (#REF!, #DIV/0!) until all inputs are complete
-- When formulas produce unexpected results, trace precedents to identify missing or incorrect inputs
-- Never delete rows/columns without checking for formula dependencies across all tabs
-
-### Step 3: Validating Formulas
-
-**Formula Integrity Checks**
-
-Before relying on template outputs, validate that formulas are functioning correctly:
-
-| Check Type | Method |
-|------------|--------|
-| Trace precedents | Select a formula cell → Formulas → Trace Precedents to verify it references correct inputs |
-| Trace dependents | Verify key inputs flow to expected output cells |
-| Evaluate formula | Use Formulas → Evaluate Formula to step through complex calculations |
-| Check for hardcodes | Projection formulas should reference assumptions, not contain hardcoded values |
-| Test with known values | Input simple test values to verify formulas produce expected results |
-| Cross-tab consistency | Ensure the same formula logic applies across all projection periods |
-
-**Common Formula Issues to Watch For**
-- Mixed absolute/relative references causing incorrect results when copied across periods
-- Broken links to external files or deleted ranges (#REF! errors)
-- Division by zero in early periods before revenue ramps (#DIV/0! errors)
-- Circular reference warnings (may be intentional for interest calculations)
-- Inconsistent formulas across projection columns (use Ctrl+\ to find differences)
-
-**Validating Cross-Tab Linkages**
-- Confirm values that appear on multiple tabs are linked (not duplicated)
-- Verify schedule totals tie to corresponding line items on main statements
-- Check that period labels align across all tabs
+Inspect formula integrity in Python rather than manual GUI steps:
+- **Formula consistency across columns:** Iterate across forecast columns in Python to confirm identical relative/absolute formula structure across projection years (replacing manual `Ctrl+\`).
+- **Precedent / hardcode audit:** Parse formula strings to verify projection cells contain `=` formulas referencing `Assumptions` / schedule cells (no embedded hardcoded percentages or constants).
+- **Recalculation & error audit:** Run `python3 scripts/recalc_xlsx.py <model.xlsx> 30` and verify exit `0` (`"status": "success"`, zero `#REF!`, `#DIV/0!`, `#VALUE!`, `#NAME?`, `#N/A`, `#NUM!`, `#NULL!`, zero uncached formulas).
 
 ### Step 4: Quality Checks by Sheet
 
@@ -306,92 +249,64 @@ See [references/formulas.md](references/formulas.md) for all formula details.
 
 | Check | Formula | Expected Result |
 |-------|---------|-----------------|
-| Balance Sheet Balance | Assets - Liabilities - Equity | = 0 |
-| Cash Tie-Out | CF Ending Cash - BS Cash | = 0 |
-| Cash Monthly vs Annual | Closing Cash (Monthly) - Closing Cash (Annual) | = 0 |
-| Net Income Link | IS Net Income - CF Starting Net Income | = 0 |
-| Retained Earnings | Prior RE + NI - Dividends - BS Ending RE | = 0 |
-| Common Stock / APIC | ΔCommon Stock/APIC (BS) - Equity Issuance (CFF) - SBC (IS) | = 0 |
-| Year 0 Equity | Equity Raised (Year 0) - Beginning Equity Capital (Year 1) | = 0 |
+| Balance Sheet Balance | `Assets - Liabilities - Equity` | `= 0` |
+| Cash Tie-Out | `CF Ending Cash - BS Cash` | `= 0` |
+| Net Income Link | `IS Net Income - CF Starting Net Income` | `= 0` |
+| Retained Earnings | `Prior RE + NI - Dividends - BS Ending RE` | `= 0` |
+| Common Stock / APIC | `ΔCommon Stock/APIC (BS) - Equity Issuance (CFF) - SBC (IS)` | `= 0` |
+| Treasury Stock / Buybacks | `ΔTreasury Stock (BS) + Share Repurchases (CFF)` | `= 0` |
+| AOCI Roll-Forward | `Prior AOCI + OCI - BS Ending AOCI` | `= 0` |
+| Revolver / Min Cash Floor | `BS Ending Cash >= Min Cash Target` | `TRUE` |
+| *Monthly Roll-Up (if monthly tabs exist)* | `Closing Cash (Monthly) - Closing Cash (Annual)` | `= 0` |
 
 ### Sign Convention Reference
 
 | Statement | Item | Sign Convention |
 |-----------|------|-----------------|
 | CFO | D&A, SBC | Positive (add-back) |
-| CFO | ΔAR (increase) | Negative (use of cash) |
-| CFO | ΔAP (increase) | Positive (source of cash) |
+| CFO | ΔAR / ΔInventory (increase) | Negative (use of cash) |
+| CFO | ΔAP / ΔDeferred Revenue (increase) | Positive (source of cash) |
 | CFI | CapEx | Negative |
-| CFF | Debt issuance | Positive |
-| CFF | Debt repayments | Negative |
-| CFF | Dividends | Negative |
+| CFF | Debt / Revolver draw | Positive |
+| CFF | Debt / Revolver repayment | Negative |
+| CFF | Share Repurchases / Dividends | Negative |
 
-### Circular Reference Handling
+### Circular Reference Handling (Python / `openpyxl`)
 
-Interest expense creates circularity: Interest → Net Income → Cash → Debt Balance → Interest
-
-Enable iterative calculation in Excel: File → Options → Formulas → Enable iterative calculation. Set maximum iterations to 100, maximum change to 0.001. Add a circuit breaker toggle in Assumptions tab.
+Average-balance interest creates circularity (`Interest → Net Income → Cash → Revolver/Debt → Interest`):
+- **Preferred (non-circular default):** Compute projected interest expense and interest income on **beginning-of-period debt and cash balances** — completely avoids circular references and guarantees deterministic LibreOffice / Excel recalculation.
+- **If average-balance iteration is explicitly required:** Add a circuit-breaker toggle cell (`0 = Beginning Balance, 1 = Average Balance`) in `Assumptions`, AND enable workbook iteration programmatically in `openpyxl`:
+  ```python
+  wb.calculation.iterate = True
+  wb.calculation.iterateCount = 100
+  wb.calculation.iterateDelta = 0.001
+  ```
 
 ### Check Categories
 
-**Section 1: Currency Consistency**
-- Currency identified and documented in Assumptions
-- All tabs use consistent currency symbol and scale
-- Units row matches model currency
+**Section 1: Currency & Units Consistency** — Consistent currency and scale across all tabs.
 
-**Section 2: Balance Sheet Integrity**
-- Assets = Liabilities + Equity (for each period)
-- Formula: Assets - Liabilities - Equity (must = 0)
+**Section 2: Balance Sheet Integrity** — `Assets - Liabilities - Equity = 0` in every historical and projected period.
 
-**Section 3: Cash Flow Integrity**
-- Cash ties to BS (CF Ending Cash = BS Cash)
-- Cash Monthly vs Annual: Closing Cash (Monthly) = Closing Cash (Annual)
-- NI ties to IS (CF Net Income = IS Net Income)
-- D&A ties to schedule
-- SBC ties to IS
-- ΔAR, ΔInventory, ΔAP tie to WC schedule
-- CapEx ties to DA schedule
+**Section 3: Cash Flow Integrity** — CF Ending Cash `= BS Cash`; CF Starting NI `= IS NI`; D&A, SBC, ΔNWC, CapEx, Debt/Revolver, Buybacks, and Dividends all tie to schedules. *(Include Monthly-vs-Annual cash check only in templates with monthly tabs.)*
 
-**Section 4: Retained Earnings**
-- RE roll-forward check: Prior RE + NI - Dividends = Ending RE
-- Show component breakdown for debugging
+**Section 4: Equity Roll-Forward** — Retained Earnings (`Prior RE + NI - Dividends`), Common Stock/APIC (`Prior APIC + Equity Issuance + SBC`), Treasury Stock (`Prior Treasury - Share Repurchases`), and AOCI (`Prior AOCI + OCI`) all reconcile to BS.
 
-**Section 5: Working Capital**
-- AR, Inventory, AP tie to BS
-- DSO, DIO, DPO reasonability checks (flag if outside normal ranges)
+**Section 5: Working Capital** — AR, Inventory, AP, and Deferred Revenue tie to BS; DSO/DIO/DPO within reasonable ranges.
 
-**Section 6: Debt Schedule**
-- Total Debt ties to BS (Current + LT Debt)
-- Interest calculation ties to IS
+**Section 6: Debt & Revolver Schedule** — Total Debt ties to BS (Current + LT + Revolver); minimum cash sweep prevents negative cash; interest ties to IS.
 
-**Section 6b: Equity Financing & Common Stock / APIC**
-- Common Stock / APIC roll-forward: Prior Common Stock/APIC + Equity Issuance (CFF) + SBC (IS) = Ending Common Stock/APIC
-- Cash increase from equity issuance plus non-cash SBC credit ties to BS Common Stock/APIC increase (must balance)
-- Common Stock / APIC Tie-Out: ΔCommon Stock/APIC (BS) - Equity Issuance (CFF) - SBC (IS) = 0
-- Year 0 Equity Tie-Out: Equity Raised (Year 0) = Beginning Equity Capital (Year 1)
+**Section 6b: Tax & NOL Schedule (ASC 740)**
+- **Established public companies:** Anchor Beginning NOL and Valuation Allowance directly to the latest `10-K` Income Tax footnote (do NOT force Beginning NOL `= 0` for established companies with existing carryforwards!).
+- **New-formation / startup models only:** Beginning NOL (Year 1 / Formation) `= 0`.
+- NOL increases only when `EBT < 0`; post-2017 federal utilization `<= 80%` of taxable income; Ending NOL `>= 0`.
+- `Current Tax Payable = MAX(0, Taxable Income × Tax Rate)`; GAAP `Deferred Tax Expense / (Benefit) = -ΔDTA` on IS and `-ΔDTA` on CFO (or `0` on both under a `100%` valuation allowance).
 
-**Section 6c: NOL Schedule**
-- Beginning NOL (Year 1 / Formation) = 0 (new business starts with zero NOL)
-- NOL increases only when EBT < 0 (losses must be realized to generate NOL)
-- DTA ties to BS (NOL Schedule DTA = BS Deferred Tax Asset)
-- NOL utilization ≤ 80% of EBT (post-2017 federal limitation)
-- NOL balance is non-negative (cannot utilize more than available)
-- NOL generated only when EBT < 0
-- Current tax payable = 0 when taxable income ≤ 0 (GAAP Deferred Tax Expense / (Benefit) = -ΔDTA on IS and -ΔDTA on CFO; under a 100% valuation allowance, Net DTA stays 0 on BS and ΔDTA = 0 on both IS and CF)
+**Section 7: Scenario Hierarchy** — Upside > Base > Downside for Revenue, EBITDA, NI, FCF, margins; Upside < Base < Downside for leverage.
 
-**Section 7: Scenario Hierarchy**
-- Absolute metrics: Upside > Base > Downside (NI, EBITDA, FCF)
-- Margins: Upside > Base > Downside (GM%, EBITDA%, NI%)
-- Credit metrics: Upside < Base < Downside for leverage (inverted)
+**Section 8: Formula Integrity** — Zero `#REF!`, `#DIV/0!`, `#VALUE!`, `#NAME?`, `#N/A`, `#NUM!`, `#NULL!`; zero uncached formulas (`scripts/recalc_xlsx.py` exits `0`).
 
-**Section 8: Formula Integrity**
-- COGS, S&M, G&A, R&D, SBC driven by % of Revenue (no hardcodes)
-- Consistent formulas across projection years
-- No #REF!, #DIV/0!, #VALUE! errors
-
-**Section 9: Credit Metric Thresholds**
-- Flag metrics as Green/Yellow/Red based on covenant thresholds
-- Summary of any red flags
+**Section 9: Credit Metric Thresholds** — Flag covenant breaches clearly.
 
 ### Master Check Formula
 

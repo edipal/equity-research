@@ -1,3 +1,5 @@
+<!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/financial-analysis/skills/competitive-analysis/references/frameworks.md), Apache-2.0; modified for Google Antigravity. -->
+
 # Frameworks Reference
 
 ## 2x2 Matrix: Common Axis Pairs by Industry

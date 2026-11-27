@@ -1,7 +1,9 @@
 ---
 name: sector-overview
-description: Create comprehensive industry and sector landscape reports covering market dynamics, competitive positioning, key players, and thematic trends. Use for client requests, sector initiations, thematic research pieces, or internal knowledge building. Triggers on "sector overview", "industry report", "market landscape", "sector analysis", "industry deep dive", or "thematic research".
+description: Create comprehensive industry and sector landscape primers covering market sizing (TAM), value chain structure, secular drivers, key players, and thematic trends. Triggers on "sector overview", "industry report", "market landscape", "sector analysis", "industry deep dive", or "thematic research". Not for competitor-by-competitor positioning decks (use competitive-analysis) or quantitative peer multiples tables (use comps-analysis).
 ---
+
+<!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/equity-research/skills/sector-overview/SKILL.md), Apache-2.0; modified for Google Antigravity. -->
 
 # Sector Overview
 

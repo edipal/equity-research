@@ -1,3 +1,5 @@
+<!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/financial-analysis/skills/competitive-analysis/references/schemas.md), Apache-2.0; modified for Google Antigravity. -->
+
 # Schemas Reference
 
 Additional table formats not shown in main SKILL.md.

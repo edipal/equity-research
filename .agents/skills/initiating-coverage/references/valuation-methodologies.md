@@ -1,6 +1,8 @@
+<!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/equity-research/skills/initiating-coverage/references/valuation-methodologies.md), Apache-2.0; modified for Google Antigravity. -->
+
 # Valuation Methodologies for Equity Research
 
-This reference document provides comprehensive guidance on the three primary valuation methodologies used in equity research: Discounted Cash Flow (DCF), Trading Comparables, and Precedent Transactions.
+This reference document provides conceptual guidance on the three primary valuation methodologies used in equity research: Discounted Cash Flow (DCF), Trading Comparables, and Precedent Transactions. For canonical Excel implementation, exact row layouts, and automated validation scripts, delegate to the `dcf-model` and `comps-analysis` skills.
 
 ## Table of Contents
 
@@ -69,63 +71,52 @@ EBIT
 
 #### 5. Determine Terminal Value
 
-**Method A: Perpetuity Growth Method**
+**Method A: Perpetuity Growth Method (Primary)**
 ```
-Terminal Value = FCF(final year) × (1 + g) / (WACC - g)
+Undiscounted TV = UFCF(final year) × (1 + g) / (WACC - g)
+PV of TV        = Undiscounted TV / (1 + WACC)^N
 ```
-- g = perpetual growth rate (typically 2-3%, not exceeding GDP growth)
-- Use when company has reached stable, mature growth
+- `g` = perpetual growth rate, strictly `< WACC` and `<= long-term nominal GDP / Rf` (typically `2.0%–3.5%`; never `3.5%–5.0%+`).
+- Target TV `%` of EV: `50%–70%` (flag and investigate `< 40%` or `> 80%`).
 
-**Method B: Exit Multiple Method**
+**Method B: Exit Multiple Method (Cross-Check)**
 ```
-Terminal Value = EBITDA(final year) × Exit Multiple
+Undiscounted TV = EBITDA(final year) × Exit EV/EBITDA Multiple
+PV of TV        = Undiscounted TV / (1 + WACC)^N    (ALWAYS N, never N - 0.5)
 ```
-- Exit multiple based on current trading comps
-- More appropriate for cyclical businesses
+- Exit multiple cross-checked against peer trading comps.
 
 #### 6. Calculate Weighted Average Cost of Capital (WACC)
 
 ```
-WACC = (E/V × Cost of Equity) + (D/V × Cost of Debt × (1 - Tax Rate))
+Total Capitalization (V) = Market Value of Equity (E) + Total Gross Debt (D)
+Equity Weight            = E / (E + D)   [0%–100%]
+Debt Weight              = D / (E + D)   [0%–100%, NEVER negative]
+WACC                     = (E/V × Cost of Equity) + (D/V × Pre-Tax Cost of Debt × (1 - Marginal Tax Rate))
 ```
 
-**Cost of Equity (using CAPM):**
-```
-Cost of Equity = Risk-Free Rate + Beta × Equity Risk Premium
-```
-- Risk-Free Rate: 10-year Treasury yield
-- Beta: Regression of stock returns vs. market (or use comparable beta)
-- Equity Risk Premium: Historical average ~5-6%
-
-**Cost of Debt:**
-```
-Cost of Debt = Risk-Free Rate + Credit Spread
-```
-- Use company's current borrowing rate or implied from bonds
-- Adjust for credit rating if no bonds outstanding
-
-**Capital Structure:**
-- E/V = Market value of equity / Total value
-- D/V = Market value of debt / Total value
-- Use target capital structure, not current (if significantly different)
+- **Cost of Equity (CAPM):** `Rf (10Y US Treasury) + Beta (5Y monthly) × ERP (5.0%–6.0%)`.
+- **Cost of Debt:** Bond YTM or `Rf + Credit Spread`; multiply by `(1 - Marginal Tax Rate)`.
+- **Gross Debt Basis:** Always use gross debt (`D >= 0`), NEVER `Net Debt / EV` (which creates negative debt weights for net-cash companies). See `dcf-model` (`references/wacc-and-valuation-bridge.md`).
 
 #### 7. Discount Cash Flows to Present Value
 
-```
-PV = Σ [FCFt / (1 + WACC)^t] + [Terminal Value / (1 + WACC)^n]
-```
+- **Explicit UFCFs (Mid-Year Convention):** `PV(UFCF_t) = UFCF_t / (1 + WACC)^(t - 0.5)` for `t = 1..N`.
+- **Terminal Value (End-of-Year):** `PV(TV) = TV / (1 + WACC)^N`.
+- **SBC Treatment:** Keep Stock-Based Compensation as a real economic expense in GAAP EBIT / UFCF (do not add back SBC without explicit dilution reconciliation).
 
 #### 8. Calculate Enterprise Value and Equity Value
 
 ```
-Enterprise Value = PV of Projected FCF + PV of Terminal Value
-Less: Net Debt (Total Debt - Cash)
-Plus: Non-operating Assets
-Less: Minority Interest
+Enterprise Value = Sum of PV of Explicit UFCFs + PV of Terminal Value
+Less: Total Gross Debt (ST + LT + finance leases; do NOT double-count ASC 842 operating lease liabilities when FCF already expenses lease rent)
 Less: Preferred Stock
-= Equity Value
+Less: Non-Controlling Interest (Minority Interest)
+Plus: Cash & Marketable Securities
+Plus: Equity Investments (non-operating)
+= Implied Equity Value
 
-Price Per Share = Equity Value / Diluted Shares Outstanding
+Implied Price Per Share = Implied Equity Value / Fully Diluted Shares (Treasury Stock Method + If-Converted)
 ```
 
 ### DCF Sensitivity Analysis
@@ -370,10 +361,10 @@ Present all three methods in a single framework:
 
 ### Weighting the Methods
 
-**Typical Weighting:**
-- **DCF**: 40-60% (fundamental value, but assumes accuracy of projections)
-- **Trading Comps**: 25-40% (reflects current market sentiment)
-- **Precedent Trans.**: 15-25% (less relevant unless M&A likely)
+**Typical Standalone Weighting (M&A unlikely):**
+- **DCF:** `50%–60%` (intrinsic fundamental value)
+- **Trading Comps:** `40%–50%` (current public-market relative valuation)
+- **Precedent Transactions:** `0%` weight (cross-check / takeover floor only — avoid inflating standalone price targets with control premiums unless an active M&A catalyst is central to the thesis, in which case `10%–25%` may be justified)
 
 **Adjust weights based on:**
 - **Confidence in forecasts**: Higher confidence → higher DCF weight

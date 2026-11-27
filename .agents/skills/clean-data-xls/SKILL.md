@@ -3,13 +3,15 @@ name: clean-data-xls
 description: Clean up messy spreadsheet data — trim whitespace, fix inconsistent casing, convert numbers-stored-as-text, standardize dates, remove duplicates, and flag mixed-type columns. Use when data is messy, inconsistent, or needs prep before analysis. Triggers on "clean this data", "clean up this sheet", "normalize this data", "fix formatting", "dedupe", "standardize this column", "this data is messy".
 ---
 
+<!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/financial-analysis/skills/clean-data-xls/SKILL.md), Apache-2.0; modified for Google Antigravity. -->
+
 # Clean Data
 
 Clean messy data in a target `.xlsx`/`.csv` file and sheet (or a specified Google Sheet range when `gsheets` is connected).
 
 ## Environment
 
-- **Standalone `.xlsx` / `.csv` files (default in Antigravity):** Use Python (`openpyxl` / `pandas`) to inspect and write formula-based helper columns or cleaned sheets, then verify with `python3 scripts/recalc_xlsx.py`.
+- **Standalone `.xlsx` / `.csv` files (default in Antigravity):** Use Python (`openpyxl` / `pandas`) to inspect and write formula-based helper columns or cleaned sheets, then verify with `python3 scripts/recalc_xlsx.py <file.xlsx> --check-only` (read-only) or `--output <cleaned.xlsx>` (non-destructive). Confirm exit `0` (`"status": "success"`); if exit `2` (`"status": "unverified"`, LibreOffice absent), disclose clearly or pass `--allow-unrecalculated` only with user approval.
 - **Google Sheets (when `gsheets` plugin is connected):** Export/read sheet ranges, inspect data quality, and write cleaned helper formulas cleanly.
 
 ## Workflow

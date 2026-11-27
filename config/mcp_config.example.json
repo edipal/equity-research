@@ -1,4 +1,5 @@
 {
+  "_notice": "Illustrative vendor MCP templates requiring active institutional subscriptions and vendor-confirmed endpoint URLs/credentials. Copy to .agents/mcp_config.json (gitignored), remove servers you do not subscribe to, and supply your vendor auth headers or OAuth credentials.",
   "mcpServers": {
     "factset": {
       "serverUrl": "https://mcp.factset.com/mcp"

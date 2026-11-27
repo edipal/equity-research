@@ -1,7 +1,9 @@
 ---
 name: morning-note
-description: Draft concise morning meeting notes summarizing overnight developments, trade ideas, and key events for coverage stocks. Designed for the 7am morning meeting format — tight, opinionated, actionable. Triggers on "morning note", "morning meeting", "what happened overnight", "trade idea", "morning call prep", or "daily note".
+description: Draft concise 7am morning meeting notes summarizing overnight developments, quick earnings takes, and actionable trade calls for coverage stocks. Triggers on "morning note", "morning meeting", "what happened overnight", "morning call prep", or "daily note". Not for systematic multi-factor stock screening (use idea-generation) or full quarterly earnings reports (use earnings-analysis).
 ---
+
+<!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/equity-research/skills/morning-note/SKILL.md), Apache-2.0; modified for Google Antigravity. -->
 
 # Morning Note
 
@@ -35,7 +37,8 @@ Keep it tight — a morning note should be readable in 2 minutes:
 
 ---
 
-**[Date] Morning Note — [Analyst Name]**
+**DRAFT — FOR INTERNAL ANALYST REVIEW ONLY (NOT INVESTMENT ADVICE)**
+**[Date] Morning Note — [ANALYST NAME — REVIEW REQUIRED]**
 **[Sector Coverage]**
 
 **Top Call: [Headline — the one thing PMs need to hear]**

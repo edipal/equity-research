@@ -3,6 +3,8 @@ name: catalyst-calendar
 description: Build and maintain a calendar of upcoming catalysts across a coverage universe — earnings dates, conferences, product launches, regulatory decisions, and macro events. Helps prioritize attention and position ahead of events. Triggers on "catalyst calendar", "upcoming events", "what's coming up", "earnings calendar", "event calendar", or "catalyst tracker".
 ---
 
+<!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/equity-research/skills/catalyst-calendar/SKILL.md), Apache-2.0; modified for Google Antigravity. -->
+
 # Catalyst Calendar
 
 ## Workflow
@@ -47,9 +49,11 @@ For each company, identify upcoming events:
 
 ### Step 3: Calendar View
 
-| Date | Event | Company/Sector | Type | Impact (H/M/L) | Our Positioning | Notes |
-|------|-------|---------------|------|-----------------|----------------|-------|
-| | | | Earnings/Corp/Industry/Macro | | Long/Short/Neutral | |
+| Date | Status | Event | Company/Sector | Type | Impact (H/M/L) | Our Positioning | Source | Notes |
+|------|--------|-------|----------------|------|----------------|-----------------|--------|-------|
+| YYYY-MM-DD | Confirmed / Projected `[ASSUMPTION]` | | | Earnings/Corp/Industry/Macro | High/Medium/Low | Long/Short/Neutral | IR press release / SEC filing / FOMC schedule (date) | |
+
+- Always distinguish **`Confirmed`** dates (backed by a company IR announcement, SEC filing, or official regulator schedule) from **`Projected`** dates estimated from prior-year reporting cadence — tag every projected date **`[ASSUMPTION]`**.
 
 ### Step 4: Weekly Preview
 

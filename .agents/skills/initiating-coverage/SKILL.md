@@ -1,779 +1,109 @@
 ---
 name: initiating-coverage
-description: Create institutional-quality equity research initiation reports through a 5-task workflow. Tasks must be executed individually with verified prerequisites - (1) company research, (2) financial modeling, (3) valuation analysis, (4) chart generation, (5) final report assembly. Each task produces specific deliverables (markdown docs, Excel models, charts, or DOCX reports). Tasks 3-5 have dependencies on earlier tasks.
+description: Create institutional-grade equity research initiation report drafts through a 5-task workflow executed one task at a time with verified prerequisites — (1) company research, (2) financial modeling, (3) valuation analysis, (4) chart generation, (5) final DOCX assembly. Use for comprehensive first-time coverage of a public company. Not for quarterly earnings updates (use earnings-analysis) or standalone models (use dcf-model or three-statement-model).
 ---
+
+<!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/equity-research/skills/initiating-coverage/SKILL.md), Apache-2.0; modified for Google Antigravity. -->
 
 # Initiating Coverage
 
-Create institutional-quality equity research initiation reports through a structured 5-task workflow. Each task must be executed separately with verified inputs.
+Produce comprehensive, first-time equity research coverage drafts through a structured **5-task workflow**. Every deliverable is staged as **`DRAFT — FOR INTERNAL ANALYST REVIEW ONLY (NOT INVESTMENT ADVICE)`** under `research/companies/<TICKER>/` per `.agents/rules/research-integrity.md`.
 
-## Overview
-
-This skill produces comprehensive first-time coverage reports following institutional standards (JPMorgan, Goldman Sachs, Morgan Stanley format). Tasks are executed individually, each verifying prerequisites before proceeding.
-
-**Default Font**: Calibri throughout all documents (unless user specifies otherwise).
+**Default Font:** Calibri across all documents and charts (unless the user specifies otherwise).
 
 ---
 
-## ⚠️ CRITICAL: One Task at a Time
+## Core Guardrails (Read Before Starting)
 
-**THIS SKILL OPERATES IN SINGLE-TASK MODE ONLY.**
-
-### If User Requests Full Pipeline
-
-When user requests:
-- "Create a coverage initiation report for [Company]"
-- "Write an initiation report for [Company]"
-- "Do the entire equity research process for [Company]"
-- "Complete all 5 tasks for [Company]"
-- Any request that implies running multiple tasks or the entire workflow
-
-**REQUIRED RESPONSE:**
-
-1. **Ask which specific task to perform:**
-   ```
-   I can help you create an equity research initiation report for [Company].
-   This involves 5 separate tasks that need to be completed individually:
-
-   1. Company Research - Research business, management, industry
-   2. Financial Modeling - Build projection model
-   3. Valuation Analysis - DCF and comparable companies
-   4. Chart Generation - Create 25-35 charts
-   5. Report Assembly - Compile final report
-
-   Which task would you like to start with?
-   ```
-
-2. **When user explicitly requests all tasks together:**
-   ```
-   I understand you'd like to complete the entire initiation report pipeline.
-   This skill executes one task at a time to enforce quality-control gates,
-   verify numbers against primary filings, and allow analyst review at each stage.
-
-   Would you like to start with Task 1 (Company Research)?
-   ```
-
-3. **Never automatically assume which task to start** - always ask user to confirm.
-
-4. **Never execute multiple tasks in sequence** - complete one task, deliver outputs, then wait for next user request.
-
-### Task Execution Rules
-
-- ✅ Execute exactly ONE task per user request
-- ✅ Always verify prerequisites before starting a task
-- ✅ Deliver task outputs and confirm completion
-- ✅ Wait for user to explicitly request the next task
-- ❌ Never chain multiple tasks together automatically
-- ❌ Never assume user wants to proceed to next task
-- ❌ Never execute Tasks 3-5 without verifying required inputs exist
-
-### ⚠️ Deliverables Policy: NO SHORTCUTS
-
-**DELIVER ONLY THE SPECIFIED OUTPUTS. DO NOT CREATE EXTRA DOCUMENTS.**
-
-Each task specifies exact deliverables. Do NOT create:
-- ❌ "Completion summaries"
-- ❌ "Executive summaries"
-- ❌ "Quick reference guides"
-- ❌ "Next steps documents"
-- ❌ "Task completion reports"
-- ❌ Any other "helpful" documentation not explicitly specified
-
-**Why**: These extras waste context and are not part of the professional workflow.
-
-**What TO deliver**:
-- ✅ Task 1: `research/companies/<TICKER>/reports/<TICKER>_Research_Document_<Date>.md` — **NOTHING ELSE**
-- ✅ Task 2: `research/companies/<TICKER>/models/<TICKER>_Historical_Financials_<Date>.xlsx` (when extracting from filings) and `research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx` — **NOTHING ELSE**
-- ✅ Task 3: `research/companies/<TICKER>/reports/<TICKER>_Valuation_Analysis_<Date>.md` + valuation tabs added to `<TICKER>_Financial_Model_<Date>.xlsx` — **NOTHING ELSE**
-- ✅ Task 4: 25–35 chart PNGs + `chart_index.txt` saved directly in `research/companies/<TICKER>/reports/charts/` — **NOTHING ELSE**
-- ✅ Task 5: `research/companies/<TICKER>/reports/<TICKER>_Initiation_Report_<Date>.docx` — **NOTHING ELSE**
-
-**If a deliverable is not listed above, DO NOT CREATE IT.**
+1. **One Task at a Time:** Execute exactly **one** task per user request (never chain Tasks 1–5 end-to-end automatically). If the user asks for an entire initiation report or full pipeline, list the 5 tasks and ask which task to start with (default recommendation: Task 1 or Task 2).
+2. **Drafts Only & No Fabricated Identities:** Label every report, model summary, and deliverable `DRAFT — FOR INTERNAL ANALYST REVIEW ONLY (NOT INVESTMENT ADVICE)`. Use `[ANALYST NAME — REVIEW REQUIRED]` and `[DATE]` placeholders — **never** invent analyst names, CFA/Ph.D. credentials, email addresses, phone numbers, or firm attributions.
+3. **No Fabrication to Hit Quotas:** All row counts, chart counts, word counts, and peer/deal counts are **target ranges where disclosed in primary filings** — never fabricate segment breakdowns, sub-geographies, funding rounds, customer cohorts, or precedent deals to satisfy a quota. Tag every analyst estimate `[ASSUMPTION]` and any unverified figure `[UNSOURCED]`.
+4. **Canonical Deliverables Only:** Create only the specified deliverables for the requested task — no unsolicited completion summaries or meta-reports.
+5. **Load Only the Active Task Reference:** Each task's full instructions live in `references/task1`–`task5`. Load **only** the reference file for the single task being executed to conserve context.
 
 ---
 
-## Task Selection
+## 5-Task Pipeline & Canonical Deliverables
 
-Select which task to execute:
+| Task | Name | Prerequisites | Reference Doc | Canonical Deliverable(s) |
+|---|---|---|---|---|
+| **1** | Company Research | Ticker / company name (independent) | [references/task1-company-research.md](references/task1-company-research.md) | `research/companies/<TICKER>/reports/<TICKER>_Research_Document_<Date>.md` (target ~6,000–8,000 words) |
+| **2** | Financial Modeling | SEC 10-K/10-Q filings or user historicals (Task 1 optional) | [references/task2-financial-modeling.md](references/task2-financial-modeling.md) | `research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx` (5 core tabs: `Revenue Model`, `Income Statement`, `Cash Flow Statement`, `Balance Sheet`, `Scenarios`) + optional `<TICKER>_Historical_Financials_<Date>.xlsx` |
+| **3** | Valuation Analysis | Task 2 financial model (verified via `recalc_xlsx.py`) | [references/task3-valuation.md](references/task3-valuation.md) & [references/valuation-methodologies.md](references/valuation-methodologies.md) | `research/companies/<TICKER>/reports/<TICKER>_Valuation_Analysis_<Date>.md` + 4 valuation tabs added to Task 2's `.xlsx`: `WACC`, `DCF` (inline 5×5 sensitivity or optional `Sensitivity` tab), `Comparable Companies`, `Valuation Summary` |
+| **4** | Chart Generation | Tasks 1, 2, & 3 + verified market data | [references/task4-chart-generation.md](references/task4-chart-generation.md) | 300 DPI PNGs (target 20–30+ charts where disclosed, prioritizing core financial/valuation charts) + `chart_index.txt` in `research/companies/<TICKER>/reports/charts/` |
+| **5** | Report Assembly | Tasks 1, 2, 3, & 4 | [references/task5-report-assembly.md](references/task5-report-assembly.md), [assets/report-template.md](assets/report-template.md), [assets/quality-checklist.md](assets/quality-checklist.md) | `research/companies/<TICKER>/reports/<TICKER>_Initiation_Report_<Date>.docx` (target ~30–50 pages, dense layout, Disclosures & Important Disclaimers appendix) |
 
-| Task | Name | Prerequisites | Output |
-|------|------|--------------|--------|
-| **1** | Company Research | Company name/ticker | 6-8K word document |
-| **2** | Financial Modeling | 10-K or financials access | Excel model (6 tabs) |
-| **3** | Valuation Analysis | Financial model (Task 2) | Valuation + price target |
-| **4** | Chart Generation | Tasks 1, 2, 3 + external data | 25-35 PNG/JPG charts |
-| **5** | Report Assembly | ALL previous tasks (1-4) | 30-50 page DOCX report |
-
----
-
-## How to Use This Skill
-
-### User Request Patterns and Responses
-
-**Pattern 1: User specifies a specific task**
-```
-User: "Use initiating-coverage, Task 1 for Tesla"
-Response: ✅ Execute Task 1 immediately
-```
-
-**Pattern 2: User asks for "initiation report" or "full pipeline"**
-```
-User: "Create a coverage initiation report for Tesla"
-Response: ❌ DO NOT start any task automatically
-         ✅ Ask which task to start with (see template above)
-```
-
-**Pattern 3: User wants to do "all tasks" or "entire workflow"**
-```
-User: "I want to complete all 5 tasks for Tesla"
-Response: ❌ DO NOT chain tasks together
-         ✅ Explain one-at-a-time limitation (see template above)
-         ✅ Ask if they want to start with Task 1
-```
-
-### Correct Usage Examples
-
-**Executing a single task:**
-```
-"Use initiating-coverage skill, Task 1 for Tesla"
-"Do Task 2 of initiating-coverage for Tesla"
-"Run Task 3 for Tesla using the initiating-coverage skill"
-```
-
-**Completing full report (requires 5 separate requests):**
-```
-Request 1: "Do Task 1 for Tesla" → Complete → Deliver outputs
-Request 2: "Do Task 2 for Tesla" → Complete → Deliver outputs
-Request 3: "Do Task 3 for Tesla" → Complete → Deliver outputs
-Request 4: "Do Task 4 for Tesla" → Complete → Deliver outputs
-Request 5: "Do Task 5 for Tesla" → Complete → Deliver outputs
-```
-
-### Task Execution Order
-
-For a complete initiation report, tasks must be executed in separate user requests following this order:
-
-```
-Request 1: Task 1 - Company Research (independent)
-           ↓ [User reviews outputs and requests next task]
-Request 2: Task 2 - Financial Modeling (independent)
-           ↓ [User reviews outputs and requests next task]
-Request 3: Task 3 - Valuation Analysis (requires Task 2 output)
-           ↓ [User reviews outputs and requests next task]
-Request 4: Task 4 - Chart Generation (requires Tasks 1, 2, & 3 outputs)
-           ↓ [User reviews outputs and requests next task]
-Request 5: Task 5 - Report Assembly (requires ALL previous task outputs)
-```
-
-**Note**: Tasks 1 and 2 can be run in any order. Tasks 3-5 have strict dependencies and must verify inputs before proceeding.
+*(Tasks 1 and 2 are independent and may be run in either order. Tasks 3, 4, and 5 have strict upstream dependencies — if any prerequisite is missing, STOP and inform the user which task must be completed first.)*
 
 ---
 
-## Task 1: Company Research
+## Response Protocol for Full-Pipeline Requests
 
-**Purpose**: Research company's business, management, competitive position, industry, and risks.
-
-**Prerequisites**: ✅ None (fully independent)
-- Company name or ticker symbol
-
-**Process**:
-1. Verify company name/ticker provided
-2. Load detailed instructions from references/task1-company-research.md
-3. Execute qualitative research workflow
-4. Deliver research document
-
-**Output**: Company Research Document (6,000-8,000 words)
-- Company overview & history
-- Management bios (300-400 words × 3-4 execs)
-- Products & services analysis
-- Industry overview
-- Competitive analysis (5-10 competitors)
-- TAM sizing
-- Risk assessment (8-12 risks)
-
-**File path**: `research/companies/<TICKER>/reports/<TICKER>_Research_Document_<Date>.md`
-
-**⚠️ DELIVER ONLY THIS 1 FILE. NO completion summaries, no extra documents.**
-
-**⚠️ DO NOT TAKE SHORTCUTS:**
-- ✅ Write full 6,000-8,000 words (not summaries)
-- ✅ Complete 300-400 word bios for ALL 3-4 executives
-- ✅ Analyze ALL 5-10 competitors thoroughly
-- ✅ Cover all 8-12 risks across 4 categories
-- ❌ Do not abbreviate sections to save time
-- ❌ Do not skip any required sections
-
-**Verification before proceeding**: None required for this task.
+When a user says *"Create a coverage initiation report for [Company]"* or *"Run all 5 tasks for [Company]"*:
+- Do **not** auto-start or chain tasks.
+- Present the 5 tasks concisely and ask which task to execute first (suggesting Task 1: Company Research or Task 2: Financial Modeling).
 
 ---
 
-## Task 2: Financial Modeling
+## Task Summaries & QA Gates
 
-**Purpose**: Extract historical financials and build comprehensive Excel financial model with projections and scenarios.
+### Task 1: Company Research
+- **Scope:** Company overview, founding/history, executive bios (3–4 executives from DEF 14A/filings), products & pricing, customers & GTM, industry overview, competitive landscape (target 5–10 peers), TAM sizing, and risk assessment (target 8–12 risks across 4 categories) with dated citations.
+- **Guardrail:** Document only facts verifiable from SEC filings, company IR, or cited secondary reports; mark estimates `[ASSUMPTION]` and gaps `[UNSOURCED]`.
+- **Full workflow:** [references/task1-company-research.md](references/task1-company-research.md).
 
-**Prerequisites**: ⚠️ Verify before starting
-- **Required**: Access to company financial data
-  - For public companies: Latest 10-K from SEC EDGAR
-  - For private companies: Financial statements or available estimates
-  - OR: Pre-extracted historical financials provided by user
-- **Optional**: Company research (Task 1) for business context
+### Task 2: Financial Modeling
+- **Scope:** Extract 3–5 years of historicals (+ latest 10-Q LTM stub if mid-year) and build a live-formula 5-year forecast workbook with **5 canonical tabs**:
+  1. `Revenue Model` (product/segment and geographic breakdowns mirroring primary 10-K/10-Q disclosures)
+  2. `Income Statement` (full P&L matching filing granularity)
+  3. `Cash Flow Statement` (CFO, CFI, CFF, FCF)
+  4. `Balance Sheet` (full BS with balance check `= 0` every period)
+  5. `Scenarios` (Bear / Base / Bull drivers & outputs)
+- **QA Gate (MANDATORY):** Run `python3 scripts/recalc_xlsx.py research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx 30` and confirm exit `0` (`"status": "success"`, zero errors, zero uncached formulas, zero balance-check failures).
+- **Full workflow:** [references/task2-financial-modeling.md](references/task2-financial-modeling.md).
 
-**Input Verification**:
-```
-BEFORE STARTING - Select approach:
+### Task 3: Valuation Analysis
+- **Scope:** Delegate DCF mechanics to `dcf-model` (gross-debt WACC, mid-year explicit UFCF, end-of-year `(1 + WACC)^N` terminal value discounting, complete equity bridge, TSM diluted shares, SBC as real expense, centered 5×5 live sensitivity grid, TV `%` of EV target `50%–70%`). Add **4 canonical tabs** to Task 2's existing `.xlsx`:
+  1. `WACC`
+  2. `DCF` *(with inline 5×5 sensitivity table per `dcf-model`, or optional dedicated `Sensitivity` tab)*
+  3. `Comparable Companies` *(5–10 peers + Max / 75th / Median / 25th / Min summary)*
+  4. `Valuation Summary` *(reconciliation, weighting, football field inputs; Precedent Transactions tab optional and used as cross-check only unless M&A is an active catalyst)*
+- **Rating Scale (Standardized):** `Buy` (`>= +15%` 12M expected return), `Hold` (`-10%` to `+15%`), `Sell` (`<= -10%`).
+- **QA Gate (MANDATORY):** Run BOTH:
+  - `python3 scripts/recalc_xlsx.py research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx 30` (exit `0`, `"status": "success"`)
+  - `python3 .agents/skills/dcf-model/scripts/validate_dcf.py research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx` (exit `0`, `"status": "PASS"`)
+- **Full workflow:** [references/task3-valuation.md](references/task3-valuation.md) & [references/valuation-methodologies.md](references/valuation-methodologies.md).
 
-Option A: Extract financials (most common)
-- [ ] Have access to 10-K or financial statements?
-- [ ] Ready to extract 3-5 years of data?
+### Task 4: Chart Generation
+- **Scope:** Generate 300 DPI PNG charts via Python (`matplotlib`, `seaborn`, `Pillow`) saved directly into `research/companies/<TICKER>/reports/charts/` alongside `chart_index.txt`.
+- **Core Priority Charts (always build where disclosed):**
+  - `chart_03` — Revenue by Product/Segment (stacked area; where multiple segments are disclosed)
+  - `chart_04` — Revenue by Geography (stacked bar; where geographic breakdown is disclosed)
+  - `chart_28` — DCF Sensitivity 2-Way Heatmap (formatted with floats `fmt='.1f'` / `fmt='.2f'`, never `fmt='d'`)
+  - `chart_32` — Valuation Football Field (horizontal bar chart with current & target price markers)
+- **No-Fabrication Rule:** Target 20–30+ charts across Tasks 1–3 and verified market data. If a chart's underlying data is not disclosed in primary filings (e.g., undisclosed cohorts or private funding), omit it and document the reason in `chart_index.txt` rather than inventing data.
+- **Full workflow:** [references/task4-chart-generation.md](references/task4-chart-generation.md).
 
-Option B: User provided pre-extracted financials
-- [ ] Historical financials file received?
-- [ ] Contains income statement, cash flow, balance sheet (3-5 years)?
-
-Optional:
-- [ ] Company research (Task 1) complete for context?
-```
-
-**Process**:
-1. Verify access to financial data
-2. Load detailed instructions from references/task2-financial-modeling.md
-3. **Step 1**: Extract historical financials (if needed)
-4. **Step 2+**: Build projection model with 6 essential tabs
-5. Deliver Excel model
-
-**Output**: Excel Financial Model (.xlsx)
-- 6 essential tabs:
-  1. **Revenue Model** - Product breakdown (20-30 rows) + Geography breakdown (15-20 rows)
-  2. **Income Statement** - Full P&L with 40-50 line items, historical (3-5 years) + projected (5 years)
-  3. **Cash Flow Statement** - Operating/Investing/Financing activities, historical + projected
-  4. **Balance Sheet** - Assets/Liabilities/Equity, historical + projected
-  5. **Scenarios** - Bull/Base/Bear comparison table
-  6. **DCF Inputs** - Prepared for Task 3 valuation
-
-**File paths**:
-- `research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx` (primary deliverable)
-- `research/companies/<TICKER>/models/<TICKER>_Historical_Financials_<Date>.xlsx` (optional intermediate extraction workbook when pulling raw 3–5 yr statements from 10-K filings in Step 1)
-
-**⚠️ DELIVER ONLY THESE MODEL FILE(S). NO completion summaries, no extra documents.**
-
-**⚠️ DO NOT TAKE SHORTCUTS:**
-- ✅ If extracting financials: Extract ALL line items from 3 financial statements (3-5 years)
-- ✅ Build ALL 6 projection tabs completely with full detail
-- ✅ Create detailed revenue model with 20-30 product rows AND 15-20 geography rows
-- ✅ Build complete income statement with 40-50 line items (not abbreviated)
-- ✅ Include full cash flow statement and balance sheet with all line items
-- ✅ Complete ALL three scenarios (Bull/Base/Bear) with different parameters
-- ❌ Do not create simplified/abbreviated versions
-- ❌ Do not skip any of the 6 essential tabs
-- ❌ Do not skip historical financials extraction if needed
-
-**Verification before proceeding to Task 3**:
-- [ ] Historical financials extracted (if needed) or provided
-- [ ] Excel file created and can be opened
-- [ ] Model has all 6 essential tabs (Revenue Model, Income Statement, Cash Flow, Balance Sheet, Scenarios, DCF Inputs)
-- [ ] Historical data (3-5 years) incorporated
-- [ ] Projections complete (5 years forward)
-- [ ] Scenarios complete (Bull/Base/Bear)
+### Task 5: Report Assembly
+- **Scope:** Assemble `research/companies/<TICKER>/reports/<TICKER>_Initiation_Report_<Date>.docx` programmatically via `python-docx` + `openpyxl` (`data_only=True` after `recalc_xlsx.py`):
+  - Page 1: **INITIATING COVERAGE** header (with prominent `DRAFT — FOR INTERNAL ANALYST REVIEW ONLY` banner), rating box, `[ANALYST NAME — REVIEW REQUIRED]`, Figure 1 stock chart, 3–4 quantified `■` bullets, financial summary table.
+  - Reuse Task 1 prose verbatim for Company 101 sections, embed Task 4 PNG charts at `<= 6.0"` width (matching default `python-docx` text width), extract Task 2/3 tables directly from Excel, and write deep Projection Assumptions, Scenario Analysis, and Valuation sections.
+  - Mandatory appendices: **Data Sources & References** (clickable hyperlinks with dates) and **Disclosures & Important Disclaimers** (draft status, not investment advice, analyst review sign-off).
+  - Verify rendered layout and page count via LibreOffice PDF export + `pypdf`.
+- **Full workflow:** [references/task5-report-assembly.md](references/task5-report-assembly.md), [assets/report-template.md](assets/report-template.md), [assets/quality-checklist.md](assets/quality-checklist.md).
 
 ---
 
-## Task 3: Valuation Analysis
+## Canonical Workspace Layout
 
-**Purpose**: Perform comprehensive valuation using DCF, comparables, and precedent transactions.
-
-**Prerequisites**: ⚠️ Verify before starting
-- **Required**: Financial model from Task 2
-  - Projected income statements
-  - Projected cash flows
-  - Revenue and EBITDA forecasts
-  - DCF inputs (unlevered FCF)
-
-**⚠️ CRITICAL: DO NOT START THIS TASK UNLESS TASK 2 IS COMPLETE**
-
-This task requires the financial model from Task 2. Starting without it will result in incomplete work.
-
-**IF TASK 2 IS NOT COMPLETE**: Stop immediately and inform the user that Task 2 (Financial Modeling) must be completed first. Do not attempt to proceed or create placeholder valuations.
-
-**Input Verification**:
-```
-BEFORE STARTING:
-- [ ] Task 2 complete? (Financial model exists)
-- [ ] Model file path/location known?
-- [ ] Can access projected financials from model?
-
-Required from model:
-- [ ] Projected FCF (5 years)
-- [ ] Revenue projections
-- [ ] EBITDA projections
-- [ ] Terminal year metrics
-```
-
-**Process**:
-1. Verify financial model is accessible
-2. Load detailed instructions from references/task3-valuation.md
-3. Execute valuation workflow
-4. Deliver valuation analysis
-
-**Output**: Valuation Analysis (4-6 pages + Excel tabs)
-- DCF analysis with sensitivity tables
-- Comparable companies (5-10 peers with statistical summary)
-- Precedent transactions (if applicable)
-- Valuation football field
-- **Price target**: $XX.XX
-- **Recommendation**: BUY/HOLD/SELL
-- **Upside**: XX%
-- Key catalysts (3-5)
-
-**Files**:
-- `research/companies/<TICKER>/reports/<TICKER>_Valuation_Analysis_<Date>.md` (written analysis document)
-- Excel tabs added to `research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx` (from Task 2)
-  - DCF tab with calculations
-  - Sensitivity analysis tab
-  - Comparable companies tab
-  - Valuation summary tab
-
-**⚠️ DELIVER ONLY: 1 markdown file + 4 tabs added to existing Excel. NO completion summaries, no extra documents.**
-
-**⚠️ DO NOT TAKE SHORTCUTS:**
-- ✅ Complete full DCF analysis with sensitivity matrix (not simplified)
-- ✅ Analyze ALL 5-10 comparable companies with full data
-- ✅ Include statistical summary in comps table (max/75th/median/25th/min)
-- ✅ Create complete sensitivity analysis tab with multiple WACC and terminal growth scenarios
-- ✅ Write full 4-6 pages of valuation analysis (not abbreviated)
-- ✅ Research and justify price target with specific methodology
-- ❌ Do not skip comparable company analysis
-- ❌ Do not create simplified DCF without sensitivity
-
-**Verification before proceeding to Task 4**:
-- [ ] Price target determined
-- [ ] Valuation uses multiple methods (DCF + Comps minimum)
-- [ ] DCF sensitivity table complete
-- [ ] Comparable companies table includes statistical summary
-
----
-
-## Task 4: Chart Generation
-
-**Purpose**: Generate 25-35 professional financial charts for the report.
-
-**Prerequisites**: ⚠️ Verify before starting
-- **Required**: Company research from Task 1
-  - Company history and milestones (for timeline charts)
-  - Management team and org structure (for org charts)
-  - Product portfolio (for product charts)
-  - Customer segmentation (for customer charts)
-  - Competitive landscape (for competitive charts)
-  - TAM analysis (for market size charts)
-- **Required**: Financial model from Task 2 (with Task 3 valuation tabs added)
-  - Revenue by product/geography data (Task 2 tabs)
-  - Margin trends (Task 2 tabs)
-  - Scenario comparison data (Task 2 tabs)
-  - DCF sensitivity table (Task 3 tab in same Excel file)
-  - Comparable companies data (Task 3 tab in same Excel file)
-  - Valuation ranges (Task 3 tab in same Excel file)
-- **Required**: External market data
-  - Historical stock price data (Yahoo Finance, Bloomberg, etc.)
-  - Historical valuation multiples (for historical trend charts)
-
-**⚠️ CRITICAL: DO NOT START THIS TASK UNLESS TASKS 1, 2, AND 3 ARE COMPLETE**
-
-This task requires outputs from all three previous tasks. Starting without them will result in incomplete charts.
-
-**IF ANY OF TASKS 1, 2, OR 3 ARE NOT COMPLETE**: Stop immediately and inform the user which tasks need to be completed first. The specific requirements are:
-- Task 1: Company research document (for 9 charts)
-- Task 2: Financial model with all 6 tabs (for 8 charts)
-- Task 3: Valuation tabs added to the model (for 6 charts)
-- External data access (for 2 charts)
-
-Do not attempt to create placeholder charts or skip charts due to missing data.
-
-**Input Verification**:
-```
-BEFORE STARTING:
-- [ ] Task 1 complete? (Company research exists)
-- [ ] Task 2 complete? (Financial model exists)
-- [ ] Task 3 complete? (Valuation analysis exists)
-- [ ] Can access external market data sources?
-
-Required from Task 1:
-- [ ] Company history and milestones (for charts 05, 06)
-- [ ] Management team structure (for chart 07)
-- [ ] Product portfolio details (for chart 08)
-- [ ] Customer segmentation data (for chart 09)
-- [ ] Competitive landscape analysis (for charts 16, 17, 18)
-- [ ] TAM sizing and market data (for chart 15)
-
-Required from Task 2:
-- [ ] Revenue by product (historical + projected) - for chart 03 ⭐
-- [ ] Revenue by geography (historical + projected) - for chart 04 ⭐
-- [ ] Income statement with margins (for charts 02, 10, 11)
-- [ ] Cash flow statement (for chart 12)
-- [ ] Scenario comparison data (for chart 14)
-
-Required from Task 3:
-- [ ] DCF sensitivity matrix - for chart 28 ⭐
-- [ ] DCF components (for chart 29)
-- [ ] Comparable companies data (for charts 30, 31)
-- [ ] Valuation ranges - for chart 32 ⭐
-
-Required from External Sources:
-- [ ] Historical stock price data (for chart 01)
-- [ ] Historical valuation multiples (for chart 34)
-```
-
-**Process**:
-1. Verify company research (Task 1), model (Task 2), and valuation (Task 3) outputs are accessible
-2. Load detailed instructions from `references/task4-chart-generation.md`
-3. Execute chart generation workflow via Python (`matplotlib`, `seaborn`, `Pillow`)
-4. Save all 25–35 PNG charts and `chart_index.txt` directly into `research/companies/<TICKER>/reports/charts/`
-
-**Output**: 25–35 Professional Chart Files (PNG, 300 DPI) + `chart_index.txt` in `research/companies/<TICKER>/reports/charts/`
-
-**4 MANDATORY Charts** (must be present) ⭐:
-- chart_03: Revenue by product (stacked area)
-- chart_04: Revenue by geography (stacked bar)
-- chart_28: DCF sensitivity (2-way heatmap)
-- chart_32: Valuation football field (horizontal bars)
-
-**25 REQUIRED Charts** (specific list):
-- Investment Summary: chart_01
-- Financial Performance: charts 02, 03⭐, 04⭐, 10, 11, 12, 14
-- Company 101: charts 05, 06, 07, 08, 09, 15, 16
-- Competitive/Market: charts 17, 18
-- Scenario Analysis: chart 13
-- Valuation: charts 28⭐, 29, 30, 31, 32⭐, 33, 34
-
-**10 OPTIONAL Charts** (for 26-35 range):
-- charts 19-27, 35 (customer acquisition, unit economics, product roadmap, etc.)
-
-**IMPORTANT**: Task 5 embeds ALL charts created (25-35) for visual density (1 chart per 200-300 words).
-
-**File naming**: `research/companies/<TICKER>/reports/charts/chart_01_description.png`, `chart_02_description.png`, etc.
-
-**Deliverable**: `research/companies/<TICKER>/reports/charts/` containing all 25–35 PNG files + `chart_index.txt`
-
-**⚠️ DELIVER ONLY THE CHARTS DIRECTORY (`chart_*.png` + `chart_index.txt`). NO completion summaries, no extra documents.**
-
-**⚠️ DO NOT TAKE SHORTCUTS:**
-- ✅ Create ALL 25 required charts minimum (specific list provided in `references/task4-chart-generation.md`)
-- ✅ Include ALL 4 mandatory charts:
-  - chart_03: Revenue by product (stacked area) ⭐
-  - chart_04: Revenue by geography (stacked bar) ⭐
-  - chart_28: DCF sensitivity (heatmap) ⭐
-  - chart_32: Valuation football field ⭐
-- ✅ Optional: Add 1-10 more charts to reach 26-35 total for greater visual density
-- ✅ Generate professional-quality charts at 300 DPI (not low-res placeholders)
-- ✅ Create unique, well-formatted charts for each visualization
-- ✅ Save all charts directly in `research/companies/<TICKER>/reports/charts/` with `chart_index.txt`
-- ❌ Do not create only 10-15 charts (minimum is 25)
-- ❌ Do not skip any of the 4 mandatory charts
-- ❌ Do not use low-quality/placeholder images
-
-**Verification before proceeding to Task 5**:
-- [ ] Minimum 25 chart files created (required)
-- [ ] All 4 mandatory charts present:
-  - [ ] chart_03: Revenue by product ⭐
-  - [ ] chart_04: Revenue by geography ⭐
-  - [ ] chart_28: DCF sensitivity ⭐
-  - [ ] chart_32: Valuation football field ⭐
-- [ ] All charts open and display correctly
-- [ ] Charts saved at 300 DPI (print quality)
-- [ ] `chart_index.txt` created listing all files with categories
-- [ ] All charts saved directly in `research/companies/<TICKER>/reports/charts/`
-- [ ] File naming follows convention: `chart_##_description.png`
-
----
-
-## Task 5: Report Assembly
-
-**Purpose**: Write and assemble the comprehensive final DOCX report.
-
-**Prerequisites**: ⚠️ Verify before starting
-- **Required**: Company research from Task 1
-  - All 6-8K words of content
-  - Management bios
-  - Competitive analysis
-  - Risk assessment
-- **Required**: Financial model from Task 2
-  - Excel workbook
-  - All projections and scenarios
-- **Required**: Valuation analysis from Task 3
-  - Price target and recommendation
-  - DCF, comps, precedent transactions
-  - All valuation data
-- **Required**: Chart files from Task 4
-  - `research/companies/<TICKER>/reports/charts/` containing all 25–35 PNG files
-  - `chart_index.txt` present in the charts directory
-
-**⚠️ CRITICAL: DO NOT START THIS TASK UNLESS ALL TASKS 1-4 ARE COMPLETE**
-
-This is the final assembly task. It cannot be completed without all previous work products.
-
-**IF ANY OF TASKS 1, 2, 3, OR 4 ARE NOT COMPLETE**: Stop immediately and inform the user which tasks need to be completed first. The specific requirements are:
-- Task 1: Company research document (6-8K words)
-- Task 2: Financial model with all 6 tabs
-- Task 3: Valuation analysis with price target and recommendation
-- Task 4: Charts directory (`research/companies/<TICKER>/reports/charts/`) with 25–35 charts
-
-Do not attempt to create placeholder content, substitute missing sections, or assemble an incomplete report. The report requires ALL inputs to be publication-ready.
-
-**Input Verification**:
-```
-BEFORE STARTING - ALL TASKS MUST BE COMPLETE:
-
-Task 1 Verification:
-- [ ] research/companies/<TICKER>/reports/<TICKER>_Research_Document_<Date>.md exists? (6-8K words)
-- [ ] Management bios complete? (300-400 words × 3-4 execs)
-- [ ] Competitive analysis complete? (5-10 competitors)
-- [ ] Risk assessment complete? (8-12 risks)
-
-Task 2 Verification:
-- [ ] research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx exists and can be opened?
-- [ ] Model has projections (5 years)?
-- [ ] Scenarios exist (Bull/Base/Bear)?
-
-Task 3 Verification:
-- [ ] research/companies/<TICKER>/reports/<TICKER>_Valuation_Analysis_<Date>.md exists?
-- [ ] Price target determined?
-- [ ] Recommendation set? (BUY/HOLD/SELL)
-- [ ] DCF and comps tabs added to <TICKER>_Financial_Model_<Date>.xlsx?
-
-Task 4 Verification:
-- [ ] research/companies/<TICKER>/reports/charts/ exists with 25-35 PNG files + chart_index.txt?
-- [ ] All 4 mandatory charts present?
-  - [ ] Revenue by product (stacked area)
-  - [ ] Revenue by geography (stacked bar)
-  - [ ] DCF sensitivity (heatmap)
-  - [ ] Valuation football field
-- [ ] Chart files accessible and can be opened?
-
-IF ANY VERIFICATION FAILS: Stop and complete missing task first.
-```
-
-**Process**:
-1. **CRITICAL**: Verify ALL prerequisites before starting
-2. Load detailed instructions from `references/task5-report-assembly.md`
-3. Execute report assembly workflow programmatically via Python (`python-docx`, `openpyxl`) and Antigravity file tools:
-   - **Use `python-docx`** to create, style, and populate the Word document (or assemble a publication-grade Markdown/PDF bundle if requested)
-   - **Use `openpyxl`** (`data_only=True` after recalculating with `scripts/recalc_xlsx.py`) to extract verified tables and metrics from Task 2/3 Excel tabs
-   - **Read** Task 1 and Task 3 markdown files directly from disk
-   - Read Task 1 `.md` file → Convert to Word formatting → Insert charts inline
-   - Read Task 2 `.xlsx` file → Extract tables → Write quantitative analysis
-   - Read Task 3 `.md` file + Excel tabs → Copy/adapt valuation analysis
-   - Insert Task 4 `.png` chart files throughout using `python-docx`
-   - Create text-dense report with charts interspersed every 200-300 words
-4. Save and deliver final DOCX report (and optionally convert to PDF via LibreOffice for visual page-by-page verification)
-
-**Key Principles**:
-- Automate assembly via reproducible Python scripts (`python-docx` + `openpyxl`) rather than manual copy/paste
-- Use actual file operations (read `.md`/`.xlsx`/`.png` files, write `.docx` file)
-- Good equity research reports are text-dense with lots of illustrating images (60-80% page coverage, 1+ chart per page)
-
-**🔥 CRITICAL: GO ALL OUT ON THIS TASK**
-
-**THIS IS THE FINAL DELIVERABLE. DO NOT TAKE SHORTCUTS.**
-
-- ✅ **Use full token budget** - This is the culmination of all previous work
-- ✅ **Write every section completely** - Do not summarize or abbreviate
-- ✅ **Hit ALL minimum requirements** - 30+ pages, 10,000+ words, 25+ charts, 12+ tables
-- ✅ **Be thorough on projection assumptions** - 2,000-3,000 words with product-by-product detail
-- ✅ **Be comprehensive on scenarios** - 1,500-2,000 words with specific Bull/Base/Bear parameters
-- ✅ **Insert ALL charts from Task 4** - Not just a few, ALL 25-35 charts throughout
-- ✅ **Create ALL tables from Task 2/3** - Extract every financial table, don't skip any
-- ✅ **Use Task 1 content verbatim** - Copy/paste full Company 101 sections (6-8K words)
-- ✅ **Professional quality only** - This must be indistinguishable from JPMorgan/Goldman Sachs research
-
-**NEVER:**
-- ❌ "This section would include..." - WRITE THE ACTUAL SECTION
-- ❌ "Charts would be inserted here..." - INSERT THE ACTUAL CHARTS
-- ❌ "See financial model for details..." - EXTRACT AND INCLUDE THE DETAILS
-- ❌ Skip sections due to length - Every section MUST be complete
-- ❌ Abbreviate for token conservation - Use whatever tokens are needed
-
-**This is publication-ready institutional research. Spare no effort, tokens, or detail.**
-
-**Output**: Comprehensive Equity Research Report (.docx)
-
-**Specifications**:
-- **Length**: 30-50 pages (MINIMUM 30)
-- **Word count**: 10,000-15,000 words (MINIMUM 10,000)
-- **Charts**: 25-35 embedded images
-- **Tables**: 12-20 comprehensive tables
-- **Format**: Professional DOCX with clickable hyperlinks
-
-**Structure**:
-- Page 1: Investment Summary (INITIATING COVERAGE format)
-- Pages 2-5: Investment thesis & risks
-- Pages 6-17: Company 101
-- Pages 18-30: Financial analysis & projections
-- Pages 31-40: Valuation analysis
-- Pages 41-50: Appendices
-
-**File path**: `research/companies/<TICKER>/reports/<TICKER>_Initiation_Report_<Date>.docx`
-
-**⚠️ DELIVER ONLY THIS 1 DOCX FILE. NO executive summaries, no "highlights" documents, no extra files.**
-
-**Final Verification**:
-- [ ] Report is 30-50 pages
-- [ ] Word count is 10,000-15,000
-- [ ] 25-35 charts embedded
-- [ ] 12-20 tables included
-- [ ] All citations are clickable hyperlinks
-- [ ] Numbers match financial model exactly
-
----
-
-## Input Verification Protocol
-
-### Why Input Verification Matters
-
-Each task has strict prerequisites. Running a task without required inputs will:
-- Waste time with incomplete work
-- Produce low-quality outputs
-- Require rework
-
-**Always verify inputs before starting a task.**
-
-### Verification Checklist by Task
-
-**Task 1**: ✅ No verification needed (independent)
-
-**Task 2**: Check historical financials available
-
-**Task 3**: Check financial model exists and is accessible
-
-**Task 4**: Check company research (Task 1), model (Task 2), AND valuation (Task 3) exist
-
-**Task 5**: Check ALL previous tasks complete (1, 2, 3, 4)
-
-### What to Do if Verification Fails
-
-```
-IF prerequisites are missing:
-1. Stop the current task
-2. Identify which prerequisite task(s) need to be completed
-3. Execute the missing task(s) first
-4. Return to current task once prerequisites are met
-```
-
-### Example Verification Dialogue
-
-```
-User: "Use initiating-coverage, Task 5 for Tesla"
-
-Agent: "Starting Task 5: Report Assembly for Tesla
-
-VERIFICATION - Checking prerequisites:
-- Task 1 (Company research)... ❌ NOT FOUND
-- Task 2 (Financial model)... ❌ NOT FOUND
-- Task 3 (Valuation)... ❌ NOT FOUND
-- Task 4 (Charts)... ❌ NOT FOUND
-
-⚠️ VERIFICATION FAILED
-
-Task 5 requires ALL previous tasks to be complete.
-
-To proceed:
-1. Complete Task 1: Company Research
-2. Complete Task 2: Financial Modeling
-3. Complete Task 3: Valuation Analysis
-4. Complete Task 4: Chart Generation
-5. Then return to Task 5
-
-Would you like to start with Task 1 first?"
-```
-
----
-
-## Task Reference Files
-
-Detailed instructions for each task are in separate reference files to keep this skill lean:
-
-- **references/task1-company-research.md** - Company research workflow
-- **references/task2-financial-modeling.md** - Financial modeling workflow
-- **references/task3-valuation.md** - Valuation methodology
-  - Also see: references/valuation-methodologies.md for DCF/comps deep dive
-- **references/task4-chart-generation.md** - Chart generation workflow
-- **references/task5-report-assembly.md** - Report writing workflow
-  - Also see: assets/report-template.md for report structure
-  - Also see: assets/quality-checklist.md for quality checks
-
-**When to load reference files**: Load ONLY the reference file associated with the specific task being performed. These files are very large - do not load multiple reference files at once. Read the appropriate task reference file at the start of the task for detailed step-by-step instructions.
-
----
-
-## Quality Standards
-
-All outputs meet institutional standards from leading investment banks (JPMorgan, Goldman Sachs, Morgan Stanley):
-
-- **Comprehensive**: Meet all minimum requirements
-- **Detailed**: Specific data and examples, not generic statements
-- **Quantified**: Lead with numbers and metrics
-- **Cited**: Proper sources with clickable hyperlinks
-- **Professional**: Institutional-quality formatting
-- **Accurate**: All numbers verified and cross-checked
-
----
-
-## Important Notes
-
-### Task Independence
-
-- **Task 1** can run anytime (no dependencies)
-- **Task 2** can run anytime (just needs historical data)
-- **Tasks 1 & 2** can run in parallel
-- **Task 3** requires Task 2
-- **Task 4** requires Tasks 1, 2, & 3
-- **Task 5** requires Tasks 1, 2, 3, & 4
-
-### Session Management
-
-**Same session**: Outputs automatically available to subsequent tasks
-
-**Different sessions**: Reference previous task outputs explicitly
-```
-"Use Task 3 with the model from yesterday at [path]"
-"Use Task 5 with the research document at [path]"
-```
-
-### File Organization
-
-Canonical workspace structure (aligned with `.agents/rules/research-outputs.md`):
 ```text
 research/companies/<TICKER>/
 ├── models/
 │   ├── <TICKER>_Historical_Financials_<Date>.xlsx   # Task 2 (optional Step 1 extraction)
-│   └── <TICKER>_Financial_Model_<Date>.xlsx         # Task 2 + Task 3 valuation tabs
+│   └── <TICKER>_Financial_Model_<Date>.xlsx         # Task 2 (5 tabs) + Task 3 (4 valuation tabs)
 └── reports/
     ├── <TICKER>_Research_Document_<Date>.md         # Task 1
     ├── <TICKER>_Valuation_Analysis_<Date>.md        # Task 3
-    ├── charts/                                      # Task 4 (25-35 PNGs + chart_index.txt)
-    │   ├── chart_01_stock_price_performance.png
-    │   └── ...
-    └── <TICKER>_Initiation_Report_<Date>.docx       # Task 5
+    ├── charts/                                      # Task 4 (300 DPI PNGs + chart_index.txt)
+    └── <TICKER>_Initiation_Report_<Date>.docx       # Task 5 (DRAFT for analyst review)
 ```
-
-### No End-to-End Execution
-
-This skill does **NOT** support running all tasks automatically in sequence. Each task must be explicitly requested and verified.
-
-**Why**: This ensures:
-- Quality control at each stage
-- Ability to review outputs before proceeding
-- Flexibility to pause/resume workflow
-- Clear verification of prerequisites
-
----
-
-## Success Criteria
-
-A successful initiation report workflow should:
-1. Complete all 5 tasks in order
-2. Pass all input verifications
-3. Meet all quality standards
-4. Produce all required deliverables
-5. Numbers cross-check between outputs
-6. Final report is publication-ready
-
-**Output quality**: Institutional (JPMorgan/Goldman/Morgan Stanley level)
-**Use case**: First-time comprehensive coverage of a company

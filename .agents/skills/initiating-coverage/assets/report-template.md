@@ -1,845 +1,173 @@
+<!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/equity-research/skills/initiating-coverage/assets/report-template.md), Apache-2.0; modified for Google Antigravity. -->
+
 # Equity Research Initiation Report Template
 
-This template provides the structure for creating a comprehensive equity research initiation report. Use this as a guide when constructing the final report document.
+This template defines the layout for assembling a comprehensive equity research initiation report draft (`DRAFT — FOR INTERNAL ANALYST REVIEW ONLY (NOT INVESTMENT ADVICE)`).
 
-**NOTE:** The actual report MUST be created programmatically as a `.docx` file using Python (`python-docx`). DO NOT deliver raw markdown in place of the Word document.
-
-**CRITICAL REQUIREMENTS:**
-1. **Generate 20-30+ chart images** using Python (`matplotlib` / `seaborn` / `Pillow`, with `plotly` optional for interactive HTML) BEFORE creating the Word document
-2. **Use `python-docx`**: Create a professional `.docx` report with proper styles, headers/footers, and formatting
-3. **Embed actual chart images**: Insert the generated PNG chart files from `research/companies/<TICKER>/reports/charts/` into the Word document at appropriate locations
-4. **NO RAW MARKDOWN OUTPUT**: Assemble the final deliverable as a formatted `.docx` file using `python-docx`.
-
-**CRITICAL FORMATTING GUIDANCE:**
-- **MAXIMUM DENSITY**: Every page should be packed with information. Intersperse text, charts, and tables throughout.
-- **NO ORPHANED SECTIONS**: Never have a section header alone or a single chart on its own page.
-- **20-30+ ACTUAL CHART IMAGES**: Generate charts as 300 DPI PNG files, then embed within text sections using `python-docx`.
+**CRITICAL ASSEMBLY REQUIREMENTS:**
+1. **Generate chart PNGs (target 20–30+ where disclosed)** using Python (`matplotlib` / `seaborn` / `Pillow`) BEFORE assembling the Word document.
+2. **Use `python-docx`** to build the formatted `.docx` file programmatically (never deliver raw markdown in place of `.docx`).
+3. **Embed actual 300 DPI PNGs** from `research/companies/<TICKER>/reports/charts/` sized to `<= 6.0"` width so they fit within default page margins cleanly.
+4. **Draft Banner & Placeholders:** Include `DRAFT — FOR INTERNAL ANALYST REVIEW ONLY (NOT INVESTMENT ADVICE)` in the Page 1 header and document footer. Use `[ANALYST NAME — REVIEW REQUIRED]` and `[DATE]` — **never** invent analyst identities, credentials, emails, or phone numbers.
+5. **Dynamic Fiscal Years:** Replace `[FY-3]A`, `[FY-2]A`, `[FY-1]A`, `[FY]A` (or `LTM`), `[FY+1]E`..`[FY+5]E` with the company's actual fiscal calendar verified from its latest 10-K and 10-Q.
 
 ---
 
-## PAGE 1: INVESTMENT UPDATE (MOST IMPORTANT PAGE)
+## PAGE 1: INITIATING COVERAGE (MOST IMPORTANT PAGE)
 
-**CRITICAL**: Page 1 is NOT a traditional executive summary. It is an **Investment Update** with a specific institutional format used by professional equity research firms.
+**CRITICAL:** Page 1 is an institutional **INITIATING COVERAGE** tearsheet — NOT a generic "Executive Summary" and NOT a "Company Update".
 
-**IMPORTANT STRUCTURAL NOTES:**
-- This is an "Investment Update" or "Company Update" page, not "Executive Summary"
-- Uses a rating box in top left corner
-- Features stock price performance chart (Figure 1) prominently
-- Contains 3-4 detailed bullet points with ■ character
-- Each bullet has **bold topic header** followed by 3-5 sentence explanation
-- Bottom section has financial and valuation metrics table
-- All charts must have figure numbers (Figure 1, Figure 2, etc.) with source lines
+**Structural Checklist:**
+- Prominent draft notice banner: `DRAFT — FOR INTERNAL ANALYST REVIEW ONLY (NOT INVESTMENT ADVICE)`
+- Section banner: **`INITIATING COVERAGE`** (NEVER `"Company Update"`)
+- Top-left rating box using standardized **`Buy / Hold / Sell`** scale
+- Analyst review placeholder block (no invented credentials or contact info)
+- Top-right Figure 1 stock price performance chart
+- 3–4 quantified `■` bullets (**bold topic header** + 3–5 concise sentences each)
+- Bottom financial & valuation metrics table (`A` suffix for actuals, `E` suffix for estimates)
 
 ### Layout Structure
 
-**TOP LEFT - RATING BOX:**
+**HEADER BANNER:**
+```text
+DRAFT — FOR INTERNAL ANALYST REVIEW ONLY (NOT INVESTMENT ADVICE)
+INITIATING COVERAGE | [Company Name] ([EXCHANGE]: [TICKER]) | [DATE]
 ```
-Rating:             [OUTPERFORM / NEUTRAL / UNDERWEIGHT / etc.]
+
+**TOP LEFT — RATING BOX:**
+```text
+Rating:             [Buy / Hold / Sell]
 Price ([Date]):     $[XX.XX]
-Target Price:       $[XX.XX]
+12M Price Target:   $[XX.XX] ([+/-XX.X%])
 52-Week Range:      $[XX.XX] - $[XX.XX]
 Market Cap:         $[XX.X]B
 Enterprise Value:   $[XX.X]B
 ```
+*(Standardized rating thresholds: Buy `>= +15%`, Hold `-10%` to `+15%`, Sell `<= -10%` 12-month expected return.)*
 
-**TOP LEFT - RESEARCH ANALYSTS:**
+**TOP LEFT — ANALYST REVIEW BLOCK:**
+```text
+Prepared for Review By: [ANALYST NAME — REVIEW REQUIRED]
+Review Date:            [DATE]
+Status:                 DRAFT — INTERNAL REVIEW ONLY
 ```
-[Name], [Credentials (Ph.D., CFA, M.D., etc.)]
-[Email] | [Phone]
+*(Never fabricate names, CFA/Ph.D. credentials, email addresses, or phone numbers.)*
 
-[Name 2], [Credentials]
-[Email] | [Phone]
-```
-
-**TOP RIGHT - STOCK PRICE PERFORMANCE:**
-```
-Figure 1 - [Company Name] Stock Price Performance
-[Line chart showing stock price over 12-24 months with benchmark comparison]
-Source: Company data, [Firm Name] estimates.
-```
-
-**MAIN CONTENT - GRAY HEADER BAR:**
-```
-[OUTPERFORM / NEUTRAL / etc.] RECOMMENDATION / COMPANY UPDATE
+**TOP RIGHT — STOCK PRICE PERFORMANCE:**
+```text
+Figure 1 - [Company Name] Stock Price Performance (12-24M vs. Benchmark)
+[Embedded 300 DPI PNG chart]
+Source: [Market Data Provider], as of [Date].
 ```
 
-**MAIN CONTENT - DETAILED BULLETS (3-4 bullets):**
-
-Use ■ character for bullets. Each bullet follows this format:
-```
-■ **[Bold Topic Header capturing main point].** Regular text explanation providing 3-5 sentences of detail with specific numbers, comparisons, and analysis. Lead with numbers and quantification where possible. Use "vs." not "versus". Be specific and concrete.
-
-■ **[Second Topic Header].** [3-5 sentences of detailed explanation...]
-
-■ **[Third Topic Header].** [3-5 sentences of detailed explanation...]
-
-■ **[Fourth Topic Header - Optional].** [3-5 sentences of detailed explanation...]
+**MAIN CONTENT — SECTION BAR:**
+```text
+INITIATING COVERAGE — [BUY / HOLD / SELL] | [THESIS-FOCUSED HEADLINE]
 ```
 
-**EXAMPLE BULLET FORMAT:**
-```
-■ **Vertical SaaS leadership and regulatory moat should enable $50bn+ TAM by 2030.**
-Deep domain expertise in healthcare IT, strong customer retention (95%+ net revenue retention),
-and cross-sell capabilities have driven Acme Health's market expansion. With the healthcare IT
-market expected to reach $50bn+ by 2030, Acme Health is well-positioned to capture share given
-its regulatory moat and high switching costs. Management has indicated that 70% of current
-revenue comes from enterprise hospital systems, suggesting strong product-market fit.
+**MAIN CONTENT — DETAILED BULLETS (3–4 bullets):**
+```text
+■ **[Bold Topic Header capturing key thesis pillar].** 3–5 sentences leading with quantified metrics, primary filing citations, and model projections. Use "vs." rather than "versus". Tag explicit forward estimates [ASSUMPTION] where appropriate in draft notes.
+
+■ **[Second Topic Header].** [3–5 sentences...]
+
+■ **[Third Topic Header].** [3–5 sentences...]
+
+■ **[Fourth Topic Header — Risks / Valuation].** [3–5 sentences...]
 ```
 
-**BOTTOM SECTION - FINANCIAL AND VALUATION METRICS TABLE:**
-```
-                            [Year-3]A   [Year-2]A   [Year-1]A   [Year]E    [Year+1]E
-Revenue ($M)                [X]         [X]         [X]         [X]        [X]
-Revenue Growth (%)          X.X%        X.X%        X.X%        X.X%       X.X%
-Gross Margin (%)           X.X%        X.X%        X.X%        X.X%       X.X%
-EBITDA ($M)                [X]         [X]         [X]         [X]        [X]
-EBITDA Margin (%)          X.X%        X.X%        X.X%        X.X%       X.X%
-EPS ($)                    X.XX        X.XX        X.XX        X.XX       X.XX
-P/E (x)                    XX.Xx       XX.Xx       XX.Xx       XX.Xx      XX.Xx
-EV/Revenue (x)             X.Xx        X.Xx        X.Xx        X.Xx       X.Xx
-EV/EBITDA (x)              XX.Xx       XX.Xx       XX.Xx       XX.Xx      XX.Xx
+**BOTTOM SECTION — FINANCIAL AND VALUATION METRICS TABLE:**
+```text
+                            [FY-2]A   [FY-1]A   [FY]A     [FY+1]E   [FY+2]E
+Revenue ($M)                [X]       [X]       [X]       [X]       [X]
+Revenue Growth (%)          X.X%      X.X%      X.X%      X.X%      X.X%
+Gross Margin (%)            X.X%      X.X%      X.X%      X.X%      X.X%
+EBITDA ($M)                 [X]       [X]       [X]       [X]       [X]
+EBITDA Margin (%)           X.X%      X.X%      X.X%      X.X%      X.X%
+Diluted EPS ($)             X.XX      X.XX      X.XX      X.XX      X.XX
+P/E (x)                     XX.Xx     XX.Xx     XX.Xx     XX.Xx     XX.Xx
+EV/Revenue (x)              X.Xx      X.Xx      X.Xx      X.Xx      X.Xx
+EV/EBITDA (x)               XX.Xx     XX.Xx     XX.Xx     XX.Xx     XX.Xx
 
-Note: Use "A" suffix for actual/historical years, "E" suffix for estimated/projected years
-Source: Company data, [Firm Name] estimates.
+Note: "A" = actual per SEC filings; "E" = draft model estimates [ASSUMPTION]. State GAAP vs. Non-GAAP basis explicitly.
+Source: Company SEC filings (FY[Current] 10-K / latest 10-Q), internal draft model.
 ```
 
 ---
 
 ## FIGURE NUMBERING AND FORMATTING STANDARDS
 
-**CRITICAL**: All charts, graphs, and tables must follow strict figure numbering conventions used in professional equity research.
-
-### Figure Numbering Format
-
-**Every chart/table must have:**
-1. **Sequential numbering**: Figure 1, Figure 2, Figure 3, etc. (continue sequentially throughout entire report)
-2. **Descriptive title**: "Figure X - [Company] [Specific Metric] [Type of Chart/Analysis]"
-3. **Source line** (always at bottom): "Source: Company data, [Firm Name] estimates."
-
-**Examples:**
-- Figure 1 - [Company] Stock Price Performance
-- Figure 2 - [Company] Historical and Projected Revenue Mix by Product
-- Figure 3 - [Company] Revenue by Geographic Region
-- Figure 4 - [Product Name] Revenue and Price per Patient per Year
-- Figure 5 - [Company] Gross Margin Evolution
-- Figure 6 - DCF Sensitivity Analysis ($/share)
-- Figure 7 - Valuation Football Field
-
-### Caption Format
-
-```
-Figure X - [Descriptive Title]
-[Chart/Table/Graph content]
-Source: Company data, [Firm Name] estimates.
-```
-
-For tables with multiple data sources:
-```
-Figure X - [Descriptive Title]
-[Table content]
-Source: Company filings, FactSet, [Firm Name] estimates.
-```
-
-### Placement Guidelines
-
-- Figures should be numbered in order of appearance in the report
-- First figure (Figure 1) is typically the stock price chart or revenue growth trajectory on Page 1
-- Each figure must have its caption directly below the visual
-- Source line should be in smaller font, italicized, at the very bottom of the figure
+Every chart and table must include:
+1. **Sequential numbering:** `Figure 1`, `Figure 2`, `Figure 3`, ... (no gaps).
+2. **Descriptive title:** `Figure X - [Company] [Specific Metric] ([Period])`.
+3. **Specific source line below:** `Source: [Company] FY[Year] 10-K (filed [Date]), [Market Data Source], internal draft estimates.` (Never generic `"Company data"` alone.)
 
 ---
 
 ## PAGE 2: TABLE OF CONTENTS
 
-```
-Executive Summary....................................................1
-Investment Thesis & Risks..........................................3
-Company Overview.......................................................6
-  Business Description & History................................6
-  Management & Ownership..........................................8
-  Products & Technology...........................................9
-  Customers & Go-to-Market......................................11
-Growth Outlook & Drivers...........................................13
-Financial Analysis & Performance.................................16
-  Historical Performance........................................16
-  Financial Projections.........................................19
-Industry Overview & Competitive Landscape.....................21
-  Market Size & TAM..............................................21
-  Competitive Analysis..........................................23
-  Industry Trends................................................25
-Valuation Analysis..................................................27
-Appendices & Disclosures...........................................31
+```text
+Initiating Coverage Summary..........................................1
+Investment Thesis & Risks............................................3
+Company Overview (Company 101).......................................6
+  Business Description & History.....................................6
+  Management & Governance............................................8
+  Products & Technology..............................................9
+  Customers & Go-to-Market..........................................11
+Industry Overview & Competitive Landscape...........................13
+Financial Analysis, Projections & Scenarios.........................18
+  Historical Performance............................................18
+  Projection Assumptions............................................21
+  Scenario Analysis (Bear / Base / Bull)............................26
+Valuation Analysis..................................................31
+Appendices, Data Sources & Disclosures..............................41
 ```
 
 ---
 
-## PAGES 3-5: INVESTMENT THESIS & RISKS
+## PAGES 3–5: INVESTMENT THESIS & RISKS
 
-**LAYOUT PRINCIPLE**: Intersperse text with 2-3 charts in this section. Each page should have both text AND graphics. Never have pages with text only or charts only.
-
-### Investment Thesis
-
-**[Thesis Pillar 1]: [Title - e.g., "Large and Growing TAM"]**
-
-[Opening sentence with key statistic]
-
-[Paragraph 1: Market opportunity quantification]
-- Current market size
-- Growth drivers
-- Company's positioning
-
-[Paragraph 2: Why company will capture share]
-- Competitive advantages
-- Go-to-market strategy
-- Early traction/proof points
-
-[Paragraph 3: Financial impact]
-- Revenue opportunity
-- Margin profile
-- Timeline
-
-**[EMBED CHART: TAM Growth Chart]** - Stacked area chart showing market size evolution and company's opportunity
-
-**[Thesis Pillar 2]: [Title - e.g., "Differentiated Technology/Product"]**
-
-[Similar structure - 3 paragraphs covering the opportunity, competitive positioning, and financial impact]
-
-**[EMBED CHART: Competitive Positioning Matrix]** - 2×2 chart showing company vs. competitors on key dimensions
-
-**[Thesis Pillar 3]: [Title - e.g., "Strong Execution and Management"]**
-
-[Similar structure]
-
-**[Add 2-3 more pillars as needed]**
-
-**[EMBED CHART: Margin Expansion Pathway]** - Waterfall or line chart showing path to margin improvement
-
-### Investment Risks
-
-**Company-Specific Risks**
-
-**[Risk 1]: [Title - e.g., "Customer Concentration"]**
-[Description of risk, quantification if possible, mitigating factors. 2-3 sentences.]
-
-**[Risk 2]: [Title - e.g., "Execution Risk on Product Roadmap"]**
-[Description. 2-3 sentences.]
-
-**[Risk 3-5]: [Additional company-specific risks]**
-[Continue with 3-5 total company risks]
-
-**Industry/Market Risks**
-
-**[Risk 1]: [Title - e.g., "Regulatory Uncertainty"]**
-[Description. 2-3 sentences.]
-
-**[Risk 2]: [Title - e.g., "Intense Competition"]**
-[Description. 2-3 sentences.]
-
-**[Risk 3-4]: [Additional industry/market risks]**
-[Continue with 2-4 total industry risks]
+- **Investment Thesis:** 3–5 pillars (quantified opportunity, competitive advantage, financial impact, catalyst timeline), interspersed with charts (e.g., TAM evolution, competitive matrix, margin pathway).
+- **Investment Risks:** Target 8–12 distinct risks across 4 categories (Company-Specific, Industry/Market, Financial, Macroeconomic), noting severity, likelihood, and mitigants. Present disconfirming evidence honestly per `.agents/rules/research-integrity.md`.
 
 ---
 
-## PAGES 8-19: COMPANY 101
+## PAGES 6–17: COMPANY 101
 
-### Company Description (1 page)
-
-**Overview**
-[3-4 paragraphs describing:
-- What the company does (in plain English)
-- How it makes money
-- Who its customers are
-- Geographic presence
-- Scale/size metrics]
-
-**Business Model Diagram/Visual**
-[Insert visual showing how the company creates value]
-
-### Company History (2-3 pages)
-
-**The Early Days: [Founding Story Title]**
-
-[Paragraph on founding: who, when, why, initial vision]
-
-**Timeline of Key Milestones**
-
-```
-[Year]: [Founding event, initial funding]
-[Year]: [Product launch, key milestone]
-[Year]: [Major partnership, funding round]
-[Year]: [Geographic expansion, new product]
-[Year]: [Recent achievement]
-```
-
-**[Major Turning Point or Pivot]**
-[If applicable, describe any major strategic shifts]
-
-**[Company Name] Today: [Current State Title]**
-[Paragraphs describing current position, recent developments, current strategy]
-
-### Management & Ownership (2 pages)
-
-**Key Executives**
-
-For each executive:
-```
-[Name] - [Title]
-[Bio paragraph including:
-- Current role and responsibilities
-- Prior experience and track record
-- Key accomplishments at company
-- Education/credentials]
-```
-
-**Corporate Structure & Governance**
-- Entity type (C-Corp, PBC, etc.)
-- Board composition
-- Special governance features
-- [Include governance diagram if applicable]
-
-**Ownership Structure** [if disclosed]
-- Major shareholders and ownership %
-- Strategic investors
-- Employee ownership
-- Insider ownership trends
-
-### Core Technology/Products (2-3 pages)
-
-**Technology Overview**
-[Description of core technology/platform]
-
-**Product Portfolio**
-
-For each major product:
-```
-[Product Name]
-
-Description:
-[What it does, key features]
-
-Target Customers:
-[Who uses it, use cases]
-
-Pricing Model:
-[How it's priced, typical contract values]
-
-Competitive Positioning:
-[How it compares to alternatives]
-
-Traction:
-[Customers, revenue, growth metrics]
-```
-
-**Product Roadmap**
-[Future products/features in development]
-
-### Customers & Distribution (2-3 pages)
-
-**Customer Base**
-- Total customers: [number]
-- Customer segments (Enterprise, Mid-Market, SMB)
-- Geographic breakdown
-- Customer case studies/testimonials
-
-**Go-to-Market Strategy**
-- Sales channels (direct, partner, etc.)
-- Sales cycle and CAC
-- Key partnerships for distribution
-- Marketing strategy
-
-**Customer Economics**
-- LTV/CAC ratio
-- Net retention rate
-- Churn rates
-- Expansion rates
+Incorporate Task 1 prose verbatim (reformatted to DOCX styles) with inline charts:
+1. **Company Overview** (plain-English description, business model, monetization, scale)
+2. **Company History & Milestones** (founding story, timeline, strategic pivots, key acquisitions)
+3. **Management & Governance** (3–4 executive bios sourced from DEF 14A/filings, board independence, insider ownership)
+4. **Products & Technology** (core offerings, pricing model, differentiation, disclosed traction)
+5. **Customers & Go-to-Market** (customer segments, channels, unit economics where disclosed)
+6. **Industry Overview & Competitive Landscape** (industry scope, TAM/SAM/SOM, Porter's Five Forces, 5–10 peers where applicable, market share where disclosed)
 
 ---
 
-## PAGES 20-22: GROWTH OUTLOOK
+## PAGES 18–30: FINANCIAL ANALYSIS, PROJECTIONS & SCENARIOS
 
-### Growth Framework Overview
-
-**Short-term Growth Drivers (1-2 years)**
-1. [Driver 1]
-2. [Driver 2]
-3. [Driver 3]
-
-**Medium-term Growth Drivers (3-5 years)**
-1. [Driver 1]
-2. [Driver 2]
-
-### Detailed Growth Driver Analysis
-
-**[Growth Driver 1]: [Title]**
-
-*Current State:*
-[Baseline metrics, current performance]
-
-*Opportunity:*
-[Market size, company positioning, growth potential]
-
-*Timeline & Milestones:*
-- Near-term (1-2 years): [Expected progress]
-- Medium-term (3-5 years): [Expected progress]
-
-*Risks & Challenges:*
-[What could prevent realization of this opportunity]
-
-**[Repeat for each major growth driver]**
-
-### Financial Projections
-
-**Revenue Build-up**
-[Visual showing how revenue grows from current to projected]
-
-**Scenario Analysis**
-[Table or chart showing Bear/Base/Bull case projections]
+- **Historical Performance (3–5 years + LTM stub if mid-year):** Full Income Statement, Revenue by Product/Segment (where disclosed in 10-K), Revenue by Geography (where disclosed in 10-K), Cash Flow Statement, Balance Sheet highlights.
+- **Projection Assumptions (`[FY+1]E–[FY+5]E`):** Product/segment drivers, geographic drivers, gross margin bridge, R&D/S&M/G&A operating leverage (`% of Revenue`), D&A, CapEx, NWC (DSO/DIO/DPO), tax rate, SBC treatment. Tag all forward drivers `[ASSUMPTION]`.
+- **Scenario Analysis (Bear / Base / Bull):** Quantified revenue CAGR, terminal EBITDA margin, FCF, key catalysts/triggers, probability weights, and comparison table extracted from the `Scenarios` tab.
 
 ---
 
-## PAGES 21-24: FINANCIAL ANALYSIS & PERFORMANCE
+## PAGES 31–40: VALUATION ANALYSIS
 
-**LAYOUT PRINCIPLE**: This section should be VERY DENSE with 5-7 charts interspersed with financial tables. Each page should have multiple elements (table + 1-2 charts).
-
-### Historical Financial Analysis
-
-**Income Statement Highlights (3-5 Year History)**
-```
-                    2021    2022    2023    2024    LTM
-Revenue ($M)        [X]     [X]     [X]     [X]     [X]
-  Growth %          -       X%      X%      X%      X%
-Gross Profit ($M)   [X]     [X]     [X]     [X]     [X]
-  Margin %          X%      X%      X%      X%      X%
-EBITDA ($M)         [X]     [X]     [X]     [X]     [X]
-  Margin %          X%      X%      X%      X%      X%
-Net Income ($M)     [X]     [X]     [X]     [X]     [X]
-  Margin %          X%      X%      X%      X%      X%
-FCF ($M)            [X]     [X]     [X]     [X]     [X]
-```
-
-**[CHART 1: Revenue Growth Trajectory]**
-Line chart showing historical revenue with annotations for key milestones. Include growth % labels on chart.
-
-**[CHART 2: REVENUE BY PRODUCT/SEGMENT]** ⭐ CRITICAL
-Stacked area chart showing revenue composition by product line or business segment over time. This shows mix shift and which products are driving growth.
-```
-Example segments:
-- Product A Revenue
-- Product B Revenue
-- Product C Revenue
-- Services Revenue
-```
-
-**[CHART 3: REVENUE BY GEOGRAPHY]** ⭐ CRITICAL
-Stacked bar chart showing revenue breakdown by geographic region over time.
-```
-Example regions:
-- North America
-- Europe
-- Asia-Pacific
-- Rest of World
-```
-
-### Financial Performance Analysis
-
-**[CHART 4: Gross Margin Evolution]**
-Line chart with annotations explaining margin drivers (scale, pricing, mix, etc.)
-
-**[CHART 5: Operating Margin Progression]**
-Waterfall chart showing path from gross margin to operating margin, or line chart showing EBITDA margin trend
-
-**[CHART 6: Free Cash Flow Generation]**
-Bar + line combo chart: Bars = FCF, Line = FCF margin %
-
-**[CHART 7: Key Operating Metrics Dashboard]**
-Multi-panel chart showing 3-4 key metrics:
-- Customer count or user growth
-- ARPU (Average Revenue Per User) or ACV (Annual Contract Value)
-- Customer cohort retention or net revenue retention
-- LTV/CAC or magic number or other unit economic metric
-
-### Forward Projections (3-5 Years)
-
-**Projected Financial Model**
-```
-                    2025E   2026E   2027E   2028E   2029E
-Revenue ($M)        [X]     [X]     [X]     [X]     [X]
-  Growth %          X%      X%      X%      X%      X%
-Gross Profit ($M)   [X]     [X]     [X]     [X]     [X]
-  Margin %          X%      X%      X%      X%      X%
-EBITDA ($M)         [X]     [X]     [X]     [X]     [X]
-  Margin %          X%      X%      X%      X%      X%
-FCF ($M)            [X]     [X]     [X]     [X]     [X]
-  FCF Margin %      X%      X%      X%      X%      X%
-```
-
-**Key Assumptions**
-- Revenue growth drivers and assumptions
-- Margin progression assumptions
-- CapEx as % of revenue
-- Working capital assumptions
-
-**Charts:**
-- Revenue bridge showing growth drivers
-- Margin waterfall showing path to profitability/margin expansion
-- Free cash flow trajectory
-
-### Fundraising & Valuation [For Private Companies]
-
-**Fundraising History**
-```
-Round    Date      Amount    Valuation    Lead Investor(s)
-Seed     [Date]    $XM       $XM          [Investor]
-Series A [Date]    $XM       $XM          [Investor]
-Series B [Date]    $XM       $XM          [Investor]
-[etc.]
-```
-
-**Valuation Evolution Chart**
-[Visual showing valuation progression over time]
-
-**Current Valuation Metrics**
-- Latest valuation: $XXbn
-- Implied valuation multiple: XX.Xx
-- Comparison to public peers
+Aligned strictly with `dcf-model` and `references/task3-valuation.md`:
+- **DCF Analysis:** Gross-debt WACC table (`WACC` tab), 5Y mid-year UFCF projection, end-of-year `(1 + WACC)^N` terminal value discounting (perpetuity `g <= 3.5%` cross-checked vs. exit multiple), complete equity bridge (`EV - Gross Debt - Preferred - NCI + Cash + Equity Investments`), TSM diluted shares, SBC kept as real expense, centered odd 5×5 live sensitivity heatmap (`chart_28`), and TV `%` of EV check (`50%–70%` target).
+- **Comparable Companies (`Comparable Companies` tab):** Two-part table (5–10 peers + target, followed by mandatory Max / 75th / Median / 25th / Min statistical summary) with NTM/LTM multiples and premium/discount justification.
+- **Precedent Transactions (Optional Cross-Check):** Include only where relevant M&A exists; keep at `0%` target weight (cross-check only) unless an active M&A catalyst is part of the thesis.
+- **Valuation Summary & Football Field (`Valuation Summary` tab + `chart_32`):** Weighted valuation summary, football field chart, 12-month Price Target, standardized `Buy / Hold / Sell` rating, 3–5 catalysts, and key risks to target.
 
 ---
 
-## PAGES 26-31: INDUSTRY OVERVIEW
-
-### Industry Definition & Market Size
-
-**Industry Overview**
-[2-3 paragraphs on:
-- Industry definition and scope
-- Current market size
-- Historical growth rates
-- Key trends and drivers]
-
-**Market Size Chart**
-[Visual showing market growth from historical through projected]
-
-### Competitive Landscape
-
-**Competitive Positioning Matrix**
-[2x2 chart showing company vs. competitors on key dimensions]
-
-**Competitive Comparison Table**
-```
-Metric              [Company]  Comp A   Comp B   Comp C   Comp D
-Revenue ($B)        [X]        [X]      [X]      [X]      [X]
-Growth %            X%         X%       X%       X%       X%
-Market Share        X%         X%       X%       X%       X%
-Gross Margin        X%         X%       X%       X%       X%
-Key Differentiator  [X]        [X]      [X]      [X]      [X]
-```
-
-**Competitive Analysis Narrative**
-[2-3 paragraphs analyzing:
-- Competitive strengths and weaknesses
-- Market positioning
-- Share gains/losses
-- Competitive moats]
-
-### Total Addressable Market
-
-**TAM Calculation**
-```
-Current TAM (2025):              $XXbn
-Projected TAM (2030):            $XXbn
-CAGR:                            XX%
-
-Segmentation:
-- [Segment A]:                   $XXbn
-- [Segment B]:                   $XXbn
-- [Segment C]:                   $XXbn
-```
-
-**TAM Growth Chart**
-[Visual showing TAM expansion over time by segment]
-
-**Company's Market Opportunity**
-```
-Total TAM (2030):                $XXbn
-Serviceable TAM:                 $XXbn
-Company's Realistic Share:       XX%
-Implied Revenue Potential:       $XXbn
-```
-
-### Industry Dynamics
-
-**Porter's Five Forces Analysis**
-- Threat of new entrants: [High/Medium/Low] - [Explanation]
-- Bargaining power of suppliers: [High/Medium/Low] - [Explanation]
-- Bargaining power of buyers: [High/Medium/Low] - [Explanation]
-- Threat of substitutes: [High/Medium/Low] - [Explanation]
-- Industry rivalry: [High/Medium/Low] - [Explanation]
-
-**Key Industry Trends**
-1. [Trend 1]: [Description and impact]
-2. [Trend 2]: [Description and impact]
-3. [Trend 3]: [Description and impact]
-
----
-
-## PAGES 32-34: VALUATION ANALYSIS
-
-### Valuation Methodology Summary
-
-```
-Valuation Method            Weight    Implied Value    Weighted Value
-DCF Analysis                50%       $XX - $YY        $ZZ
-Trading Comparables         30%       $XX - $YY        $ZZ
-Precedent Transactions      20%       $XX - $YY        $ZZ
-                           ────       ─────────────    ─────────
-Weighted Average Price Target         $AA - $BB        $CC
-```
-
-### DCF Analysis
-
-**Key Assumptions**
-```
-Revenue Growth (2025-2029):         XX% CAGR
-Terminal Growth Rate:               X.X%
-WACC:                               X.X%
-Terminal Year EBITDA Margin:        XX%
-```
-
-**Figure X - DCF Sensitivity Analysis ($/share)**
-
-CRITICAL FORMAT: DCF sensitivity must be shown as a 2-way heat map table with color coding.
-
-```
-                        Terminal Growth Rate
-WACC        2.0%      2.5%      3.0%      3.5%      4.0%
-8.0%        $52       $55       $58       $62       $66
-9.0%        $48       $51       $54       $57       $61
-10.0%       $45       $47       $50       $53       $56
-11.0%       $42       $44       $47       $49       $52
-12.0%       $39       $41       $44       $46       $49
-
-Color coding: Green (higher values) → Yellow (mid) → Red (lower values)
-Source: [Firm Name] estimates.
-```
-
-**Scenario Analysis**
-```
-Scenario      Enterprise Value    Equity Value    Price/Share
-Bear Case     $XXbn              $XXbn           $XX
-Base Case     $XXbn              $XXbn           $XX
-Bull Case     $XXbn              $XXbn           $XX
-```
-
-### Trading Comparables
-
-**Figure X - Comparable Companies Analysis**
-
-CRITICAL FORMAT: Comp table must have two-part structure with statistical summary.
-
-**Part 1: Individual Company Data**
-```
-Company         Ticker   Market   EV/Rev   EV/Rev   EV/EBITDA  EV/EBITDA  Rev     EBITDA
-                         Cap($B)  2024E    2025E    2024E      2025E      Growth  Margin
-Peer A          PERA     XX.X     X.Xx     X.Xx     XX.X       XX.X       XX%     XX%
-Peer B          PERB     XX.X     X.Xx     X.Xx     XX.X       XX.X       XX%     XX%
-Peer C          PERC     XX.X     X.Xx     X.Xx     XX.X       XX.X       XX%     XX%
-Peer D          PERD     XX.X     X.Xx     X.Xx     XX.X       XX.X       XX%     XX%
-[Company]       COMP     XX.X     X.Xx     X.Xx     XX.X       XX.X       XX%     XX%
-```
-
-**Part 2: Statistical Summary**
-```
-Max                      XX.X     X.Xx     X.Xx     XX.X       XX.X       XX%     XX%
-75th Percentile          XX.X     X.Xx     X.Xx     XX.X       XX.X       XX%     XX%
-Median                   XX.X     X.Xx     X.Xx     XX.X       XX.X       XX%     XX%
-25th Percentile          XX.X     X.Xx     X.Xx     XX.X       XX.X       XX%     XX%
-Min                      XX.X     X.Xx     X.Xx     XX.X       XX.X       XX%     XX%
-
-Source: FactSet, company filings, [Firm Name] estimates.
-```
-
-**Implied Valuation**
-[Calculation showing application of peer multiples to company's metrics]
-
-### Precedent Transactions [If Applicable]
-
-**Figure X - Precedent Transaction Analysis**
-```
-Date        Target       Acquirer      Deal      EV/Rev   EV/EBITDA  Premium
-                                      Value($B)
-[MM/YYYY]   [Company A]  [Buyer A]    X.X       X.Xx     XX.X       XX%
-[MM/YYYY]   [Company B]  [Buyer B]    X.X       X.Xx     XX.X       XX%
-[MM/YYYY]   [Company C]  [Buyer C]    X.X       X.Xx     XX.X       XX%
-────────────────────────────────────────────────────────────────────
-Median                                          X.Xx     XX.X       XX%
-
-Source: Capital IQ, company filings, [Firm Name] estimates.
-```
-
-**Control Premium Analysis**
-[Discussion of typical premiums in the industry]
-
-### Valuation Summary
-
-**Figure X - Valuation Football Field**
-
-CRITICAL FORMAT: Football field must be a horizontal bar chart showing all valuation methods.
-
-```
-Valuation Method                Low End ────── Range ────── High End
-
-DCF Analysis                    $42 ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ $58
-
-Trading Comps (NTM)             $45 ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ $55
-
-Precedent Trans.                $48 ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ $60
-                                                      ↑
-                                            Current Price: $50
-────────────────────────────────────────────────────────────────
-Valuation Range:                $42                        $60
-
-Color coding: Each method should have distinct color bar
-Add vertical line showing current stock price
-Source: [Firm Name] estimates.
-```
-
-**Price Target & Recommendation**
-```
-Current Price:              $XX.XX ([Date])
-Price Target:               $YY.YY
-Upside/Downside:            ZZ%
-
-Recommendation:             BUY / HOLD / SELL
-Time Horizon:               12 months
-
-Catalysts:
-• [Near-term catalyst with timeframe]
-• [Medium-term catalyst with timeframe]
-• [Long-term catalyst with timeframe]
-```
-
----
-
-## PAGES 35+: APPENDICES & DISCLOSURES
-
-### Appendix A: Detailed Financial Model
-[Reference to Excel model]
-
-### Appendix B: Management Bios
-[Extended bios if not included in main text]
-
-### Appendix C: Product Detail
-[Additional product information if needed]
-
-### Appendix D: Industry Data Sources
-[List of sources used for industry analysis]
-
-### Required Disclosures
-- Analyst certification
-- Important disclosures
-- Company-specific disclosures
-- Legal entity disclosures
-- Other regulatory disclosures
-
----
-
-## GRAPHICS & CHARTS TO INCLUDE
-
-**TARGET: 20-30+ charts throughout the report**
-
-**CRITICAL PRINCIPLE**: Charts should be embedded within text sections, NOT grouped on separate pages. Every page (except TOC) should have at least one chart or table.
-
-### Page 1 - Executive Summary (3 charts)
-1. Revenue/ARR growth trajectory (line chart, historical + projected)
-2. Key metrics dashboard (multi-panel chart)
-3. Market positioning or margin progression
-
-### Pages 3-5 - Investment Thesis & Risks (3 charts)
-4. TAM growth and opportunity (stacked area chart)
-5. Competitive positioning matrix (2×2 with bubbles)
-6. Margin expansion pathway (waterfall or line)
-
-### Pages 6-17 - Company 101 (6-8 charts)
-7. Business model diagram (flow chart)
-8. Company timeline (horizontal timeline)
-9. Funding history (bar chart with valuation line)
-10. Organization chart
-11. Product portfolio matrix
-12. Customer segmentation (pie or tree map)
-13. Geographic revenue breakdown
-14. Customer cohort retention
-
-### Pages 18-20 - Growth Outlook (4 charts)
-15. Revenue bridge showing drivers (waterfall)
-16. Market share evolution (line chart)
-17. Product roadmap (timeline)
-18. Geographic expansion (map with timeline)
-
-### Pages 21-24 - Financials (7 charts) ⭐ CRITICAL SECTION
-19. Revenue growth trajectory (line with annotations)
-20. **Revenue by product/segment** (stacked area) ⭐ MUST HAVE
-21. **Revenue by geography** (stacked bar) ⭐ MUST HAVE
-22. Gross margin evolution (line chart)
-23. Operating margin progression (waterfall or line)
-24. Free cash flow trajectory (bar + line combo)
-25. Key operating metrics dashboard (multi-panel)
-26. Scenario comparison (grouped bar: Bear/Base/Bull)
-
-### Pages 25-30 - Industry Overview (6 charts)
-27. Market size evolution (area chart with CAGR)
-28. Competitive landscape map (2×2)
-29. Market share pie chart
-30. Market share evolution over time (line chart)
-31. TAM segmentation
-32. Industry trend charts
-
-### Pages 31-34 - Valuation (5 charts)
-33. DCF sensitivity analysis (heat map)
-34. DCF waterfall (PV of cash flows → equity value)
-35. Trading comps scatter plot (growth vs. multiple)
-36. Peer valuation multiples (grouped bar)
-37. Valuation football field (range chart)
-38. Price target scenarios (bar with upside/downside)
-
-**Chart Style Guidelines:**
-- **Consistent color scheme** throughout (pick 3-5 brand colors)
-- **Consistent font** (Calibri, unless user specifies otherwise)
-- **Clear labels and legends** on every chart
-- **Source citations** at bottom of each chart
-- **High information density** - use chart space efficiently
-- **Mix of chart types** for visual interest
-- **Annotations** to highlight key insights
-- **Embedded in text** - never standalone pages
-- **Sparklines in tables** where appropriate
-
----
-
-## NOTES ON USING THIS TEMPLATE
-
-1. **PAGE 1 IS CRITICAL:** The executive summary on page 1 must contain ALL key information - fast facts, financial snapshot, 3 charts, valuation summary, thesis, and risks. This is the most important page.
-
-2. **MAXIMUM DENSITY:** Professional equity research is EXTREMELY information-dense. Every page should be packed with interspersed text, charts, and tables. Aim for 60-80% page coverage with minimal white space.
-
-3. **NO ORPHANED SECTIONS:** Never have a section header alone, or a single chart/table on its own page. Always combine elements. Example: DON'T put "Financial Snapshot" on page 6 by itself - integrate it with surrounding content.
-
-4. **20-30+ CHARTS:** Include extensive graphics throughout, with specific emphasis on:
-   - **Revenue by product/segment** (stacked area chart)
-   - **Revenue by geography** (stacked bar chart)
-   - **Financial performance trends** (multiple charts)
-   - Charts should be embedded within text, not grouped separately
-
-5. **Use `python-docx`:** This outline should be converted to a professional Word document (`.docx`) using `python-docx`, with proper formatting, Calibri styles, headers/footers, and page numbers
-
-6. **Intersplice Content:** Text paragraphs should have charts embedded inline. Each page should have 2-4 distinct elements (tables, charts, text blocks).
-
-7. **Consistent Formatting:** Use consistent styles for headers, body text, tables, and charts throughout. Pick a color scheme and stick to it.
-
-8. **References:** Include citations and sources for all data points
-
-9. **Proofread:** Always proofread for accuracy, especially financial data and calculations
-
-10. **Executive Summary Last:** While it appears on page 1, write this section last after completing the full analysis
-
-11. **Balance:** Present both positive and negative aspects objectively
-
-12. **Specific > Generic:** Use specific data and examples rather than generic statements
+## PAGES 41+: APPENDICES, DATA SOURCES & DISCLOSURES (MANDATORY)
+
+1. **Appendix A: Detailed Financial Model Tables** (extended IS/CF/BS extracts reconciled to `<TICKER>_Financial_Model_<Date>.xlsx`)
+2. **Appendix B: Data Sources & References** (organized by SEC Filings, Earnings Transcripts, Company IR, Market Data, Industry Reports — all public URLs formatted as clickable hyperlinks with dates; paid feeds noted as subscription required)
+3. **Appendix C: Disclosures & Important Disclaimers (MANDATORY)**
+   - **Draft Status Notice:** *"DRAFT — FOR INTERNAL ANALYST REVIEW ONLY. This document is an unapproved internal research draft generated with AI assistance and has not been reviewed, verified, or signed off by a licensed research analyst or supervisory analyst."*
+   - **Not Investment Advice:** *"This draft does not constitute personalized investment advice, a solicitation, or an offer to buy or sell any security."*
+   - **Data & Assumption Notice:** *"Historical figures are sourced from primary public filings cited herein. Forward projections represent illustrative draft assumptions (`[ASSUMPTION]`) subject to analyst verification. Any unverified figure is marked `[UNSOURCED]`."*
+   - **Analyst Sign-Off Block:** `[ANALYST NAME — REVIEW REQUIRED]` | `[SUPERVISORY REVIEW — PENDING]` | `[DATE]`

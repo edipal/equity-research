@@ -1,7 +1,9 @@
 ---
 name: comps-analysis
-description: Build institutional-grade comparable company analyses with operating metrics, trading valuation multiples (EV/Revenue, EV/EBITDA, P/E), and statistical benchmarking (Max, 75th, Median, 25th, Min) in Excel format. Use for public equity valuation, peer benchmarking, identifying valuation outliers, or supporting sector overviews and DCF terminal multiples.
+description: Build institutional comparable company analyses with operating metrics, LTM/NTM trading valuation multiples (EV/Revenue, EV/EBITDA, P/E), and statistical benchmarking (Max, 75th, Median, 25th, Min) in Excel (.xlsx). Use for relative public equity valuation, peer benchmarking, and DCF exit-multiple cross-checks. Not for qualitative moat/positioning decks (use competitive-analysis) or intrinsic DCF valuation (use dcf-model).
 ---
+
+<!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/financial-analysis/skills/comps-analysis/SKILL.md), Apache-2.0; modified for Google Antigravity. -->
 
 # Comparable Company Analysis
 
@@ -68,12 +70,9 @@ Start with headers that force strategic thinking about what matters, input clean
 - The only hardcoded values should be raw input data (revenue, EBITDA, share price, etc.) — and every one of those gets a cell comment with its source
 - Why: the model must update automatically when an input changes. A hardcoded margin is a silent bug waiting to happen.
 
-**Verify step-by-step with the user:**
-- After setting up the structure → show the user the header layout before filling data
-- After entering raw inputs → show the user the input block and confirm sources/periods before building formulas
-- After building operating metrics formulas → show the calculated margins and sanity-check with the user before moving to valuation
-- After building valuation multiples → show the multiples and confirm they look reasonable before adding statistics
-- Do NOT build the entire sheet end-to-end and then present it — catch errors early by confirming each section
+**Verify step-by-step (Interactive vs. Subagent Mode):**
+- **Interactive mode:** Confirm at key checkpoints — (1) header & peer-set structure, (2) raw sourced inputs & fiscal calendarization, (3) operating margins sanity check, (4) valuation multiples & quartile statistics — before finalizing.
+- **Subagent mode (e.g., invoked by `market-researcher` or `model-builder`):** Do not stall for mid-build confirmation. Build the complete workbook end-to-end, tag inferred assumptions `[ASSUMPTION]` and missing feeds `[UNSOURCED]`, run `python3 scripts/recalc_xlsx.py <file.xlsx> 30` (confirming exit `0`), and surface the full peer-set rationale, calendarization notes, and outlier checks in the handoff.
 
 ---
 
@@ -198,41 +197,49 @@ Rule of 40: =[Growth %]+[FCF Margin %]
 ## Section 3: Valuation Multiples & Investment Metrics
 
 ### Core Valuation Columns (Start with these)
-1. **Company** - Same order as operating section
-2. **Market Cap** - Current market valuation
-3. **Enterprise Value** - Market Cap ± Net Debt/Cash
-4. **EV/Revenue** - How much market pays per dollar of sales
-5. **EV/EBITDA** - How much market pays per dollar of earnings
-6. **P/E Ratio** - Price relative to net earnings
+1. **Company** — Same order as operating section
+2. **Market Cap** — Current Share Price × Fully Diluted Shares (TSM)
+3. **Enterprise Value** — Full institutional formula:
+   `Enterprise Value = Market Cap + Total Gross Debt + Preferred Stock + Non-Controlling Interest - Cash & Short-Term Investments`
+   *(Exclude ASC 842 operating lease liabilities unless peer EBITDA is consistently adjusted on an IFRS 16 / EBITDAR basis.)*
+4. **EV/Revenue (LTM & NTM / FY+1)** — How much the market pays per dollar of sales
+5. **EV/EBITDA (LTM & NTM / FY+1)** — How much the market pays per dollar of operating cash flow proxy
+6. **P/E Ratio (LTM & NTM / FY+1)** — Price relative to net earnings (match GAAP vs. Non-GAAP strictly across all peers!)
+
+### Calendarization & Forward Multiples (NTM / FY+1)
+Public peers often have different fiscal year-ends (e.g., Jan, Mar, Jun, Sep, Dec). Always align forward multiples to a **common 12-month window (NTM or CY+1)** using weighted fiscal-year interpolation when consensus estimates are available (e.g., `NTM Metric = (m/12) * FY1E + ((12 - m)/12) * FY2E`, where `m` is months remaining in `FY1`). If forward consensus is unavailable via connected MCPs, default to **LTM** from primary SEC filings and disclose that NTM multiples are `[UNSOURCED]`.
 
 ### Optional Valuation Metrics (Choose based on context)
-- **FCF Yield** - FCF/Market Cap (for cash-focused analysis)
-- **PEG Ratio** - P/E/Growth Rate (for growth companies)
-- **Price/Book** - Market value vs. book value (for asset-heavy businesses)
-- **ROE/ROA** - Return metrics (for profitability comparison)
-- **Revenue/EBITDA CAGR** - Historical growth rates (for trend analysis)
-- **Asset Turnover** - Revenue/Assets (for operational efficiency)
-- **Debt/Equity** - Leverage (for capital structure analysis)
+- **FCF Yield** — `FCF / Market Cap` (for cash-focused analysis)
+- **PEG Ratio** — `P/E / (EPS Growth Rate in percentage points)` (when growth is stored as a decimal like `0.15`, divide by `Growth * 100`!)
+- **Price/Book** — Market value vs. book value (for financials/asset-heavy businesses)
+- **ROE/ROA** — Return metrics
+- **Rule of 40** — `YoY Revenue Growth % + FCF Margin %` (or `+ EBITDA Margin %` — ALWAYS label explicitly whether FCF or EBITDA margin is used!)
 
-**Key Principle:** Include 3-5 core multiples that matter for your industry. Don't include every possible metric just because you can.
+**Key Principle:** Include 3–5 core multiples that matter for your industry.
 
-### Formula Examples
+### Formula Examples (Always Guard Negative/Zero Denominators with `"NM"`)
 ```excel
-// Core multiples - always include these
-EV/Revenue: =[Enterprise Value]/[LTM Revenue]
-EV/EBITDA: =[Enterprise Value]/[LTM EBITDA]
-P/E Ratio: =[Market Cap]/[Net Income]
+// Enterprise Value (full formula)
+Enterprise Value: =MarketCap + TotalGrossDebt + PreferredStock + NCI - CashAndSTI
 
-// Optional multiples - include if data available
-FCF Yield: =[LTM FCF]/[Market Cap]
-PEG Ratio: =[P/E]/[Growth Rate %]
+// Core multiples — return "NM" (NOT 0!) for non-meaningful/negative/zero denominators
+// Returning "NM" ensures MEDIAN / QUARTILE / AVERAGE ignore invalid rows instead of skewing toward zero
+EV/Revenue:  =IF(Revenue<=0, "NM", IFERROR(EV/Revenue, "NM"))
+EV/EBITDA:   =IF(EBITDA<=0, "NM", IFERROR(EV/EBITDA, "NM"))
+P/E Ratio:   =IF(NetIncome<=0, "NM", IFERROR(MarketCap/NetIncome, "NM"))
+
+// Optional multiples
+FCF Yield:   =IFERROR(LTM_FCF/MarketCap, "NM")
+// PEG Ratio (decimal growth rate e.g. 0.15 for 15% MUST be multiplied by 100!)
+PEG Ratio:   =IF(OR(PE="NM", Growth<=0), "NM", IFERROR(PE/(Growth*100), "NM"))
 ```
 
 ### Cross-Reference Rule
 **CRITICAL:** Valuation multiples MUST reference the operating metrics section. Never input the same raw data twice. If revenue is in C7, then EV/Revenue formula should reference C7.
 
 ### Statistics Block
-Same structure as operating section: Max, 75th, Median, 25th, Min for every metric. Add one blank row for visual separation between company data and statistics. Do NOT add a "VALUATION STATISTICS" header row.
+Same structure as operating section: Max, 75th, Median, 25th, Min for every comparable metric (Excel `MEDIAN`, `QUARTILE`, `MAX`, `MIN` automatically ignore `"NM"` text strings). Add one blank row for visual separation between company data and statistics. Do NOT add a "VALUATION STATISTICS" header row.
 
 ---
 
@@ -241,21 +248,20 @@ Same structure as operating section: Max, 75th, Median, 25th, Min for every metr
 ### Required Components
 
 **Data Sources & Quality:**
-- Where did the data come from? (S&P Kensho MCP, FactSet MCP, Daloopa MCP, Bloomberg, SEC filings)
-- What period does it cover? (Q4 2024, audited figures)
-- How was it verified? (Cross-checked against 10-K/10-Q)
-- Note: Prioritize MCP data sources (S&P Kensho, FactSet, Daloopa) if available for better accuracy and traceability
+- Where did the data come from? (Connected MCP servers — FactSet, S&P Global/Kensho, Daloopa, LSEG — SEC filings, verified market feeds)
+- What period does it cover? (LTM / calendarized NTM, as-of date)
+- How was it verified? (Cross-checked against 10-K/10-Q; GAAP vs. Non-GAAP basis reconciled)
 
 **Key Definitions:**
-- EBITDA calculation method (Operating Income (EBIT) + D&A, or Net Income + Interest + Taxes + D&A)
-- Free Cash Flow formula (Operating CF - CapEx)
-- Special metrics explained (Rule of 40, FCF Conversion)
-- Time period definitions (LTM, CAGR calculation periods)
+- EBITDA calculation method (`Operating Income (EBIT) + D&A`, noting explicitly whether SBC is excluded or included)
+- Free Cash Flow formula (`Operating CF - CapEx`)
+- Rule of 40 basis (explicitly state `Rev Growth % + FCF Margin %` OR `Rev Growth % + EBITDA Margin %`)
+- Calendarization formula for off-calendar fiscal year-ends
 
 **Valuation Methodology:**
-- How was Enterprise Value calculated? (Market Cap + Net Debt)
-- What growth rates were used? (Historical CAGR, forward estimates)
-- Any adjustments made? (One-time items excluded, normalized margins)
+- Enterprise Value = `Market Cap + Total Gross Debt + Preferred Stock + Non-Controlling Interest - Cash & Short-Term Investments`
+- Diluted share count basis (Treasury Stock Method + if-converted test)
+- Outlier exclusions and adjustments documented transparently
 
 **Analysis Framework:**
 - What's the investment thesis? (Cloud/SaaS efficiency)
@@ -445,57 +451,60 @@ This helps answer: "Is our target company trading rich or cheap vs. peers?"
 - **Version control**: Save as "Comps_v1_2024-12-15" with clear dating
 - **Collaborative reviews**: Have someone else check your formulas
 
-### Excel Formatting Checklist (Optional - adapt to user preferences)
-- [ ] Font set to user's preferred style (default: Times New Roman, 11pt data, 12pt headers)
-- [ ] Section headers formatted per user's template (default: dark blue #17365D with white bold text)
-- [ ] Column headers formatted per user's template (default: light blue/gray #D9E2F3 with black bold text)
-- [ ] Statistics rows formatted per user's template (default: light gray #F2F2F2)
-- [ ] No borders applied (clean, minimal appearance)
-- [ ] **Column widths set to uniform/even width** (creates clean, professional appearance)
-- [ ] **Row heights set to consistent height** (typically 20-25pt for data rows)
-- [ ] Numbers formatted with proper decimal precision and thousands separators
-- [ ] **All metrics center-aligned** for clean, uniform appearance
-- [ ] **One blank row for separation between company data and statistics rows**
-- [ ] **No separate "SECTOR STATISTICS" or "VALUATION STATISTICS" header rows**
-- [ ] **Every hard-coded input cell has a comment with either: (1) exact data source, OR (2) assumption explanation**
-- [ ] **Hyperlinks added to cells where applicable** (SEC filings, data provider pages, reports)
+### Excel Formatting Checklist (Aligned with `.agents/rules/financial-modeling.md`)
+- [ ] Font set to user's preferred style (default: Calibri or Times New Roman, 10–11pt data, 11–12pt headers)
+- [ ] Section headers formatted per palette (default: dark navy `#1F4E79` with white bold text)
+- [ ] Column headers formatted per palette (default: light blue `#D9E1F2` with black bold text)
+- [ ] Statistics rows formatted per palette (default: light grey `#F2F2F2`; highlight target/median row `#BDD7EE` if helpful)
+- [ ] Column widths set cleanly with zero `###` truncation; consistent row heights
+- [ ] Numbers formatted with proper decimal precision (`0.0%`, `0.0"x"`, `#,##0`)
+- [ ] One blank row separating company rows from statistics rows
+- [ ] Every hard-coded input cell has a comment citing exact source + date (or `[ASSUMPTION]` explanation)
+- [ ] Hyperlinks added to SEC filings or data sources where applicable
 
 ---
 
-## Section 9: Example Template Layout
+## Section 9: Illustrative Placeholder Template Layout
 
-**Simple Version (Start here):**
-```
-┌─────────────────────────────────────────────────────────────┐
-│ TECHNOLOGY - COMPARABLE COMPANY ANALYSIS                    │
-│ Microsoft • Alphabet • Amazon                               │
-│ As of Q4 2024 | All figures in USD Millions                │
-├─────────────────────────────────────────────────────────────┤
-│ OPERATING METRICS                                           │
-├──────────┬─────────┬─────────┬──────────┬──────────────────┤
-│ Company  │ Revenue │ Growth  │ Gross    │ EBITDA  │ EBITDA │
-│          │ (LTM)   │ (YoY)   │ Margin   │ (LTM)   │ Margin │
-├──────────┼─────────┼─────────┼──────────┼─────────┼────────┤
-│ MSFT     │ 261,400 │ 12.3%   │ 68.7%    │ 205,100 │ 78.4%  │
-│ GOOGL    │ 349,800 │ 11.8%   │ 57.9%    │ 239,300 │ 68.4%  │
-│ AMZN     │ 638,100 │ 10.5%   │ 47.3%    │ 152,600 │ 23.9%  │
-│          │         │         │          │         │        │ [blank row]
-│ Median   │ =MEDIAN │ =MEDIAN │ =MEDIAN  │ =MEDIAN │=MEDIAN │
-│ 75th %   │ =QUART  │ =QUART  │ =QUART   │ =QUART  │=QUART  │
-│ 25th %   │ =QUART  │ =QUART  │ =QUART   │ =QUART  │=QUART  │
-├─────────────────────────────────────────────────────────────┤
-│ VALUATION MULTIPLES                                         │
-├──────────┬──────────┬──────────┬──────────┬────────────────┤
-│ Company  │ Mkt Cap  │ EV       │ EV/Rev   │ EV/EBITDA │ P/E│
-├──────────┼──────────┼──────────┼──────────┼───────────┼────┤
-│ MSFT     │3,550,000 │3,530,000 │ 13.5x    │ 17.2x     │36.0│
-│ GOOGL    │2,030,000 │1,960,000 │  5.6x    │  8.2x     │24.5│
-│ AMZN     │2,226,000 │2,320,000 │  3.6x    │ 15.2x     │58.3│
-│          │          │          │          │           │    │ [blank row]
-│ Median   │ =MEDIAN  │ =MEDIAN  │ =MEDIAN  │ =MEDIAN   │=MED│
-│ 75th %   │ =QUART   │ =QUART   │ =QUART   │ =QUART    │=QRT│
-│ 25th %   │ =QUART   │ =QUART   │ =QUART   │ =QUART    │=QRT│
-└──────────┴──────────┴──────────┴──────────┴───────────┴────┘
+*(Illustrative placeholder figures only — verify live numbers from primary filings/MCP before building. Notice `Gross Margin > EBITDA Margin` strictly holds for every peer!)*
+
+```text
+┌────────────────────────────────────────────────────────────────────────────┐
+│ TECHNOLOGY — COMPARABLE COMPANY ANALYSIS (ILLUSTRATIVE PLACEHOLDER LAYOUT) │
+│ Microsoft (MSFT) • Alphabet (GOOGL) • Amazon (AMZN)                        │
+│ As of [Date] | All dollar figures in USD Millions                          │
+├────────────────────────────────────────────────────────────────────────────┤
+│ OPERATING METRICS (LTM)                                                    │
+├──────────┬─────────┬─────────┬──────────┬─────────┬──────────┬─────────────┤
+│ Company  │ Revenue │ Growth  │ Gross    │ EBITDA  │ EBITDA   │ FCF         │
+│          │ (LTM)   │ (YoY)   │ Margin   │ (LTM)   │ Margin   │ Margin      │
+├──────────┼─────────┼─────────┼──────────┼─────────┼──────────┼─────────────┤
+│ MSFT     │ 261,800 │ 15.0%   │ 69.4%    │ 139,300 │ 53.2%    │ 27.5%       │
+│ GOOGL    │ 350,000 │ 13.9%   │ 58.2%    │ 127,800 │ 36.5%    │ 20.8%       │
+│ AMZN     │ 638,000 │ 11.0%   │ 48.9%    │ 141,000 │ 22.1%    │  6.0%       │
+│          │         │         │          │         │          │             │
+│ Max      │   —     │ =MAX()  │ =MAX()   │   —     │ =MAX()   │ =MAX()      │
+│ 75th %   │   —     │ =QUART  │ =QUART   │   —     │ =QUART   │ =QUART      │
+│ Median   │   —     │ =MEDIAN │ =MEDIAN  │   —     │ =MEDIAN  │ =MEDIAN     │
+│ 25th %   │   —     │ =QUART  │ =QUART   │   —     │ =QUART   │ =QUART      │
+│ Min      │   —     │ =MIN()  │ =MIN()   │   —     │ =MIN()   │ =MIN()      │
+├────────────────────────────────────────────────────────────────────────────┤
+│ VALUATION MULTIPLES (LTM & NTM)                                            │
+├──────────┬──────────┬──────────┬─────────┬──────────┬──────────┬───────────┤
+│ Company  │ Mkt Cap  │ EV*      │ EV/Rev  │ EV/EBITDA│ EV/EBITDA│ P/E       │
+│          │          │          │ (LTM)   │ (LTM)    │ (NTM)    │ (NTM)     │
+├──────────┼──────────┼──────────┼─────────┼──────────┼──────────┼───────────┤
+│ MSFT     │3,100,000 │3,085,000 │ 11.8x   │ 22.1x    │ 19.6x    │ 31.0x     │
+│ GOOGL    │2,200,000 │2,120,000 │  6.1x   │ 16.6x    │ 14.8x    │ 21.5x     │
+│ AMZN     │2,150,000 │2,190,000 │  3.4x   │ 15.5x    │ 13.2x    │ 33.5x     │
+│          │          │          │         │          │          │           │
+│ Max      │   —      │   —      │ =MAX()  │ =MAX()   │ =MAX()   │ =MAX()    │
+│ 75th %   │   —      │   —      │ =QUART  │ =QUART   │ =QUART   │ =QUART    │
+│ Median   │   —      │   —      │ =MEDIAN │ =MEDIAN  │ =MEDIAN  │ =MEDIAN   │
+│ 25th %   │   —      │   —      │ =QUART  │ =QUART   │ =QUART   │ =QUART    │
+│ Min      │   —      │   —      │ =MIN()  │ =MIN()   │ =MIN()   │ =MIN()    │
+└──────────┴──────────┴──────────┴─────────┴──────────┴──────────┴───────────┘
+*EV = Market Cap + Total Gross Debt + Preferred + NCI - Cash & ST Investments.
 ```
 
 **Add complexity only when needed:**
@@ -562,10 +571,10 @@ Add if relevant: Asset Turnover, Inventory Turns, Backlog
 =STDEV.P(range)          // Standard deviation
 
 // Financial Calculations
-=B7/C7                   // Simple ratio (Margin)
-=SUM(B7:B9)/3            // Average of multiple companies
-=IF(B7>0, C7/B7, "N/A")  // Conditional calculation
-=IFERROR(C7/D7, 0)       // Handle divide by zero
+=B7/C7                                  // Simple ratio (Margin)
+=SUM(B7:B9)/3                           // Average of multiple companies
+=IF(B7<=0, "NM", IFERROR(C7/B7, "NM"))  // Guard zero/negative multiples with "NM" (NEVER 0!)
+=IFERROR(C7/D7, "NM")                   // Handle divide by zero cleanly with "NM"
 
 // Cross-Sheet References
 ='Sheet1'!B7             // Reference another sheet

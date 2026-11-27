@@ -1,17 +1,19 @@
+<!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/financial-analysis/skills/3-statement-model/references/sec-filings.md), Apache-2.0; modified for Google Antigravity. -->
+
 # SEC Filings Data Extraction Reference
 
-**When to Use:** Only reference this file when a model template specifically requires pulling data from SEC filings (10-K, 10-Q). For templates that provide data directly or use other data sources, this reference is not needed.
+**When to Use:** Reference this file when building or populating a model with public company data from SEC filings (`10-K`, `10-Q`).
 
 ---
 
 ## Extracting Data from SEC Filings (10-K / 10-Q)
 
-When populating a model template with public company data, extract financials directly from SEC filings.
+When building or populating a model with public company data, extract financials directly from SEC filings.
 
 ### Step 1: Locate the Filing
 
-1. Use SEC EDGAR: `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=[TICKER]&type=10-K`
-2. For quarterly data, use `type=10-Q`
+1. Use SEC EDGAR: `https://www.sec.gov/edgar/browse/?CIK=<CIK>` (or XBRL API `https://data.sec.gov/api/xbrl/companyfacts/CIK<10-digit-CIK>.json`)
+2. Pull the latest Form `10-K` (annual) and any subsequent Form `10-Q` filings (quarterly)
 
 ### Step 2: Identify Filing Currency
 

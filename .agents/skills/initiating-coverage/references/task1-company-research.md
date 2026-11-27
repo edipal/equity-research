@@ -1,15 +1,19 @@
+<!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/equity-research/skills/initiating-coverage/references/task1-company-research.md), Apache-2.0; modified for Google Antigravity. -->
+
 # Task 1: Company Research - Detailed Workflow
 
 This document provides step-by-step instructions for executing Task 1 (Company Research) of the initiating-coverage skill.
 
 ## Task Overview
 
-**Purpose**: Research company's business, management, competitive position, industry, and risks.
+**Purpose**: Research company's business, management, competitive position, industry, and risks for an internal draft (`DRAFT — FOR INTERNAL ANALYST REVIEW ONLY`).
 
 **Prerequisites**: ✅ None (fully independent)
 - Company name or ticker symbol only
 
-**Output**: Company Research Document (6,000-8,000 words)
+**Output**: Company Research Document (target ~6,000–8,000 words where disclosed in primary filings)
+
+> **Integrity & No-Fabrication Rule:** Every quantitative fact must cite its primary source and date (e.g., `FY[Year] 10-K filed YYYY-MM-DD`, `DEF 14A filed YYYY-MM-DD`). Never invent executive biographies, market shares, customer counts, or funding rounds to hit word-count or competitor-count targets. Mark explicit analyst estimates `[ASSUMPTION]` and any unavailable/unverified data points `[UNSOURCED]`.
 
 ---
 
@@ -305,28 +309,27 @@ Identify 8-12 risks across four categories. For each risk, write 50-100 words.
 ## Quality Standards
 
 ### Content Depth
-- Each section must meet minimum word count targets
+- Aim for section word-count targets where primary disclosures support the depth (never pad or invent facts to hit counts)
 - Analysis should be substantive, not just descriptive
-- Use specific examples and quantitative data
-- Cite sources throughout
+- Use specific examples and quantitative data with filing dates
+- Cite sources throughout; mark estimates `[ASSUMPTION]` and unavailable metrics `[UNSOURCED]`
 - Maintain objectivity and balance
 
 ### Management Bios
-- 300-400 words per executive for 3-4 key executives
-- Must include: current role, prior experience, key accomplishments, education
+- Target 300–400 words per executive for 3–4 key executives (sourced from DEF 14A, 10-K, and official company biographies)
+- Include: current role, prior experience, key accomplishments, education (where disclosed)
 - Provide enough detail to assess track record and capabilities
 
 ### Competitive Analysis
-- Must analyze 5-10 specific competitors
-- Include both direct and indirect competitors
+- Target 5–10 specific competitors where applicable (direct and indirect peers from 10-K disclosures and sector mapping)
 - Assess relative positioning on key dimensions
 - Identify company's competitive advantages and vulnerabilities
-- Use specific data and examples
+- Use specific data and examples; mark estimated market shares `[ASSUMPTION]`
 
 ### Risk Assessment
-- Must identify 8-12 distinct risks across all four categories
-- Each risk needs 50-100 word description
-- Quantify impact where possible
+- Target 8–12 distinct risks across all four categories
+- Target 50–100 words per risk description
+- Quantify impact where disclosed or model-backed
 - Note mitigating factors
 - Cover all four risk categories
 
@@ -342,9 +345,10 @@ Identify 8-12 risks across four categories. For each risk, write 50-100 words.
 ## Output Format
 
 ```
-COMPANY RESEARCH REPORT: [Company Name]
-Date: [Date]
-Analyst: [Your name if applicable]
+DRAFT — FOR INTERNAL ANALYST REVIEW ONLY (NOT INVESTMENT ADVICE)
+COMPANY RESEARCH REPORT: [Company Name] ([TICKER])
+Date: [DATE]
+Prepared for Review By: [ANALYST NAME — REVIEW REQUIRED]
 
 TABLE OF CONTENTS
 1. Company Overview
@@ -422,11 +426,11 @@ DATA SOURCES
 
 A successful Task 1 completion should deliver:
 
-1. Meet 6,000-8,000 word target (verify word count)
-2. Include all 9 required sections with target word counts
-3. Provide substantive analysis, not just description
-4. Use specific examples and quantitative data
-5. Cite all sources properly
+1. Thorough coverage targeting ~6,000–8,000 words where primary disclosures support it (zero fabricated data)
+2. All 9 core sections addressed with explicit `[ASSUMPTION]` / `[UNSOURCED]` tags for any estimates or disclosure gaps
+3. Substantive, balanced analysis (both bull factors and disconfirming evidence)
+4. Specific examples and quantitative data
+5. Dated citations for every quantitative claim
 6. Enable reader to understand:
    - What the company does and how it makes money
    - Quality and track record of management team
@@ -440,9 +444,9 @@ A successful Task 1 completion should deliver:
 
 Save the output as:
 
-`research/companies/<TICKER>/reports/<TICKER>_Research_Document_<Date>.md`
+`research/companies/<TICKER>/reports/<TICKER>_Research_Document_YYYY-MM-DD.md`
 
-Example: `research/companies/TSLA/reports/TSLA_Research_Document_2024-10-27.md`
+Example: `research/companies/TSLA/reports/TSLA_Research_Document_2026-03-15.md`
 
 ---
 

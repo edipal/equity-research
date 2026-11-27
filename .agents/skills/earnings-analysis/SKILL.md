@@ -3,19 +3,21 @@ name: earnings-analysis
 description: Create professional equity research earnings update reports (8-12 pages, 3,000-5,000 words) analyzing quarterly results for companies already under coverage. Fast-turnaround format focusing on beat/miss analysis, key metrics, updated estimates, and revised thesis. Includes 1-3 summary tables and 8-12 charts. Use when user requests "earnings update", "quarterly update", "earnings analysis", "Q1/Q2/Q3/Q4 results", or post-earnings report.
 ---
 
+<!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/equity-research/skills/earnings-analysis/SKILL.md), Apache-2.0; modified for Google Antigravity. -->
+
 # Equity Research Earnings Update
 
-Create professional **EARNINGS UPDATE REPORTS** analyzing quarterly results for companies already under coverage, following institutional standards (JPMorgan, Goldman Sachs, Morgan Stanley format).
+Create institutional **EARNINGS UPDATE DRAFTS** analyzing quarterly results for companies already under coverage. Stage all deliverables as **`DRAFT — FOR INTERNAL ANALYST REVIEW ONLY (NOT INVESTMENT ADVICE)`**.
 
 **Key Characteristics:**
-- **Length**: 8-12 pages
+- **Length**: 8-12 pages (target range; scale to materiality)
 - **Word Count**: 3,000-5,000 words
 - **Tables**: 1-3 summary tables (NOT comprehensive)
-- **Figures**: 8-12 charts
-- **Turnaround**: 1-2 days (within 24-48 hours of earnings)
-- **Audience**: Clients already familiar with the company
+- **Figures**: 8-12 charts (where disclosed)
+- **Turnaround**: Draft within 24-48 hours of earnings release
+- **Audience**: Analysts / PMs already familiar with the company
 - **Focus**: What's NEW - beat/miss, updated estimates, thesis impact
-- **Font**: Times New Roman throughout (unless user specifies otherwise)
+- **Font**: Times New Roman or Calibri throughout (consistent per user preference)
 
 ## When to Use
 
@@ -33,15 +35,22 @@ Use when the user requests:
 ## Critical Requirements
 
 ### 1. Speed & Timeliness Verification
-- **Verify latest print before writing:** Search for `[Company] latest earnings results [current year]`, confirm the earnings release is the most recent quarter (within the last 3 months), and verify the earnings call transcript date matches the release date. If local data is stale, alert the user and fetch the latest release.
-- Publish within 24-48 hours of earnings release
-- Focus on NEW information only
-- Don't rehash company background extensively
+- **Latest-quarter requests:** Search for `[Company] latest earnings results [current year]`, confirm the earnings release is the most recent quarter (flag if older than 3 months), and verify the earnings call transcript date matches the release date.
+- **Historical-quarter requests:** If the user explicitly requests a specific historical quarter (e.g., *"analyze Q2 FY2024"*), do **not** reject it for staleness — verify the requested quarter's primary filings and note clearly that it is a historical retrospective review.
+- Draft within 24-48 hours of earnings release (for live coverage)
+- Focus on NEW information only; do not rehash company background extensively
 
-### 2. Beat/Miss Analysis
-- Lead with whether company beat or missed estimates
-- Quantify variances (e.g., "Revenue beat by $120M or 3%")
-- Explain WHY results differed from expectations
+### 2. Beat/Miss Analysis & Consensus Source Hierarchy (MANDATORY)
+- **Pre-Print Consensus Source Hierarchy:**
+  1. Connected financial MCP server (FactSet, S&P Capital IQ, LSEG, Bloomberg)
+  2. Pre-release wire articles (Reuters, Bloomberg, WSJ) quoting a named consensus provider dated **BEFORE** the earnings release
+  3. Company IR-compiled consensus (where published on IR site)
+- Always record **provider, as-of date, and estimate count (`n`)** where available.
+- **Prohibited:** NEVER use post-print Yahoo Finance consensus as pre-print consensus (post-print pages overwrite pre-release numbers), and do NOT cite unverified "whisper numbers".
+- **Fallback when pre-print consensus is unavailable:** Benchmark actuals against **prior management guidance** or **prior internal model estimates**, and explicitly mark Street consensus **`[UNSOURCED]`**.
+- **Basis matching:** Strictly match **GAAP vs. Non-GAAP** between reported actuals and consensus (never compare Non-GAAP EPS actual to GAAP consensus or vice versa).
+- **In-line threshold:** Revenue within **`±1.0%`** and EPS within **`±2.0%` or `±$0.01`** = **`INLINE`**; above = **`BEAT`**; below = **`MISS`**.
+- Explain **WHY** results differed from expectations (volume, pricing, mix, FX, or one-offs).
 
 ### 3. Summary Format
 - Keep tables to 1-3 (summary only, not comprehensive)
@@ -54,61 +63,24 @@ Use when the user requests:
 
 **Include specific citations WITH CLICKABLE LINKS in every figure and table:**
 
+```text
+Source: Q3 FY2026 Form 10-Q filed 2026-11-06; Q3 FY2026 Earnings Release (2026-10-29)
+        [Hyperlink "10-Q" to: https://www.sec.gov/Archives/edgar/data/<CIK>/<accession>/<doc>.htm]
+        [Hyperlink "EDGAR company page" to: https://www.sec.gov/edgar/browse/?CIK=<CIK>]
+        [Hyperlink "earnings release" to: https://investor.company.com/news/...]
 ```
-Source: Q3 2024 10-Q filed November 8, 2024; Company earnings release
-        [Hyperlink "10-Q" to: https://www.sec.gov/cgi-bin/viewer?accession=...]
-        [Hyperlink "earnings release" to: https://investor.company.com/news/q3-2024]
-```
-
-**HOW HYPERLINKS SHOULD APPEAR IN WORD:**
-- Document names appear as blue, underlined clickable links
-- Reader can Ctrl+Click to open source directly
-- Not plain text URLs - formatted hyperlinks with display text
 
 **REQUIRED SOURCES LIST:**
-
-Cite in every earnings update:
 - ✅ Earnings release (with date and URL)
-- ✅ 10-Q filing (with filing date and EDGAR link)
-- ✅ Earnings call transcript (with date)
+- ✅ 10-Q or 10-K filing (with filing date and SEC EDGAR URL: `https://www.sec.gov/edgar/browse/?CIK=...` or `https://www.sec.gov/Archives/edgar/data/...`) — note SEC Form 10-Q is due within **40 days** of quarter end for large accelerated/accelerated filers (**45 days** for non-accelerated filers), though often filed alongside or within days of the release
+- ✅ Earnings call transcript (with date matching release date)
 - ✅ Investor presentation/supplemental materials (if available)
-- ✅ Consensus estimates source (Bloomberg/FactSet/etc. with date)
+- ✅ Pre-print consensus estimates source (provider, as-of date, `n` — or `[UNSOURCED]` with guidance/model fallback)
 - ✅ Prior guidance (from previous quarter's materials)
 
-**REFERENCE SECTION WITH CLICKABLE HYPERLINKS:**
-
-Include "Sources" section at end of report:
-
-```
-SOURCES & REFERENCES
-
-Earnings Materials (Q3 2024):
-• Earnings Release (November 7, 2024)
-  [Hyperlink entire line to: https://investor.company.com/news/q3-2024-earnings]
-
-• Form 10-Q (Filed November 8, 2024)
-  [Hyperlink to: https://www.sec.gov/cgi-bin/viewer?accession=...]
-
-• Earnings Call Transcript (November 7, 2024)
-  [Hyperlink to: https://seekingalpha.com/article/...]
-
-• Investor Presentation (November 7, 2024)
-  [Hyperlink to: https://investor.company.com/presentations/q3-2024.pdf]
-```
-
-**VERIFICATION CHECKLIST:**
-- [ ] Every figure has source with specific document and date
-- [ ] Every table has source with document reference
-- [ ] Beat/miss analysis cites consensus source with date
-- [ ] Guidance changes cite current and prior guidance sources
-- [ ] Key statistics have footnotes
-- [ ] Sources section lists all materials with URLs
-- [ ] ALL URLs are CLICKABLE HYPERLINKS (not plain text)
-- [ ] All SEC filings hyperlinked to EDGAR viewer
-
 ### 5. Updated Estimates
-- Update forward estimates based on results
-- Show old vs. new estimates clearly
+- Update forward estimates based on results (defer to `model-update` as single source of truth when running inside `earnings-reviewer`)
+- Show old vs. new estimates clearly and tag forward projections `[ASSUMPTION]`
 - Explain what changed and why
 
 ## High-Level Workflow
@@ -117,22 +89,11 @@ The earnings update process follows 5 phases:
 
 ### Phase 1: Data Collection (30-60 minutes)
 
-**🚨🚨🚨 CRITICAL: TRAINING DATA IS OUTDATED 🚨🚨🚨**
-
-**BEFORE STARTING - COMPLETE THESE 4 STEPS IN ORDER:**
-1. **CHECK TODAY'S DATE** - Write down the current date
-2. **SEARCH FOR LATEST** - Use web search: "[Company] latest earnings results"
-3. **VERIFY THE DATE** - Confirm earnings release is within last 3 months
-4. **CHECK TRANSCRIPT DATE** - Verify transcript date matches release date
-
-**COMMON MISTAKE**: Using outdated earnings calls from training data instead of searching for the latest.
-
-**REQUIREMENTS:**
-- ✅ Search for latest earnings - do NOT rely on training data
-- ✅ Write down today's date and the release date found
-- ✅ Verify release date is within 3 months of today
-- ✅ Verify transcript date matches release date
-- ✅ If dates don't match or are old (>3 months), search again
+**Verify Timeliness Before Analyzing:**
+1. **Write down today's date** and confirm whether the request targets the **latest quarter** or a **specific historical quarter**.
+2. **Search primary sources** (MCP / SEC EDGAR / Company IR) — never rely on stale training data.
+3. **Verify release & transcript dates match** (for "latest quarter" requests, alert if the most recent release found is >3 months old; for explicitly requested historical quarters, proceed and label as historical).
+4. **Pull pre-print consensus** using the strict hierarchy above (record provider, as-of date, `n`, and GAAP/Non-GAAP basis).
 
 **See [references/workflow.md](references/workflow.md)** for detailed search procedures and verification steps.
 

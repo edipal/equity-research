@@ -3,6 +3,8 @@ name: model-update
 description: Update financial models with new data — quarterly earnings, management guidance, macro changes, or revised assumptions. Adjusts estimates, recalculates valuation, and flags material changes. Use after earnings, guidance updates, or when assumptions need refreshing. Triggers on "update model", "plug earnings", "refresh estimates", "update numbers for [company]", "new guidance", or "revise estimates".
 ---
 
+<!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/equity-research/skills/model-update/SKILL.md), Apache-2.0; modified for Google Antigravity. -->
+
 # Model Update
 
 ## Workflow
@@ -81,8 +83,8 @@ Recalculate valuation with updated estimates:
 
 ### Step 6: Output
 
-- Updated Excel model: `research/companies/<TICKER>/models/<TICKER>_Model_YYYY-MM-DD.xlsx` (if user provides or maintains an existing model; verify with `scripts/recalc_xlsx.py`)
-- Estimate change summary & updated price target derivation: `research/companies/<TICKER>/notes/<TICKER>_Model_Update_YYYY-MM-DD.md` (markdown or Word)
+- Updated Excel model: `research/companies/<TICKER>/models/<TICKER>_Model_YYYY-MM-DD.xlsx` (verify with `python3 scripts/recalc_xlsx.py <file.xlsx> 30` until exit `0` / `"status": "success"`, plus `python3 .agents/skills/dcf-model/scripts/validate_dcf.py <file.xlsx>` whenever a `DCF` tab is present)
+- Estimate change summary & updated price target derivation (`DRAFT — FOR INTERNAL ANALYST REVIEW ONLY`): `research/companies/<TICKER>/notes/<TICKER>_Model_Update_YYYY-MM-DD.md` (markdown or Word)
 
 ## Important Notes
 

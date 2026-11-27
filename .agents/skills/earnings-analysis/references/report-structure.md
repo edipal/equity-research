@@ -1,25 +1,26 @@
+<!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/equity-research/skills/earnings-analysis/references/report-structure.md), Apache-2.0; modified for Google Antigravity. -->
+
 # Report Structure and Templates
 
-This document provides complete page-by-page templates and formatting requirements for the earnings update DOCX report.
+This document provides page-by-page templates and formatting requirements for earnings update drafts (`DRAFT — FOR INTERNAL ANALYST REVIEW ONLY (NOT INVESTMENT ADVICE)`).
 
 ## Complete Report Structure
-
-**REPORT STRUCTURE:**
 
 ---
 
 ## PAGE 1: EARNINGS SUMMARY
 
 **Top Section - Header:**
-```
+```text
+DRAFT — FOR INTERNAL ANALYST REVIEW ONLY (NOT INVESTMENT ADVICE)
 [COMPANY NAME] ([TICKER])
-[QUARTER] [YEAR] EARNINGS UPDATE
+[QUARTER] FY[YEAR] EARNINGS UPDATE
 
-[Current Date]
+Date: [DATE] | Prepared for Review By: [ANALYST NAME — REVIEW REQUIRED]
 
-Rating: [MAINTAIN/RAISE/LOWER] [RATING]
-Price (as of [date]): $XX.XX
-Price Target: [OLD → NEW if changed, or MAINTAIN $XXX]
+Rating: [MAINTAIN / RAISE / LOWER] [BUY / HOLD / SELL]
+Price (as of [Date]): $XX.XX
+12M Price Target: [OLD -> NEW if changed, or MAINTAIN $XXX]
 ```
 
 **Top Section - Quick Summary Box:**
@@ -339,30 +340,27 @@ Source: [Firm Name] estimates
 
 ## Citation Examples for Specific Content
 
-### For Beat/Miss Analysis:
-```
-Revenue of $2.45B beat consensus of $2.39B by $60M (2.5%)¹
+### For Beat/Miss Analysis (Record Provider, As-Of Date, `n`, and Accounting Basis):
+```text
+Non-GAAP Revenue of $2.45B beat FactSet pre-release consensus of $2.39B (n=24, as of 2026-11-05) by $60M (+2.5%, BEAT; threshold ±1.0%)¹
 
-¹ Bloomberg consensus as of market close November 6, 2024; Company earnings release November 7, 2024
-  [Hyperlink "earnings release" to: https://investor.company.com/news/q3-2024-earnings]
+¹ FactSet pre-release consensus (n=24 analysts, as of market close 2026-11-05); Q3 FY2026 Earnings Release (2026-11-06).
+  [Hyperlink "Earnings Release" to: https://investor.company.com/news/...]
+  (If verified pre-print consensus is unavailable, benchmark against prior management guidance or internal model and tag Street consensus [UNSOURCED].)
 ```
 
 ### For Guidance:
-```
-Management raised FY2024 revenue guidance to $9.8-10.0B from prior $9.5-9.7B²
+```text
+Management raised FY[Year] revenue guidance to $9.8–10.0B from prior $9.5–9.7B²
 
-² Q3 2024 Earnings Call, November 7, 2024, CFO prepared remarks
-  [Hyperlink "Earnings Call" to: https://seekingalpha.com/article/...]
-  Prior guidance from Q2 earnings call August 8, 2024
-  [Hyperlink "Q2 earnings call" to August transcript]
+² Q3 FY[Year] Earnings Call (date), CFO prepared remarks; prior guidance from Q2 earnings call (date).
 ```
 
 ### For Key Metrics:
-```
+```text
 Enterprise customers grew 23% YoY to 845, with net revenue retention at 128%³
 
-³ Q3 2024 10-Q, page 23
-  [Hyperlink "10-Q" to: https://www.sec.gov/cgi-bin/viewer?accession=...]
-  Q3 2024 Investor Presentation slide 8
-  [Hyperlink "Investor Presentation" to PDF]
+³ Q3 FY[Year] Form 10-Q (filed YYYY-MM-DD), Item 2 MD&A
+  [Hyperlink "Form 10-Q" to: https://www.sec.gov/Archives/edgar/data/<CIK>/<accession>/<doc>.htm]
+  [Hyperlink "EDGAR Filings" to: https://www.sec.gov/edgar/browse/?CIK=<CIK>]
 ```

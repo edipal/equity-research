@@ -1,18 +1,18 @@
+<!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/equity-research/skills/earnings-analysis/references/workflow.md), Apache-2.0; modified for Google Antigravity. -->
+
 # Detailed Workflow for Earnings Updates
 
-This document provides detailed step-by-step instructions for each phase of the earnings update process.
+This document provides detailed step-by-step instructions for each phase of the earnings update process (`DRAFT — FOR INTERNAL ANALYST REVIEW ONLY`).
 
-## ⚠️⚠️⚠️ CRITICAL WARNING: ALWAYS USE THE LATEST EARNINGS DATA ⚠️⚠️⚠️
+## ⚠️ Timeliness Verification (Latest vs. Historical Quarter)
 
-**STOP AND READ THIS FIRST:**
+Training data may be outdated. Actively retrieve primary earnings materials from connected MCP servers, SEC EDGAR, or company IR.
 
-Training data is OUTDATED. Actively search for and retrieve the MOST RECENT earnings materials. Using outdated earnings data is the #1 mistake in earnings analysis.
-
-**BEFORE STARTING:**
-1. **CHECK TODAY'S DATE** - Write down the current date
-2. **SEARCH FOR LATEST** - Use web search to find the most recent earnings
-3. **VERIFY THE DATE** - Confirm the earnings release is within the last 3 months
-4. **IF OLDER THAN 3 MONTHS** - Wrong quarter obtained, search again
+- **When analyzing the "latest quarter":**
+  1. Write down today's date.
+  2. Search for the most recent earnings release and matching transcript.
+  3. Flag and re-search if the release date is older than **3 months** (90 days).
+- **When the user explicitly requests a historical quarter** (e.g., *"analyze Q2 FY2024"*): Do **not** reject it as stale — retrieve that exact quarter's primary filings, match its pre-release consensus (or prior guidance/model fallback), and label the note clearly as a historical retrospective.
 
 ## Phase 1: Earnings Data Collection (30-60 minutes)
 
@@ -89,27 +89,14 @@ After identifying the latest quarter from search, understand the company's fisca
 
 Many companies state their fiscal year in the earnings release header. Search `[company] fiscal year calendar` if needed.
 
-**Step 1c: MANDATORY VERIFICATION - Verify Latest Data Obtained**
+**Step 1c: MANDATORY VERIFICATION — Confirm Quarter & Dates**
 
-🛑 **STOP - DO NOT PROCEED until verifying ALL of these:**
+- [ ] ✅ **Today's date written down**: `[YYYY-MM-DD]`
+- [ ] ✅ **Target scope confirmed**: Latest quarter OR user-specified historical quarter
+- [ ] ✅ **Earnings release date found**: `[YYYY-MM-DD]` (for "latest quarter" requests, verify within 3 months of today; skip staleness rejection if a historical quarter was explicitly requested)
+- [ ] ✅ **Opened and read** the actual primary earnings release / 8-K / 10-Q confirming reported figures
 
-- [ ] ✅ **Today's date written down**: [Month] [Day], [Year]
-- [ ] ✅ **Actively searched** using "latest earnings" or "most recent earnings"
-- [ ] ✅ **Earnings release date found**: [Month] [Day], [Year]
-- [ ] ✅ **Verified release is within 3 months of today** (do the math!)
-- [ ] ✅ **Did NOT assume** the quarter based on today's date alone
-- [ ] ✅ **Can see the actual press release** confirming the quarter/period
-- [ ] ✅ **Opened and read** the actual earnings materials (not just assumed they exist)
-
-**🚨 RED FLAGS - If ANY of these are true, WRONG quarter obtained:**
-- 🚨 Release date is more than 90 days old
-- 🚨 Relying on expectations rather than what was FOUND by searching
-- 🚨 Have not actually SEEN a press release or filing confirming this quarter exists
-- 🚨 Used data from training without searching
-- 🚨 Cannot state the exact release date
-- 🚨 Release date found is from 2023 or earlier (when today is 2024+)
-
-**IF ANY RED FLAGS PRESENT**: STOP and search again. Do not proceed with outdated data.
+**RED FLAGS (for "latest quarter" requests):** Release date > 90 days old without user requesting a historical period, mismatched release vs. transcript quarter, or relying on memory instead of primary filings.
 
 **Step 1c: Handle Naming Variations**
 
@@ -143,75 +130,35 @@ After SEARCHING FOR and confirming the latest quarter, collect the following:
   - **Verify the date matches what was found in Step 1** (should be within last 1-3 months)
   - **Read the actual document** to confirm the quarter and get reported numbers
 
-- **10-Q or 10-K filing** - On SEC EDGAR (sec.gov/edgar/searchedgar/companysearch.html)
-  - Search by ticker symbol
-  - For quarters 1-3: Look for most recent 10-Q
-  - For Q4: Look for 10-K (annual report)
-  - Note: May be filed 1-5 days after earnings release
-  - Direct link format: `https://www.sec.gov/cgi-bin/viewer?accession=[accession-number]`
+- **10-Q or 10-K filing** — On SEC EDGAR (`https://www.sec.gov/edgar/browse/?CIK=<CIK>`):
+  - Search by ticker symbol or CIK
+  - For quarters 1–3: Look for the corresponding Form `10-Q`
+  - For Q4: Look for Form `10-K` (annual report)
+  - Note: SEC Form `10-Q` is due within **40 days** after quarter end for large accelerated and accelerated filers (**45 days** for non-accelerated filers), though many issuers file alongside or within days of the earnings release
+  - Direct EDGAR URL format: `https://www.sec.gov/edgar/browse/?CIK=<CIK>` or `https://www.sec.gov/Archives/edgar/data/<CIK>/<accession-no-hyphens>/<filename>.htm`
 
-- **Earnings call transcript** - 🚨 **VERIFY THE DATE ON THE TRANSCRIPT** 🚨
-  - **Search for**: "[Company] latest earnings call transcript" or "[Company] Q[X] [Year] earnings call transcript"
-  - **Sources**:
-    - Company IR site (some post transcripts directly)
-    - Seeking Alpha: Search "[Company] [latest quarter] earnings call transcript"
-    - AlphaStreet, Motley Fool (alternative sources)
-  - **CRITICAL DATE CHECK**:
-    - ✅ **Before using ANY transcript, verify the date on the transcript itself**
-    - ✅ **The transcript date MUST match the earnings release date from Step 1**
-    - ✅ **If transcript says "Q2 2023" but release was "Q3 2024", WRONG transcript obtained**
-    - 🚨 **Common mistake**: Grabbing an old transcript without checking the date
-  - If transcript not yet available, listen to webcast replay or note to wait for transcript
+- **Earnings call transcript** — Verify the transcript date matches the earnings release date (±1 day) and same fiscal quarter (sources: company IR site, Seeking Alpha, AlphaStreet).
 
 **Supplemental Materials (if available):**
-- **Investor presentation/slides** - Often posted on IR site alongside press release
-  - Usually titled "Q[X] [Year] Earnings Presentation" or "Investor Presentation"
-  - PDF format with slides management presented during earnings call
+- Investor presentation / earnings slides (PDF on IR site)
+- Supplemental financial data schedules
 
-- **Supplemental data file** - Some companies provide Excel files with detailed metrics
-  - Look for "Supplemental Financial Information" or "Investor Data Sheet"
+**Reference Materials & Consensus Source Hierarchy (MANDATORY):**
+- **Prior quarter & prior-year same quarter results** (for QoQ and YoY comparisons)
+- **Prior guidance & internal model estimates** (from previous quarter's release and workspace model)
+- **Pre-Print Consensus Estimates (STRICT HIERARCHY):**
+  1. Connected financial MCP server (FactSet, S&P Capital IQ, LSEG, Bloomberg)
+  2. Pre-release wire articles (Reuters, Bloomberg, WSJ) quoting a named consensus provider dated **BEFORE** the earnings release
+  3. Company IR-compiled consensus (if published on IR site)
+  - Always record **provider, as-of date, estimate count (`n`), and accounting basis (GAAP vs. Non-GAAP)**.
+  - **NEVER** use post-print Yahoo Finance consensus as pre-print consensus (post-print pages overwrite pre-release estimates), and **NEVER** fabricate or cite unverified "whisper numbers".
+  - **Fallback:** If verified pre-print consensus is unavailable, benchmark reported results against **prior management guidance** or **prior internal model estimates**, and explicitly mark Street consensus **`[UNSOURCED]`**.
+- **Basis & In-Line Rules:** Match GAAP vs. Non-GAAP basis identically between reported actuals and consensus. Treat Revenue within **`±1.0%`** and EPS within **`±2.0%` or `±$0.01`** as **`INLINE`** (above = `BEAT`, below = `MISS`).
 
-**Reference Materials (for comparison):**
-- **Prior quarter results** - For QoQ comparison
-  - From prior quarter's earnings release (90 days ago)
-
-- **Prior year same quarter** - For YoY comparison
-  - From same quarter last year (4 quarters ago)
-
-- **Prior estimates** - If this company was previously covered
-  - From last earnings update or initiation report
-  - Check what was estimated for this quarter's metrics
-
-- **Consensus estimates** - From Bloomberg, FactSet, Refinitiv, or Yahoo Finance
-  - CRITICAL: Use estimates from BEFORE earnings release
-  - Look for "as of [date before earnings]" to ensure pre-announcement consensus
-  - Needed for beat/miss analysis
-
-**🛑 MANDATORY VERIFICATION before proceeding to Step 3:**
-
-**DATES - Verify ALL dates match:**
-- [ ] ✅ **Today's date written down**: _______________
-- [ ] ✅ **Earnings release date**: _______________ (MUST be within 3 months of today)
-- [ ] ✅ **Earnings call transcript date**: _______________ (MUST match release date ±1 day)
-- [ ] ✅ **10-Q/10-K filing date**: _______________ (MUST be same quarter as release)
-- [ ] ✅ **ALL materials show SAME quarter** (e.g., all say "Q3 2024", not mixed quarters)
-
-**SEARCH & ACCESS - Verify active search completed:**
-- [ ] ✅ **SEARCHED** for "latest earnings" (not assumed based on current date)
-- [ ] ✅ **ACCESSED** actual earnings press release and read it
-- [ ] ✅ **OPENED** actual earnings call transcript and verified date
-- [ ] ✅ **CONFIRMED** this is the MOST RECENT quarter by checking dates
-- [ ] ✅ Have full financial results (revenue, EPS, margins, etc.) from actual release
-- [ ] ✅ Have pre-earnings consensus estimates with source date
-
-**🚨 RED FLAGS - STOP if ANY of these are true:**
-- 🚨 Did NOT actually search for or access the earnings materials
-- 🚨 Working from memory or training data instead of current documents
-- 🚨 The earnings release date is more than 90 days old
-- 🚨 Cannot state the EXACT DATE of the earnings release
-- 🚨 The transcript date does NOT match the release date
-- 🚨 Materials show different quarters (e.g., release says Q3 but transcript says Q2)
-- 🚨 Grabbed the first result without verifying the date
+**VERIFICATION before proceeding to Step 3:**
+- [ ] All primary materials (release, transcript, 10-Q/10-K if filed) verified for the **exact same quarter**
+- [ ] Release date verified (`<= 90 days` for "latest quarter" requests; or labeled historical retrospective if explicitly requested)
+- [ ] Pre-print consensus verified via hierarchy with provider + as-of date + `n` + GAAP/Non-GAAP basis (or `[UNSOURCED]` fallback documented)
 
 ### Step 3: Extract Key Metrics
 
@@ -489,10 +436,11 @@ Before publishing, verify:
 - [ ] No raw URLs displayed - all formatted as clickable links
 - [ ] Earnings call quotes cite specific speaker and approximate timestamp
 
-**Timeliness:**
-- [ ] Report published within 24-48 hours of earnings release
-- [ ] All data is from LATEST quarter
-- [ ] Consensus estimates are pre-earnings (not post-earnings)
+**Timeliness & Compliance:**
+- [ ] Draft completed within 24–48 hours of earnings release (for live coverage; or labeled historical retrospective if requested)
+- [ ] Report labeled `DRAFT — FOR INTERNAL ANALYST REVIEW ONLY (NOT INVESTMENT ADVICE)`
+- [ ] Pre-print consensus verified via hierarchy with provider, as-of date, `n`, and matching GAAP/Non-GAAP basis (or `[UNSOURCED]` fallback documented)
+- [ ] Beat/inline/miss classifications match thresholds (`±1.0%` revenue, `±2.0%` or `±$0.01` EPS)
 
 ### Step 16: Deliver Report
 

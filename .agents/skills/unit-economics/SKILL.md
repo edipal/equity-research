@@ -1,99 +1,88 @@
 ---
 name: unit-economics
-description: Analyze unit economics for public equities, SaaS/subscription, and recurring-revenue businesses — ARR bridges, cohort retention, LTV/CAC, net/gross dollar retention, payback periods, revenue quality, and margin waterfalls. Use when evaluating revenue quality, building a cohort analysis, or assessing customer economics. Triggers on "unit economics", "cohort analysis", "ARR analysis", "LTV CAC", "net retention", "revenue quality", or "customer economics".
+description: Analyze unit economics for public equities, SaaS/subscription, and recurring-revenue businesses — ARR/billings bridges, cohort retention, lagged CAC, LTV/CAC, GRR/NDR, CAC payback, Rule of 40, and margin waterfalls. Triggers on "unit economics", "cohort analysis", "ARR analysis", "LTV CAC", "net retention", "revenue quality", or "customer economics".
 ---
 
+<!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/private-equity/skills/unit-economics/SKILL.md), Apache-2.0; modified for Google Antigravity. -->
+
 # Unit Economics Analysis
+
+Evaluate revenue quality, customer retention, acquisition efficiency, and contribution margins for public equities and recurring-revenue businesses. Stage outputs as `DRAFT — FOR INTERNAL ANALYST REVIEW ONLY`.
 
 ## Workflow
 
 ### Step 1: Identify Business Model
+Tailor KPIs to the monetization model:
+- **SaaS / Subscription:** ARR, RPO/cRPO, calculated billings, GRR/NDR, CAC payback, Rule of 40
+- **Recurring Services:** Contract value, renewal rates, expansion attach
+- **Transaction / Usage-Based:** GMV/GPV, take rate, active buyers/sellers, repeat volume
+- **Hybrid:** Separate recurring subscription lines from lower-margin professional services / hardware
 
-Determine the revenue model to tailor the analysis:
-- **SaaS / Subscription**: ARR, net retention, cohorts
-- **Recurring services**: Contract value, renewal rates, upsell
-- **Transaction / usage-based**: Revenue per transaction, volume trends, take rate
-- **Hybrid**: Break down by revenue stream
+### Step 2: Core Metrics & Exact Institutional Formulas
 
-### Step 2: Core Metrics
+#### ARR & Revenue Quality
+- **ARR Bridge:** `Ending ARR = Beginning ARR + New Logo ARR + Expansion ARR - Contraction ARR - Churned ARR`
+- **Calculated Billings (Public-Filing Proxy):** `Calculated Billings = GAAP Revenue + ΔDeferred Revenue` (verify short-term + long-term deferred revenue)
+- **Revenue Mix & Concentration:** Recurring vs. services `%`; top 10/20 customers `%` (where disclosed in 10-K)
 
-#### ARR / Revenue Quality
-- **ARR bridge**: Beginning ARR → New → Expansion → Contraction → Churn → Ending ARR
-- **ARR by cohort**: Vintage analysis — how does each annual cohort retain and grow?
-- **Revenue concentration**: Top 10/20/50 customers as % of total
-- **Revenue by type**: Recurring vs. non-recurring vs. professional services
-- **Contract structure**: ACV distribution, multi-year %, auto-renewal %
+#### Retention & Expansion (Explicit Formulas)
+- **Gross Dollar Retention (GRR):**
+  $$\text{GRR} = \frac{\text{Beginning ARR} - \text{Contraction ARR} - \text{Churned ARR}}{\text{Beginning ARR}} \quad (\le 100\%)$$
+- **Net Dollar Retention (NDR / DBNRR):**
+  $$\text{NDR} = \frac{\text{Beginning ARR} + \text{Expansion ARR} - \text{Contraction ARR} - \text{Churned ARR}}{\text{Beginning ARR}}$$
+- **Logo Churn:** `Churned Customers_t / Beginning Customers_t`
+- **Dollar Churn:** `(Contraction ARR + Churned ARR) / Beginning ARR`
 
-#### Customer Economics
-- **CAC (Customer Acquisition Cost)**: Total S&M spend / new customers acquired
-- **LTV (Lifetime Value)**: (ARPU × Gross Margin) / Churn Rate
-- **LTV:CAC ratio**: Target >3x for healthy businesses
-- **CAC payback period**: Months to recover acquisition cost
-- **Blended vs. segmented**: Break down by customer segment (enterprise vs. SMB vs. mid-market)
+#### Customer Acquisition & Lifetime Value (Lagged CAC Basis)
+- **Lagged CAC (MANDATORY for multi-month sales cycles):**
+  $$\text{CAC}_t = \frac{\text{Sales \& Marketing Spend}_{t-1}}{\text{New Customers Acquired}_t}$$
+  *(Match the lag `t-1` to the company's sales cycle — typically 1 quarter for mid-market/enterprise SaaS — rather than dividing contemporaneous S&M by current-period closes. Explicitly note when contemporaneous S&M is used for PLG / zero-lag self-serve models.)*
+- **CAC Payback Period (Months):**
+  $$\text{CAC Payback (months)} = \frac{\text{CAC}_t}{\text{Monthly ARPU} \times \text{Subscription Gross Margin \%}}$$
+  *(Public-filing macro proxy when customer counts are undisclosed: `Prior-Period S&M / (Net New ARR × Subscription Gross Margin %) × 12`.)*
+- **Lifetime Value (LTV):**
+  $$\text{LTV} = \frac{\text{Annual ARPU} \times \text{Subscription Gross Margin \%}}{\text{Annual Churn Rate}}$$
+  *(Use logo churn for per-customer LTV or gross dollar churn for revenue-weighted LTV; state basis explicitly and note that LTV explodes artificially if churn approaches 0% — cap assumed customer lifetime at 7–10 years when modeling.)*
+- **LTV : CAC Ratio:** `LTV / Lagged CAC` (target `> 3.0x`)
 
-#### Retention & Expansion
-- **Gross retention**: % of beginning ARR retained (excludes expansion)
-- **Net retention (NDR)**: % of beginning ARR retained including expansion
-- **Logo churn**: % of customers lost
-- **Dollar churn**: % of revenue lost (often different from logo churn)
-- **Expansion rate**: Upsell + cross-sell as % of beginning ARR
+#### Cohort Matrix & Margin Waterfall
+- Build a cohort retention table (`Cohort × Year 0..Year 4`) showing both absolute `$` and indexed (`Year 0 = 100%`) views where cohorts are disclosed (never fabricate undisclosed cohorts!).
+- **Margin Waterfall:** `Revenue → Subscription Gross Profit → Contribution Margin (less S&M/Support) → Operating Income / EBITDA`. Always separate GAAP vs. Non-GAAP (SBC treatment).
 
-#### Cohort Analysis
-Build a cohort matrix showing:
+### Step 3: Benchmarking (Aligned with `comps-analysis`)
+- **Rule of 40:** `YoY Revenue Growth % + FCF Margin %` *(or `YoY Revenue Growth % + EBITDA Margin %` — **ALWAYS label explicitly** which margin metric is used so benchmarks match `comps-analysis` cleanly!)* Target `>= 40%`.
+- **SaaS Magic Number:** `Net New ARR / Prior-Period S&M Spend` (quarterly: `(Subscription Rev_t - Subscription Rev_{t-1}) × 4 / S&M_{t-1}`). Healthy `> 0.75x`; efficient `> 1.0x`.
+- **NDR:** Best-in-class `> 120%`, good `> 110%`, concerning `< 100%`.
+- **GRR:** Best-in-class `> 95%`, good `> 90%`, concerning `< 85%`.
+- **LTV : CAC:** Best-in-class `> 5.0x`, good `> 3.0x`, concerning `< 2.0x`.
+- **CAC Payback:** Best-in-class `< 12 mo`, good `< 18 mo`, concerning `> 24 mo`.
 
-| Cohort | Year 0 | Year 1 | Year 2 | Year 3 | Year 4 |
-|--------|--------|--------|--------|--------|--------|
-| 2020 | $1.0M | $1.1M | $1.2M | $1.1M | |
-| 2021 | $1.5M | $1.7M | $1.8M | | |
-| 2022 | $2.0M | $2.3M | | | |
-| 2023 | $3.0M | | | | |
+### Step 4: Revenue Quality Scorecard
 
-Show both absolute $ and indexed (Year 0 = 100%) views.
+| Factor | Score (1–5) | Evidence & Primary Source |
+|---|---|---|
+| Recurring Revenue `%` | | |
+| Net & Gross Dollar Retention | | |
+| Customer Concentration | | |
+| Cohort / RPO Visibility | | |
+| S&M Efficiency (Magic # / Payback) | | |
+| Subscription Gross Margin & Rule of 40 | | |
+| **Overall Revenue Quality** | | |
 
-#### Margin Waterfall
-- Revenue → Gross Profit → Contribution Margin → EBITDA
-- Fully loaded unit economics: what does it cost to acquire, serve, and retain a customer?
-- Gross margin by revenue stream (subscription vs. services vs. other)
+### Step 5: Canonical `.xlsx` Workbook Layout & Output Paths
 
-### Step 3: Benchmarking
+Stage deliverables under `research/companies/<TICKER>/` (aligned with `model-builder`):
+- **Model workbook:** `research/companies/<TICKER>/models/<TICKER>_UnitEconomics_YYYY-MM-DD.xlsx` built via `xlsx-author` with live formulas, institutional palette (`#1F4E79` / `#D9E1F2` / `#F2F2F2` / `#BDD7EE`), source comments on all blue inputs, and **5 canonical tabs**:
+  1. `Summary Dashboard` — Headline KPIs (ARR, Growth, GRR/NDR, Lagged CAC, Payback, LTV/CAC, Magic Number, Rule of 40 labeled FCF vs. EBITDA basis, Revenue Quality Scorecard)
+  2. `ARR & Billings Bridge` — Beginning ARR → New / Expansion / Contraction / Churn → Ending ARR, plus GAAP Revenue + ΔDeferred Revenue calculated billings & RPO/cRPO table
+  3. `Cohort & Proxy Panel` — Disclosed customer cohorts (absolute `$` & `%` indexed) OR transparent public-filing proxies (customer tiers `$100K+`/`$1M+`, implied ACV, DBNRR) tagged `[ASSUMPTION]` where derived
+  4. `Unit Economics & Waterfall` — Lagged CAC, Payback, LTV/CAC, subscription vs. services gross margin, contribution margin waterfall
+  5. `Sources & Notes` — Filing dates, GAAP/Non-GAAP reconciliations, SBC treatment, and proxy methodology
+- **Mandatory QA Gate:** Run `python3 scripts/recalc_xlsx.py research/companies/<TICKER>/models/<TICKER>_UnitEconomics_YYYY-MM-DD.xlsx 30` (exit `0`, `"status": "success"`).
+- **Analytical summary note:** `research/companies/<TICKER>/notes/<TICKER>_UnitEconomics_YYYY-MM-DD.md` (with optional slides via `pptx-author` under `research/companies/<TICKER>/reports/`).
 
-Compare unit economics to relevant benchmarks:
-- **SaaS Rule of 40**: Growth rate + EBITDA margin > 40%
-- **SaaS Magic Number**: Net new ARR / prior period S&M spend > 0.75x
-- **NDR benchmarks**: Best-in-class >120%, good >110%, concerning <100%
-- **LTV:CAC**: Best-in-class >5x, good >3x, concerning <2x
-- **Gross retention**: Best-in-class >95%, good >90%, concerning <85%
-- **CAC payback**: Best-in-class <12mo, good <18mo, concerning >24mo
+## Public-Filing Data Reality
 
-### Step 4: Revenue Quality Score
-
-Synthesize into a revenue quality assessment:
-
-| Factor | Score (1-5) | Notes |
-|--------|-------------|-------|
-| Recurring % | | |
-| Net retention | | |
-| Customer concentration | | |
-| Cohort stability | | |
-| Growth durability | | |
-| Margin profile | | |
-| **Overall** | | |
-
-### Step 5: Output
-
-Stage all outputs under `research/companies/<TICKER>/`:
-- **Model workbook**: `research/companies/<TICKER>/models/<TICKER>_UnitEconomics_YYYY-MM-DD.xlsx` via `xlsx-author` (ARR/billings bridge, cohort matrix or public-filing proxy panel, unit economics dashboard)
-- **Analytical note / summary**: `research/companies/<TICKER>/notes/<TICKER>_UnitEconomics_YYYY-MM-DD.md` (with optional slide via `pptx-author` under `research/companies/<TICKER>/reports/`) highlighting key benchmarks, red flags, and diligence questions
-
-## Public-Filing Proxies & Important Notes
-
-- **Public-equity data reality**: Unlike private equity data rooms, public companies rarely disclose raw customer-level tables. When granular cohorts are unavailable, build transparent proxies from SEC filings (`10-K`, `10-Q`), earnings releases, and investor day decks — explicitly labeling derived figures `[ASSUMPTION]`:
-  - **RPO & cRPO** (Remaining Performance Obligations / current RPO) to track contracted backlog and forward revenue visibility
-  - **Calculated billings** (`Revenue + ΔDeferred Revenue`) and **deferred revenue** trends to cross-check demand vs. GAAP revenue recognition
-  - **Disclosed NRR / DBNRR, customer-count tiers** (e.g., `$100K+` / `$1M+` ARR logos), and **implied ACV** (`Subscription Revenue / Ending Customers`)
-  - **Public-filing S&M efficiency**: Implied Magic Number (`ΔSubscription Revenue × 4 / Prior-Quarter S&M` or `Net New ARR / Prior-Year S&M`), implied gross-margin-adjusted CAC payback, and S&M % of revenue
-- If the user uploads customer-level exports or investor-day cohort disclosures, prioritize those primary datasets and document exact source dates
-- NDR above 100% can mask elevated gross churn if expansion is strong enough — flag when GRR is undisclosed
-- Differentiate clearly between contracted ARR, billings, and GAAP recognized revenue
-- For usage-based models, focus on consumption trends, RPO drawdowns, and expansion patterns rather than traditional seat-based ARR metrics
-- Evaluate professional services revenue separately — it is non-recurring and carries structurally lower gross margins
+- Public companies rarely disclose raw customer-level tables. When granular cohorts are unavailable in 10-K/10-Q/Investor Day materials, build transparent proxies from RPO/cRPO, calculated billings, disclosed DBNRR, customer tiers, and lagged S&M efficiency — explicitly tagging derived proxies `[ASSUMPTION]` and unavailable figures `[UNSOURCED]`.
+- Flag whenever NDR `> 100%` is reported without GRR (strong expansion can mask elevated gross churn).
+- Evaluate professional services separately from subscription software.

@@ -3,6 +3,8 @@ name: pptx-author
 description: Build institutional-quality PowerPoint (.pptx) equity research decks, sector primers, and pitch presentations programmatically using Python (python-pptx) with model-linked charts and visual verification. Use when creating presentation slides in Antigravity.
 ---
 
+<!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/financial-analysis/skills/pptx-author/SKILL.md), Apache-2.0; modified for Google Antigravity. -->
+
 # pptx-author
 
 Build clean, institutional-grade PowerPoint (`.pptx`) presentations programmatically in Antigravity using Python (`python-pptx`) and high-DPI rendered charts (`matplotlib`).
@@ -20,6 +22,7 @@ Build clean, institutional-grade PowerPoint (`.pptx`) presentations programmatic
 Write a Python script using `python-pptx` and run it in the terminal:
 
 ```python
+from pathlib import Path
 from pptx import Presentation
 from pptx.util import Inches, Pt
 
@@ -32,7 +35,9 @@ slide = prs.slides.add_slide(prs.slide_layouts[5])  # Title-only
 slide.shapes.title.text = "Valuation Summary — DCF & Peer Multiples"
 # Add tables, high-DPI chart PNGs, and source footnotes...
 
-prs.save("research/sectors/cloud-saas/decks/primer.pptx")
+out_path = Path("research/sectors/cloud-saas/decks/primer.pptx")
+out_path.parent.mkdir(parents=True, exist_ok=True)
+prs.save(out_path)
 ```
 
 ## Institutional Conventions
