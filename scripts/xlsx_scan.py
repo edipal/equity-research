@@ -520,7 +520,7 @@ def scan_workbook_formulas(
                     raw_ref = attr_text.strip()
                     if raw_ref.startswith("="):
                         raw_ref = raw_ref[1:].strip()
-                    if not raw_ref or "," in raw_ref or ":" in raw_ref or "[" in raw_ref or "]" in raw_ref:
+                    if not raw_ref or ":" in raw_ref or "[" in raw_ref or "]" in raw_ref:
                         continue
                     if "!" in raw_ref:
                         sheet_part, cell_part = raw_ref.rsplit("!", 1)
@@ -528,12 +528,7 @@ def scan_workbook_formulas(
                             continue
                         if len(sheet_part) >= 2 and sheet_part[0] == "'" and sheet_part[-1] == "'":
                             inner_sheet = sheet_part[1:-1]
-                            if (
-                                not inner_sheet
-                                or "[" in inner_sheet
-                                or "]" in inner_sheet
-                                or "'" in inner_sheet.replace("''", "")
-                            ):
+                            if not inner_sheet or "'" in inner_sheet.replace("''", ""):
                                 continue
                             sheet_title = inner_sheet.replace("''", "'")
                         elif UNQUOTED_SHEET_REF_RE.fullmatch(sheet_part):

@@ -6127,6 +6127,96 @@ class TestValidateDcf(unittest.TestCase):
             for name in invalid_specs:
                 self.assertNotIn(name, dn, f"{name} ({invalid_specs[name]!r}) should be skipped")
 
+    def test_quoted_comma_sheet_names_accepted_while_comma_unions_rejected(self) -> None:
+        from openpyxl.workbook.defined_name import DefinedName
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "quoted_comma_sheets_and_unions.xlsx"
+            wb = openpyxl.Workbook()
+            ws_dcf = wb.active
+            ws_dcf.title = "DCF"
+            ws_dcf["A4"] = "PV of Terminal Value"
+            ws_dcf["C4"] = 600.0
+            ws_dcf["A5"] = "Enterprise Value"
+            ws_dcf["C5"] = 1000.0
+            ws_dcf["C6"] = 0.025
+            ws_dcf["A12"] = "Sensitivity Analysis"
+
+            # Real non-target sheets with commas (and apostrophes) plus union-target sheets
+            ws_comma = wb.create_sheet("Inputs, 2026")
+            ws_comma["B2"] = 0.095
+            ws_comma["B3"] = 0.99  # Unreferenced cell — must NOT be loaded by point-capture
+
+            ws_obrien_comma = wb.create_sheet("O'Brien, Inc.")
+            ws_obrien_comma["D12"] = 0.025
+            ws_obrien_comma["D13"] = 0.88  # Unreferenced cell — must NOT be loaded by point-capture
+
+            ws_s1 = wb.create_sheet("Sheet 1")
+            ws_s1["A1"] = 0.01
+            ws_s2 = wb.create_sheet("Sheet 2")
+            ws_s2["B2"] = 0.02
+            ws_q1 = wb.create_sheet("A'")
+            ws_q1["A1"] = 0.03
+            ws_q2 = wb.create_sheet("'B")
+            ws_q2["B2"] = 0.04
+
+            # Valid single-cell defined names referencing quoted comma sheet names
+            wb.defined_names["DCF_WACC"] = DefinedName("DCF_WACC", attr_text="'Inputs, 2026'!$B$2")
+            wb.defined_names["TerminalGrowth"] = DefinedName(
+                "TerminalGrowth", attr_text="='O''Brien, Inc.'!$D$12"
+            )
+            wb.defined_names["PV_TerminalValue"] = DefinedName("PV_TerminalValue", attr_text="DCF!$C$4")
+            wb.defined_names["EnterpriseValue"] = DefinedName("EnterpriseValue", attr_text="DCF!$C$5")
+
+            # Invalid comma unions, unquoted comma sheet names, and wrapped functions -> MUST all be rejected
+            invalid_comma_specs = {
+                "UnionUnquotedBoth": "DCF!$C$5,DCF!$C$6",
+                "UnionUnquotedLeadEq": "=DCF!$C$5,DCF!$C$6",
+                "UnionUnquotedImplicit": "DCF!$C$5,$C$6",
+                "UnionQuotedBoth": "'Sheet 1'!$A$1,'Sheet 2'!$B$2",
+                "UnionQuotedLeadEq": "='Sheet 1'!$A$1,'Sheet 2'!$B$2",
+                "UnionQuotedEscapedApostrophes": "'A'''!$A$1,'''B'!$B$2",
+                "UnionMixedUnquotedQuoted": "DCF!$A$1,'Sheet 2'!$B$2",
+                "UnionMixedQuotedUnquoted": "'Sheet 1'!$A$1,DCF!$B$2",
+                "UnionParenthesized": "('Sheet 1'!$A$1,'Sheet 2'!$B$2)",
+                "FuncSumQuotedCommaSheet": "=SUM('Inputs, 2026'!$B$2)",
+                "FuncSumQuotedCommaSheetArgs": "=SUM('Inputs, 2026'!$B$2,1)",
+                "UnquotedCommaSheet": "Inputs, 2026!$B$2",
+            }
+            for name, attr_text in invalid_comma_specs.items():
+                wb.defined_names[name] = DefinedName(name, attr_text=attr_text)
+            ws_dcf.defined_names["ScopedUnqualifiedUnion"] = DefinedName(
+                "ScopedUnqualifiedUnion", attr_text="$C$5,$C$6"
+            )
+
+            wb.save(path)
+            wb.close()
+
+            scan = xlsx_scan_mod.scan_workbook_formulas(
+                path,
+                capture_sheet_grids=True,
+                grid_sheet_names=("DCF",),
+                capture_defined_names=True,
+            )
+            dn = scan["defined_names"]
+
+            # Valid quoted comma sheet names MUST resolve and point-capture ONLY referenced cells
+            self.assertEqual(dn["DCF_WACC"], ("Inputs, 2026", 2, 2))
+            self.assertEqual(dn["TerminalGrowth"], ("O'Brien, Inc.", 12, 4))
+            self.assertEqual(scan["sheet_grids"]["Inputs, 2026"], {2: {2: (0.095, "B2")}})
+            self.assertEqual(scan["sheet_grids"]["O'Brien, Inc."], {12: {4: (0.025, "D12")}})
+
+            # All comma unions / invalid forms MUST be rejected
+            for name, attr_text in invalid_comma_specs.items():
+                self.assertNotIn(name, dn, f"{name} ({attr_text!r}) should be rejected")
+            self.assertNotIn("ScopedUnqualifiedUnion", dn)
+
+            # End-to-end DCFModelValidator check resolves both comma-sheet named metrics cleanly
+            res = validate_dcf_mod.validate_dcf_model(str(path))
+            self.assertEqual(res["status"], "PASS", res)
+            self.assertEqual(res["error_count"], 0, res["errors"])
+            self.assertEqual(res["warning_count"], 0, res["warnings"])
+
     def test_ref_error_and_quoted_char_defined_names_skipped_and_do_not_shadow_scoped_names(self) -> None:
         from openpyxl.workbook.defined_name import DefinedName
 
