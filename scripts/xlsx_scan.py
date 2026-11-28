@@ -21,9 +21,11 @@ from xml.etree import ElementTree as ET
 
 EXCEL_ERRORS = ("#REF!", "#DIV/0!", "#VALUE!", "#NAME?", "#N/A", "#NUM!", "#NULL!")
 OOXML_ZIP_SUFFIXES = (".xlsx", ".xlsm", ".xltx", ".xltm")
+EXCEL_MAX_ROW = 1_048_576
+EXCEL_MAX_COL = 16_384  # XFD
 STRING_LITERAL_RE = re.compile(r'"(?:""|[^"])*"')
 SINGLE_CELL_REF_RE = re.compile(r"^\$?[A-Za-z]{1,3}\$?[1-9][0-9]*$")
-UNQUOTED_SHEET_REF_RE = re.compile(r"^[^\s!'\"()+\-*/=<>&^%,:;\[\]?\\]+$")
+UNQUOTED_SHEET_REF_RE = re.compile(r"^[^\s!'\"()+\-*/=<>&^%,:;\[\]?\\#{}~@$`|]+$")
 
 
 class WorkbookLoadError(RuntimeError):
@@ -512,66 +514,54 @@ def scan_workbook_formulas(
                     dn_lower = dn_name.lower()
                     if dn_lower in resolved_names_lower:
                         continue
-                    destinations: list[tuple[str, str]] = []
+                    attr_text = getattr(dn, "attr_text", None)
+                    if not isinstance(attr_text, str):
+                        continue
+                    raw_ref = attr_text.strip()
+                    if raw_ref.startswith("="):
+                        raw_ref = raw_ref[1:].strip()
+                    if not raw_ref or "," in raw_ref or ":" in raw_ref or "[" in raw_ref or "]" in raw_ref:
+                        continue
+                    if "!" in raw_ref:
+                        sheet_part, cell_part = raw_ref.rsplit("!", 1)
+                        if not SINGLE_CELL_REF_RE.fullmatch(cell_part):
+                            continue
+                        if len(sheet_part) >= 2 and sheet_part[0] == "'" and sheet_part[-1] == "'":
+                            inner_sheet = sheet_part[1:-1]
+                            if (
+                                not inner_sheet
+                                or "[" in inner_sheet
+                                or "]" in inner_sheet
+                                or "'" in inner_sheet.replace("''", "")
+                            ):
+                                continue
+                            sheet_title = inner_sheet.replace("''", "'")
+                        elif UNQUOTED_SHEET_REF_RE.fullmatch(sheet_part):
+                            sheet_title = sheet_part
+                        else:
+                            continue
+                    elif owner_sheet_title and SINGLE_CELL_REF_RE.fullmatch(raw_ref):
+                        sheet_title = owner_sheet_title
+                        cell_part = raw_ref
+                    else:
+                        continue
+
+                    ref_clean = cell_part.replace("$", "").upper()
                     try:
-                        destinations = list(dn.destinations)
+                        r_idx, c_idx = coordinate_to_tuple(ref_clean)
                     except Exception:
-                        destinations = []
-                    if not destinations:
-                        attr_text = getattr(dn, "attr_text", None)
-                        if isinstance(attr_text, str):
-                            raw_ref = attr_text.strip()
-                            if raw_ref.startswith("="):
-                                raw_ref = raw_ref[1:].strip()
-                            if raw_ref and ":" not in raw_ref:
-                                if "!" in raw_ref:
-                                    sheet_part, cell_part = raw_ref.rsplit("!", 1)
-                                    sheet_part = sheet_part.strip()
-                                    cell_part = cell_part.strip()
-                                    if SINGLE_CELL_REF_RE.fullmatch(cell_part):
-                                        if (
-                                            len(sheet_part) >= 2
-                                            and sheet_part[0] == "'"
-                                            and sheet_part[-1] == "'"
-                                        ):
-                                            inner_sheet = sheet_part[1:-1]
-                                            if (
-                                                inner_sheet
-                                                and "[" not in inner_sheet
-                                                and "'" not in inner_sheet.replace("''", "")
-                                            ):
-                                                destinations = [(inner_sheet, cell_part)]
-                                        elif (
-                                            sheet_part
-                                            and "[" not in sheet_part
-                                            and UNQUOTED_SHEET_REF_RE.fullmatch(sheet_part)
-                                        ):
-                                            destinations = [(sheet_part, cell_part)]
-                                elif owner_sheet_title and SINGLE_CELL_REF_RE.fullmatch(raw_ref):
-                                    destinations = [(owner_sheet_title, raw_ref)]
-                    for sheet_title, ref in destinations:
-                        if not ref or ":" in ref or "[" in sheet_title:
-                            continue
-                        ref_stripped = ref.strip()
-                        if not SINGLE_CELL_REF_RE.fullmatch(ref_stripped):
-                            continue
-                        ref_clean = ref_stripped.replace("$", "")
-                        try:
-                            r_idx, c_idx = coordinate_to_tuple(ref_clean)
-                        except Exception:
-                            continue
-                        unescaped_title = sheet_title.replace("''", "'")
-                        canon_title = (
-                            title_by_lower.get(unescaped_title.lower())
-                            or title_by_lower.get(sheet_title.lower())
-                            or unescaped_title
-                        )
-                        defined_names_map[dn_name] = (canon_title, r_idx, c_idx)
-                        resolved_names_lower.add(dn_lower)
-                        canon_lower = canon_title.lower()
-                        if full_grid_sheets_lower is not None and canon_lower not in full_grid_sheets_lower:
-                            named_coords_by_sheet_lower.setdefault(canon_lower, set()).add((r_idx, c_idx))
-                        break
+                        continue
+                    if not (1 <= r_idx <= EXCEL_MAX_ROW and 1 <= c_idx <= EXCEL_MAX_COL):
+                        continue
+
+                    canon_title = title_by_lower.get(sheet_title.lower())
+                    if canon_title is None:
+                        continue
+                    defined_names_map[dn_name] = (canon_title, r_idx, c_idx)
+                    resolved_names_lower.add(dn_lower)
+                    canon_lower = canon_title.lower()
+                    if full_grid_sheets_lower is not None and canon_lower not in full_grid_sheets_lower:
+                        named_coords_by_sheet_lower.setdefault(canon_lower, set()).add((r_idx, c_idx))
 
             # Precedence: workbook-global > DCF/WACC sheet-scoped > other sheet-scoped
             _collect_defined_names(wb_values.defined_names)

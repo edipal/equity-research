@@ -6042,6 +6042,237 @@ class TestValidateDcf(unittest.TestCase):
             ]
             self.assertEqual(len(supp_neg_warnings), 1, validator.warnings)
 
+    def test_non_leading_equals_formulas_unions_bounds_and_whitespace_defined_names_skipped(self) -> None:
+        from openpyxl.workbook.defined_name import DefinedName
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "strict_defined_name_parser.xlsx"
+            wb = openpyxl.Workbook()
+            ws_dcf = wb.active
+            ws_dcf.title = "DCF"
+            ws_dcf["B2"] = 0.03
+            ws_dcf["C5"] = 0.095
+            ws_dcf["C6"] = 0.025
+
+            ws_obrien = wb.create_sheet("O'Brien Inputs")
+            ws_obrien["D12"] = 0.03
+            ws_obrien["D13"] = 0.04
+
+            ws_bang = wb.create_sheet("Alert!")
+            ws_bang["A1"] = 0.05
+
+            # Valid edge cases that MUST resolve
+            wb.defined_names["ValidPlain"] = DefinedName("ValidPlain", attr_text="DCF!$C$5")
+            wb.defined_names["ValidLeadEq"] = DefinedName("ValidLeadEq", attr_text="=DCF!$C$5")
+            wb.defined_names["ValidMaxCoord"] = DefinedName("ValidMaxCoord", attr_text="DCF!$XFD$1048576")
+            wb.defined_names["ValidMaxCoordLower"] = DefinedName(
+                "ValidMaxCoordLower", attr_text="=dcf!$xfd$1048576"
+            )
+            wb.defined_names["ValidBangSheet"] = DefinedName("ValidBangSheet", attr_text="'Alert!'!$A$1")
+
+            # Non-leading-= formulas (Excel/LibreOffice canonical OOXML form) -> MUST skip
+            invalid_specs = {
+                "NoEqAdd": "DCF!$C$5+1",
+                "NoEqAddFloat": "DCF!$B$2+0.10",
+                "NoEqSub": "DCF!$C$5-0.01",
+                "NoEqMul": "DCF!$C$5*2",
+                "NoEqDiv": "DCF!$C$5/2",
+                "NoEqCellAdd": "DCF!$C$5+DCF!$C$6",
+                "NoEqConcat": 'DCF!$C$5&"%"',
+                "NoEqQuotedAdd": "'O''Brien Inputs'!$D$12+0.01",
+                "NoEqQuotedCellAdd": "'O''Brien Inputs'!$D$12+'O''Brien Inputs'!$D$13",
+                # Multi-cell unions & ranges -> MUST skip
+                "UnionPlain": "DCF!$C$5,DCF!$C$6",
+                "UnionLeadEq": "=DCF!$C$5,DCF!$C$6",
+                "UnionQuoted": "'O''Brien Inputs'!$D$12,'O''Brien Inputs'!$D$13",
+                "RangePlain": "DCF!$C$5:$C$10",
+                "ThreeDRange": "DCF:Alert!!$A$1",
+                # Out-of-bounds Excel coords -> MUST skip
+                "ColTooHigh": "DCF!$XFE$1",
+                "ColTooHighEq": "=DCF!$XFE$1",
+                "RowTooHigh": "DCF!$A$1048577",
+                "RowTooHighEq": "=DCF!$A$1048577",
+                # Whitespace around `!` -> MUST skip
+                "SpaceAroundBangEq": "= DCF ! $C$5",
+                "SpaceAroundBangPlain": "DCF ! $C$5",
+                "SpaceBeforeBang": "DCF !$C$5",
+                "SpaceAfterBang": "DCF! $C$5",
+                "QuotedSpaceBeforeBang": "'O''Brien Inputs' !$D$12",
+                "QuotedSpaceAfterBang": "'O''Brien Inputs'! $D$12",
+                # Unescaped quotes & empty quoted sheet name -> MUST skip
+                "UnescapedQuote": "'O'Brien Inputs'!$D$12",
+                "EmptyQuotedSheet": "''!$A$1",
+            }
+            for name, attr_text in invalid_specs.items():
+                wb.defined_names[name] = DefinedName(name, attr_text=attr_text)
+
+            wb.save(path)
+            wb.close()
+
+            scan = xlsx_scan_mod.scan_workbook_formulas(
+                path,
+                capture_sheet_grids=True,
+                grid_sheet_names=("DCF",),
+                capture_defined_names=True,
+            )
+            dn = scan["defined_names"]
+
+            self.assertEqual(dn["ValidPlain"], ("DCF", 5, 3))
+            self.assertEqual(dn["ValidLeadEq"], ("DCF", 5, 3))
+            self.assertEqual(dn["ValidMaxCoord"], ("DCF", 1_048_576, 16_384))
+            self.assertEqual(dn["ValidMaxCoordLower"], ("DCF", 1_048_576, 16_384))
+            self.assertEqual(dn["ValidBangSheet"], ("Alert!", 1, 1))
+            self.assertEqual(scan["sheet_grids"]["Alert!"], {1: {1: (0.05, "A1")}})
+
+            for name in invalid_specs:
+                self.assertNotIn(name, dn, f"{name} ({invalid_specs[name]!r}) should be skipped")
+
+    def test_ref_error_and_quoted_char_defined_names_skipped_and_do_not_shadow_scoped_names(self) -> None:
+        from openpyxl.workbook.defined_name import DefinedName
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ref_error_non_shadowing.xlsx"
+            wb = openpyxl.Workbook()
+            ws_dcf = wb.active
+            ws_dcf.title = "DCF"
+            ws_dcf["A2"] = "Custom Metric 1"
+            ws_dcf["C2"] = 0.095
+            ws_dcf["A3"] = "Custom Metric 2"
+            ws_dcf["C3"] = 0.025
+            ws_dcf["A4"] = "Custom Metric 3"
+            ws_dcf["C4"] = 600.0
+            ws_dcf["A5"] = "Custom Metric 4"
+            ws_dcf["C5"] = 1000.0
+            ws_dcf["A12"] = "Sensitivity Analysis"
+
+            # Even if a real worksheet happens to be named "#REF", unquoted #REF!$A$1 MUST be rejected
+            # (Excel always quotes sheet names containing `#` as `'#REF'!$A$1`).
+            ws_hash = wb.create_sheet("#REF")
+            ws_hash["A1"] = 0.99
+
+            # Workbook-global broken #REF! and nonexistent-sheet defined names MUST be skipped
+            # and MUST NOT shadow valid DCF sheet-scoped names!
+            wb.defined_names["DCF_WACC"] = DefinedName("DCF_WACC", attr_text="#REF!$A$1")
+            wb.defined_names["TerminalGrowth"] = DefinedName("TerminalGrowth", attr_text="=#REF!$A$1")
+            wb.defined_names["PV_TerminalValue"] = DefinedName(
+                "PV_TerminalValue", attr_text="MissingSheet!$A$1"
+            )
+            wb.defined_names["QuotedHashSheet"] = DefinedName("QuotedHashSheet", attr_text="'#REF'!$A$1")
+
+            # Other Excel-quoted characters in unquoted sheet refs -> MUST skip
+            special_char_refs = {
+                "UnquotedHash": "Sheet#1!$A$1",
+                "UnquotedLBrace": "Sheet{1!$A$1",
+                "UnquotedRBrace": "Sheet}1!$A$1",
+                "UnquotedTilde": "Sheet~1!$A$1",
+                "UnquotedAt": "Sheet@1!$A$1",
+                "UnquotedDollar": "Sheet$1!$A$1",
+                "UnquotedBacktick": "Sheet`1!$A$1",
+                "UnquotedPipe": "Sheet|1!$A$1",
+            }
+            for name, attr_text in special_char_refs.items():
+                wb.defined_names[name] = DefinedName(name, attr_text=attr_text)
+
+            # Valid sheet-scoped definitions on DCF that must win when globals are broken
+            ws_dcf.defined_names["DCF_WACC"] = DefinedName("DCF_WACC", attr_text="DCF!$C$2")
+            ws_dcf.defined_names["TerminalGrowth"] = DefinedName("TerminalGrowth", attr_text="=$C$3")
+            ws_dcf.defined_names["PV_TerminalValue"] = DefinedName("PV_TerminalValue", attr_text="DCF!$C$4")
+            wb.defined_names["EnterpriseValue"] = DefinedName("EnterpriseValue", attr_text="DCF!$C$5")
+
+            wb.save(path)
+            wb.close()
+
+            scan = xlsx_scan_mod.scan_workbook_formulas(
+                path,
+                capture_sheet_grids=True,
+                grid_sheet_names=("DCF", "WACC"),
+                capture_defined_names=True,
+            )
+            dn = scan["defined_names"]
+            self.assertEqual(dn["DCF_WACC"], ("DCF", 2, 3))
+            self.assertEqual(dn["TerminalGrowth"], ("DCF", 3, 3))
+            self.assertEqual(dn["PV_TerminalValue"], ("DCF", 4, 3))
+            self.assertEqual(dn["EnterpriseValue"], ("DCF", 5, 3))
+            self.assertEqual(dn["QuotedHashSheet"], ("#REF", 1, 1))
+            for name in special_char_refs:
+                self.assertNotIn(name, dn, f"{name} ({special_char_refs[name]!r}) should be skipped")
+
+            res = validate_dcf_mod.validate_dcf_model(str(path))
+            self.assertEqual(res["status"], "PASS", res)
+            self.assertEqual(res["error_count"], 0, res["errors"])
+            self.assertEqual(res["warning_count"], 0, res["warnings"])
+
+    @_skip_unless_required(
+        recalc_xlsx_mod.find_soffice() is None,
+        "LibreOffice (soffice) is required for formula defined-name roundtrip test",
+    )
+    def test_libreoffice_roundtrip_formula_defined_name_not_misresolved_to_first_cell(self) -> None:
+        from openpyxl.workbook.defined_name import DefinedName
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "lo_formula_defined_name.xlsx"
+            wb = openpyxl.Workbook()
+            ws_dcf = wb.active
+            ws_dcf.title = "DCF"
+            ws_dcf["A2"] = "Base Input"
+            ws_dcf["B2"] = 0.03
+            ws_dcf["A3"] = "Terminal Growth Rate"
+            ws_dcf["B3"] = "=TerminalGrowth"
+            ws_dcf["A4"] = "PV of Terminal Value"
+            ws_dcf["B4"] = 600.0
+            ws_dcf["A5"] = "Enterprise Value"
+            ws_dcf["B5"] = 1000.0
+            ws_dcf["A10"] = "Sensitivity Analysis"
+
+            ws_wacc = wb.create_sheet("WACC")
+            ws_wacc["A1"] = "WEIGHTED AVERAGE COST OF CAPITAL"
+            ws_wacc["B1"] = 0.08
+
+            wb.defined_names["DCF_WACC"] = DefinedName("DCF_WACC", attr_text="WACC!$B$1")
+            wb.defined_names["TerminalGrowth"] = DefinedName("TerminalGrowth", attr_text="=DCF!$B$2+0.10")
+            wb.defined_names["PV_TerminalValue"] = DefinedName("PV_TerminalValue", attr_text="DCF!$B$4")
+            wb.defined_names["EnterpriseValue"] = DefinedName("EnterpriseValue", attr_text="DCF!$B$5")
+            wb.save(path)
+            wb.close()
+
+            recalc_proc = subprocess.run(
+                [sys.executable, str(RECALC_XLSX_PATH), str(path), "30", "--in-place"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(recalc_proc.returncode, 0, recalc_proc.stdout + recalc_proc.stderr)
+            recalc_payload = json.loads(recalc_proc.stdout)
+            self.assertEqual(recalc_payload["status"], "success", recalc_payload)
+            self.assertEqual(recalc_payload["total_errors"], 0, recalc_payload)
+
+            # Confirm LibreOffice serialized TerminalGrowth without leading '=' and evaluated B3 to 13%
+            wb_post = openpyxl.load_workbook(path, data_only=True)
+            try:
+                tg_dn = wb_post.defined_names["TerminalGrowth"]
+                self.assertFalse(tg_dn.attr_text.startswith("="), f"Expected non-= OOXML form, got {tg_dn.attr_text!r}")
+                self.assertAlmostEqual(float(wb_post["DCF"]["B3"].value), 0.13, places=6)
+            finally:
+                wb_post.close()
+
+            # scan_workbook_formulas MUST skip formula defined name TerminalGrowth (never mis-resolve to DCF!B2)
+            scan = xlsx_scan_mod.scan_workbook_formulas(
+                path,
+                capture_sheet_grids=True,
+                grid_sheet_names=("DCF", "WACC"),
+                capture_defined_names=True,
+            )
+            self.assertNotIn("TerminalGrowth", scan["defined_names"])
+            self.assertEqual(scan["defined_names"]["DCF_WACC"], ("WACC", 1, 2))
+
+            # validate_dcf.py MUST catch the 13% >= 8% WACC violation on DCF!B3 (not silent false PASS from DCF!B2)
+            res = validate_dcf_mod.validate_dcf_model(str(path))
+            self.assertEqual(res["status"], "FAIL", res)
+            self.assertTrue(
+                any("Terminal growth (13.00% at DCF!B3) >= WACC (8.00% at WACC!B1)" in e for e in res["errors"]),
+                res["errors"],
+            )
+
 
 @_skip_unless_required(openpyxl is None, "openpyxl is required for DCF skeleton tests")
 class TestBuildDcfSkeleton(unittest.TestCase):
