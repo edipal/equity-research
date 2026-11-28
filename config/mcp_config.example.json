@@ -1,0 +1,32 @@
+{
+  "_notice": "Illustrative vendor MCP templates requiring active institutional subscriptions and vendor-confirmed endpoint URLs/credentials. Copy to .agents/mcp_config.json (gitignored), remove servers you do not subscribe to, and supply your vendor auth headers or OAuth credentials.",
+  "mcpServers": {
+    "factset": {
+      "serverUrl": "https://mcp.factset.com/mcp"
+    },
+    "sp-global": {
+      "serverUrl": "https://kfinance.kensho.com/integrations/mcp"
+    },
+    "daloopa": {
+      "serverUrl": "https://mcp.daloopa.com/server/mcp"
+    },
+    "lseg": {
+      "serverUrl": "https://api.analytics.lseg.com/lfa/mcp"
+    },
+    "morningstar": {
+      "serverUrl": "https://mcp.morningstar.com/mcp"
+    },
+    "moodys": {
+      "serverUrl": "https://api.moodys.com/genai-ready-data/m1/mcp"
+    },
+    "aiera": {
+      "serverUrl": "https://mcp-pub.aiera.com"
+    },
+    "mtnewswire": {
+      "serverUrl": "https://vast-mcp.blueskyapi.com/mtnewswires"
+    },
+    "pitchbook": {
+      "serverUrl": "https://premium.mcp.pitchbook.com/mcp"
+    }
+  }
+}

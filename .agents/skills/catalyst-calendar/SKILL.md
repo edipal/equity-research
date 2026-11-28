@@ -1,0 +1,88 @@
+---
+name: catalyst-calendar
+description: Build and maintain a calendar of upcoming catalysts across a coverage universe — earnings dates, conferences, product launches, regulatory decisions, and macro events. Helps prioritize attention and position ahead of events. Triggers on "catalyst calendar", "upcoming events", "what's coming up", "earnings calendar", "event calendar", or "catalyst tracker".
+---
+
+<!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/equity-research/skills/catalyst-calendar/SKILL.md), Apache-2.0; modified for Google Antigravity. -->
+
+# Catalyst Calendar
+
+## Workflow
+
+### Step 1: Define Coverage Universe
+
+- List of companies to track (tickers or names)
+- Sector / industry focus
+- Include macro events? (Fed meetings, economic data, regulatory deadlines)
+- Time horizon (next 2 weeks, month, quarter)
+
+### Step 2: Gather Catalysts
+
+For each company, identify upcoming events:
+
+**Earnings & Financial Events**
+- Quarterly earnings date and time (pre/post market)
+- Annual shareholder meeting
+- Investor day / analyst day
+- Capital markets day
+- Debt maturity / refinancing dates
+
+**Corporate Events**
+- Product launches or announcements
+- FDA approvals / regulatory decisions
+- Contract renewals or expirations
+- M&A milestones (close dates, regulatory approvals)
+- Management transitions
+- Insider trading windows (lockup expirations)
+
+**Industry Events**
+- Major conferences (dates, which companies presenting)
+- Trade shows and expos
+- Regulatory comment periods or rulings
+- Industry data releases (monthly sales, traffic, etc.)
+
+**Macro Events**
+- Fed meetings (FOMC dates)
+- Jobs report, CPI, GDP releases
+- Central bank decisions (ECB, BOJ, etc.)
+- Geopolitical events with market impact
+
+### Step 3: Calendar View
+
+| Date | Status | Event | Company/Sector | Type | Impact (H/M/L) | Our Positioning | Source | Notes |
+|------|--------|-------|----------------|------|----------------|-----------------|--------|-------|
+| YYYY-MM-DD | Confirmed / Projected `[ASSUMPTION]` | | | Earnings/Corp/Industry/Macro | High/Medium/Low | Long/Short/Neutral | IR press release / SEC filing / FOMC schedule (date) | |
+
+- Always distinguish **`Confirmed`** dates (backed by a company IR announcement, SEC filing, or official regulator schedule) from **`Projected`** dates estimated from prior-year reporting cadence — tag every projected date **`[ASSUMPTION]`**.
+
+### Step 4: Weekly Preview
+
+Each week, generate a forward-looking summary:
+
+**This Week's Key Events:**
+1. [Day]: [Company] Q[X] earnings — consensus [$X EPS], our estimate [$X], key focus: [metric]
+2. [Day]: [Event] — why it matters for [stocks]
+3. [Day]: [Macro release] — expectations and positioning
+
+**Next Week Preview:**
+- Early heads-up on important events coming
+
+**Position Implications:**
+- Events that could move specific positions
+- Any pre-positioning recommended
+- Risk management ahead of binary events
+
+### Step 5: Output
+
+Stage all outputs as internal drafts for analyst review (never send emails or push external calendar invites automatically):
+- **Master calendar (default)**: `research/catalysts.md` — structured Markdown calendar table and weekly preview
+- **Optional sortable spreadsheet**: `research/catalysts_YYYY-MM-DD.xlsx` via `xlsx-author` when filtering/sorting across a large coverage universe
+
+## Important Notes
+
+- Earnings dates shift — verify against company IR pages, SEC filings, or connected financial MCP servers closer to the date
+- Pre-announce risk: track companies with a history of pre-announcing (positive or negative)
+- Conference attendance lists are valuable — which companies are presenting and which are conspicuously absent?
+- Some catalysts are recurring (monthly industry data) — maintain a consistent template inside `research/catalysts.md`
+- Tag impact levels consistently (`High` / `Medium` / `Low`) and flag binary event risks clearly
+- Archive past catalysts with the actual outcome — builds pattern recognition over time

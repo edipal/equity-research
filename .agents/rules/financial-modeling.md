@@ -1,0 +1,26 @@
+---
+trigger: model_decision
+description: Apply whenever creating, modifying, populating, or auditing Excel financial models (.xlsx), DCF valuations, 3-statement models, comparable company analyses, unit economics workbooks, or Python financial modeling scripts.
+---
+
+# Financial Modeling & Spreadsheet Standards
+
+1. **Formulas over hardcodes (non-negotiable).** Every projection, margin, growth rate, subtotal, multiple, discount factor, equity bridge, and sensitivity cell MUST be a live Excel formula (`ws["D20"] = "=D19*(1+$B$8)"`). Never compute derived outputs in Python and write static numbers into calculation cells.
+2. **Institutional color coding & unified fill palette.**
+   - **Font colors:** Blue (`#0000FF`) = hardcoded historical actuals & assumption inputs; Black (`#000000`) = same-sheet formulas; Green (`#008000`) = cross-sheet or cross-workbook links.
+   - **Fill palette (unless a user template overrides):**
+     - Dark navy (`#1F4E79`) with white bold text = section headers / banners
+     - Light blue (`#D9E1F2`) with black bold text = column headers / sub-headers
+     - Light grey (`#F2F2F2`) = input cells / summary statistics shading
+     - Medium blue (`#BDD7EE`) with bold text = key totals, checks, active scenario selector, and sensitivity center-cell highlights
+3. **Document every input.** Attach cell comments on hardcoded inputs stating source, filing date, and unit (or `[ASSUMPTION]` for analyst estimates), and consolidate methodology notes on the sheet or in a `Sources & Notes` tab.
+4. **Stage checkpoints on complex builds.** On 3-statement and DCF models running interactively, verify inputs, historicals, projections, balance checks, and valuation bridges incrementally before finalizing. When invoked as an autonomous subagent, tag defaults `[ASSUMPTION]` and surface the full assumption summary and audit report in the final handoff.
+5. **Mandatory automated QA before delivery.**
+   - **Read-only audit of an untouched existing workbook (`audit-xls`):** Run `python3 scripts/recalc_xlsx.py <workbook.xlsx>` (non-destructive default / `--check-only`) — recalculates in a temporary directory and scans every sheet for all 7 Excel errors (`#REF!`, `#DIV/0!`, `#VALUE!`, `#NAME?`, `#N/A`, `#NUM!`, `#NULL!`) without mutating charts, pivots, slicers, What-If data tables, or VBA.
+   - **After ANY `openpyxl` write** (`openpyxl` strips cached formula values on save) — **always populate cached formula values directly into the canonical versioned filename** (never overwrite an existing prior-quarter/template workbook and never leave an uncached `openpyxl` file sitting at a canonical path on disk):
+     - Newly Python-generated `.xlsx` models: save to the canonical versioned path and run `python3 scripts/recalc_xlsx.py <canonical.xlsx> 30 --in-place` (or stage to `/tmp/<name>_staged.xlsx`, write `--output <canonical.xlsx>`, and delete the staging file) so cached formula values are populated on disk before running `validate_dcf.py` or reading with `openpyxl(data_only=True)`.
+     - Updated existing coverage workbooks (`model-update`, `earnings-reviewer`): inspect the original first with read-only `python3 scripts/recalc_xlsx.py <original.xlsx>` (`--check-only`). If `lossy_features` or `data_tables` are non-empty **or `lossy_features_inspected` is `false`** (e.g., legacy `.xls` or `.ods` inputs), ask the user before modifying in interactive mode (in delegated subagent mode, leave the original 100% untouched, write to a new versioned canonical copy, and disclose the untouched source path and `lossy_features` / `lossy_feature_details` prominently in the handoff). Populate cached values directly into the new canonical versioned path via `--in-place` (when the new `.xlsx` copy has `lossy_features_inspected: true`, zero `lossy_features`, and zero `data_tables`) OR stage the uncached `openpyxl` output to `/tmp/<name>_staged.xlsx`, run `python3 scripts/recalc_xlsx.py /tmp/<name>_staged.xlsx 30 --output <canonical_versioned.xlsx>`, and delete the staging file. Then run `validate_dcf.py` and draft notes strictly from **that canonical recalculated file**.
+   - Confirm exit `0` (`"status": "success"`, `uncached_formulas: 0`). If exit `2` (`"status": "unverified"`, LibreOffice unavailable), install LibreOffice or explicitly disclose unverified cached values (only passing `--allow-unrecalculated` with analyst consent).
+   - For DCF workbooks, also run `python3 .agents/skills/dcf-model/scripts/validate_dcf.py <canonical_recalc.xlsx>` on the canonical recalculated file and confirm exit `0` (`"status": "PASS"`). You can bootstrap or compare against `.agents/skills/dcf-model/scripts/build_dcf_skeleton.py`.
+   - Verify accounting integrity: Balance Sheet balances (`Assets - Liabilities - Equity = 0`) for every period, Cash Flow ending cash ties to Balance Sheet cash, gross-capitalization (`E + D + P`) WACC weights sum to `100%` (`0%–100%`), mid-year explicit FCFs and perpetuity TV are discounted at `t - 0.5` / `N - 0.5`, exit-multiple TV is discounted strictly at `(1 + WACC)^N`, and sensitivity table center cells match the base case.
+6. **Reproducibility.** Save or document the Python generator script (creating parent directories via `Path(...).parent.mkdir(parents=True, exist_ok=True)`) so models can be audited and rolled forward cleanly next quarter.

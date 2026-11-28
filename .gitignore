@@ -1,0 +1,24 @@
+# Python environments & caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local secrets & user-specific MCP credentials
+.env
+.env.*
+.agents/mcp_config.json
+
+# Temporary scratch outputs
+out/
+*.tmp
+*.bak
+
+# Office lock files & OS artifacts
+~$*.xls*
+~$*.docx
+~$*.pptx
+.~lock.*#
+.DS_Store
+Thumbs.db
