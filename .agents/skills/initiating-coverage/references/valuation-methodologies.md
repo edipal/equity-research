@@ -77,7 +77,7 @@ Undiscounted TV = UFCF(final year) × (1 + g) / (WACC - g)
 PV of TV        = Undiscounted TV / (1 + WACC)^(N - 0.5)   (consistent mid-year perpetuity timing)
 ```
 - `g` = perpetual growth rate, strictly `< WACC` and `<= long-term nominal GDP / Rf` (typically `2.0%–3.5%`; never `3.5%–5.0%+`).
-- Target TV `%` of EV: `50%–70%` (`validate_dcf.py` warns if `< 50%` or `> 70%`).
+- **TV `%` of EV (mature-company diagnostic / disclosure check — NOT a valuation target):** `50%–70%` is a mature-company diagnostic benchmark (`validate_dcf.py` warns if `< 50%` or `> 70%`). Never tune WACC, `g`, or operating assumptions just to force TV/EV inside `50%–70%`; disclose concentration (`70%–85%+` is normal for high-growth companies) and cross-check via Exit Multiple TV and trading comps.
 
 **Method B: Exit Multiple Method (Cross-Check)**
 ```

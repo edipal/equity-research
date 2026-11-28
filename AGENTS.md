@@ -20,7 +20,7 @@ Use the matching skill (or invoke directly with `/<skill-name>`):
 ### Single-Name Coverage & Earnings
 - `/initiating-coverage` — 5-task institutional initiation report (company research → model → valuation → charts → assembly)
 - `/earnings-preview` — Pre-earnings setup, consensus expectations, KPIs to watch, bull/base/bear scenarios
-- `/earnings-analysis` — Post-earnings quarterly update report (beat/miss, call read, estimate changes, thesis impact)
+- `/earnings-analysis` — Post-earnings quarterly update report (ongoing coverage or standalone: beat/miss, call read, estimate changes, thesis impact)
 - `/model-update` — Update an existing coverage model with new quarterly actuals, guidance, or assumptions
 - `/thesis-tracker` — Maintain and stress-test a living investment thesis, key pillars, and disconfirming evidence
 - `/catalyst-calendar` — Track upcoming earnings, investor days, product launches, regulatory milestones, and macro prints
@@ -47,7 +47,7 @@ Use the matching skill (or invoke directly with `/<skill-name>`):
 
 For multi-skill workflows, select a primary agent (`/agents` or `agy --agent <name>`) or delegate in parallel via `invoke_subagent`:
 - `equity-analyst` — Lead analyst for full-lifecycle single-name coverage and subagent coordination
-- `earnings-reviewer` — End-to-end post-earnings update (variance read → `model-update` → `audit-xls` → `earnings-analysis` / `morning-note` → `thesis-tracker`)
+- `earnings-reviewer` — End-to-end post-earnings update (variance read → `model-update` if covered → `audit-xls` → `earnings-analysis` / `morning-note` → `thesis-tracker`)
 - `market-researcher` — Sector & thematic primer (`sector-overview` → `competitive-analysis` → `comps-analysis` → `idea-generation` shortlisting `3–5` high-conviction ideas from `5–10` candidates)
 - `model-builder` — Scratch financial model build (`three-statement-model` / `dcf-model` / `comps-analysis` / `unit-economics` → `audit-xls`, with human review checkpoint)
 

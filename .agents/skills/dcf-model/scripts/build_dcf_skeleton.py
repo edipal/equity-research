@@ -902,7 +902,7 @@ def _build_dcf_sheet(ws, wb: openpyxl.Workbook, default_case: int = 2) -> None:
     ws.cell(row=ROW_TV_PCT, column=1, value="TV % of Enterprise Value").font = FONT_FORMULA
     ws.cell(row=ROW_TV_PCT, column=2, value="%").font = FONT_NOTE
     _write_formula_cell(ws, ROW_TV_PCT, 3, f"=C{ROW_PV_TV}/C{ROW_EV}", FMT_PCT)
-    ws.cell(row=ROW_TV_PCT, column=4, value="Target institutional range: 50%-70%").font = FONT_NOTE
+    ws.cell(row=ROW_TV_PCT, column=4, value="Mature-company diagnostic: 50%-70% (disclose if outside; do not tune WACC/g)").font = FONT_NOTE
 
     ws.cell(row=ROW_EV_EBITDA1, column=1, value="Implied EV / FY2026E EBITDA").font = FONT_FORMULA
     ws.cell(row=ROW_EV_EBITDA1, column=2, value="x").font = FONT_NOTE

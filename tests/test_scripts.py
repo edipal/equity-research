@@ -3522,7 +3522,11 @@ class TestValidateDcf(unittest.TestCase):
                 if expect_warning:
                     self.assertGreater(results["warning_count"], 0, results)
                     self.assertTrue(
-                        any("typically should be 50-70%" in w for w in results["warnings"]),
+                        any(
+                            "mature-company benchmark is 50-70%" in w
+                            and "rather than" in w
+                            for w in results["warnings"]
+                        ),
                         results["warnings"],
                     )
                 else:
@@ -4557,7 +4561,7 @@ class TestValidateDcf(unittest.TestCase):
                 res_c3["errors"],
             )
             self.assertFalse(
-                any("typically should be 50-70%" in w for w in res_c3["warnings"]),
+                any("50-70%" in w for w in res_c3["warnings"]),
                 f"Bogus Exit Multiple TV % of EV warning emitted: {res_c3['warnings']}",
             )
             self.assertTrue(
@@ -4686,7 +4690,7 @@ class TestValidateDcf(unittest.TestCase):
                     res_ev = validate_dcf_mod.validate_dcf_model(str(p_ev))
                     self.assertEqual(res_ev["status"], "FAIL", res_ev)
                     self.assertFalse(
-                        any("typically should be 50-70%" in w for w in res_ev["warnings"]),
+                        any("50-70%" in w for w in res_ev["warnings"]),
                         f"Mis-paired Exit Multiple TV on {label}: {res_ev['warnings']}",
                     )
                     self.assertTrue(
@@ -4703,7 +4707,7 @@ class TestValidateDcf(unittest.TestCase):
                     _make_named_wb(p_tv, **kwargs)
                     res_tv = validate_dcf_mod.validate_dcf_model(str(p_tv))
                     self.assertFalse(
-                        any("typically should be 50-70%" in w for w in res_tv["warnings"]),
+                        any("50-70%" in w for w in res_tv["warnings"]),
                         f"Mis-paired Exit Multiple TV on {label}: {res_tv['warnings']}",
                     )
                     self.assertTrue(
@@ -4953,7 +4957,7 @@ class TestValidateDcf(unittest.TestCase):
                 res_tv["warnings"],
             )
             self.assertFalse(
-                any("typically should be 50-70%" in w or "250.0%" in w for w in res_tv["warnings"]),
+                any("50-70%" in w or "250.0%" in w for w in res_tv["warnings"]),
                 f"Bogus Exit Multiple TV mis-pairing warning emitted: {res_tv['warnings']}",
             )
 
@@ -5149,7 +5153,7 @@ class TestValidateDcf(unittest.TestCase):
                 res_tvna["warnings"],
             )
             self.assertFalse(
-                any("typically should be 50-70%" in w or "250.0%" in w for w in res_tvna["warnings"]),
+                any("50-70%" in w or "250.0%" in w for w in res_tvna["warnings"]),
                 f"Bogus Exit Multiple TV mis-pairing warning emitted: {res_tvna['warnings']}",
             )
 
@@ -5189,7 +5193,7 @@ class TestValidateDcf(unittest.TestCase):
                 f"Redundant PV_TerminalValue warning emitted for formula error cell: {res_fe['warnings']}",
             )
             self.assertFalse(
-                any("typically should be 50-70%" in w or "250.0%" in w for w in res_fe["warnings"]),
+                any("50-70%" in w or "250.0%" in w for w in res_fe["warnings"]),
                 f"Bogus Exit Multiple TV mis-pairing warning emitted: {res_fe['warnings']}",
             )
 

@@ -1,13 +1,13 @@
 ---
 name: earnings-analysis
-description: Create professional equity research earnings update reports (8-12 pages, 3,000-5,000 words) analyzing quarterly results for companies already under coverage. Fast-turnaround format focusing on beat/miss analysis, key metrics, updated estimates, and revised thesis. Includes 1-3 summary tables and 8-12 charts. Use when user requests "earnings update", "quarterly update", "earnings analysis", "Q1/Q2/Q3/Q4 results", or post-earnings report.
+description: Create professional equity research earnings update reports (8-12 pages, 3,000-5,000 words) analyzing quarterly results for both covered companies and standalone first-time earnings requests. Fast-turnaround format focusing on beat/miss analysis, key metrics, updated estimates/outlook, and thesis impact. Includes 1-3 summary tables and 8-12 charts. Use when user requests "earnings update", "quarterly update", "earnings analysis", "Q1/Q2/Q3/Q4 results", or post-earnings report.
 ---
 
 <!-- Derived from anthropics/financial-services@3e32c22 (plugins/vertical-plugins/equity-research/skills/earnings-analysis/SKILL.md), Apache-2.0; modified for Google Antigravity. -->
 
 # Equity Research Earnings Update
 
-Create institutional **EARNINGS UPDATE DRAFTS** analyzing quarterly results for companies already under coverage. Stage all deliverables as **`DRAFT — FOR INTERNAL ANALYST REVIEW ONLY (NOT INVESTMENT ADVICE)`**.
+Create institutional **EARNINGS UPDATE DRAFTS** analyzing quarterly results for companies under ongoing coverage **or** standalone first-time earnings requests. Stage all deliverables as **`DRAFT — FOR INTERNAL ANALYST REVIEW ONLY (NOT INVESTMENT ADVICE)`**.
 
 **Key Characteristics:**
 - **Length**: 8-12 pages (target range; scale to materiality)
@@ -15,8 +15,8 @@ Create institutional **EARNINGS UPDATE DRAFTS** analyzing quarterly results for 
 - **Tables**: 1-3 summary tables (NOT comprehensive)
 - **Figures**: 8-12 charts (where disclosed)
 - **Turnaround**: Draft within 24-48 hours of earnings release
-- **Audience**: Analysts / PMs already familiar with the company
-- **Focus**: What's NEW - beat/miss, updated estimates, thesis impact
+- **Audience**: Analysts / PMs (concise focus on what's new; add a brief business snapshot when running in standalone first-time mode)
+- **Focus**: What's NEW - beat/miss, updated estimates/outlook, thesis impact
 - **Font**: Times New Roman or Calibri throughout (consistent per user preference)
 
 ## When to Use
@@ -28,9 +28,13 @@ Use when the user requests:
 - "Q1/Q2/Q3/Q4 update for [Company]"
 
 **Do NOT use if:**
-- User requests "initiation report" → Use different skill
-- User requests "flash note" or "quick take" → Different format
-- Company is not already covered → Need initiation first
+- User requests "initiation report" → Use `/initiating-coverage`
+- User requests "flash note" or "quick take" → Use `/morning-note`
+
+## Coverage Modes: Ongoing Coverage vs. Standalone First-Time Earnings
+
+- **Existing coverage (`research/companies/<TICKER>/models/` and/or `thesis.md` present):** Benchmark actuals against verified pre-print consensus and prior internal model estimates, update the coverage model via `model-update`, and revise the living thesis and forward estimates.
+- **No prior coverage yet (standalone earnings request, e.g., *"NVDA Q3 earnings analysis"* in a fresh workspace):** Do **not** refuse or redirect into the 5-task `/initiating-coverage` workflow. Build a lightweight prior-quarter/pre-print baseline from the latest `10-K`, prior `10-Q`s, prior management guidance, and verified pre-print consensus (per the consensus source hierarchy below), tag the header and executive summary prominently **`[NO PRIOR COVERAGE MODEL — STANDALONE EARNINGS UPDATE]`**, deliver the full beat/miss analysis, call transcript takeaways, and forward outlook, and optionally offer `/initiating-coverage` afterward if the user wants full ongoing coverage.
 
 ## Critical Requirements
 
@@ -55,7 +59,7 @@ Use when the user requests:
 ### 3. Summary Format
 - Keep tables to 1-3 (summary only, not comprehensive)
 - No full P&L/Cash Flow/Balance Sheet (just key metrics)
-- Assume reader has seen initiation report
+- Keep company background concise (if running in ongoing coverage, assume reader knows the business; if running in standalone first-time mode, include a crisp 2–3 sentence business snapshot and tag `[NO PRIOR COVERAGE MODEL — STANDALONE EARNINGS UPDATE]`)
 
 ### 4. Citations & Source Attribution ⭐⭐⭐ MANDATORY
 

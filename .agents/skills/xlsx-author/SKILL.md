@@ -60,7 +60,7 @@ After saving a newly generated `.xlsx` file with `openpyxl`, always populate cac
 python3 scripts/recalc_xlsx.py <path-to-workbook.xlsx> 30 --in-place
 ```
 
-*(Because `recalc_xlsx.py` is **non-destructive by default** / `--check-only`, omitting `--in-place` or `--output <PATH>` leaves `openpyxl`-written files uncached on disk and reports `on_disk_uncached_formulas > 0` with a warning. Use `--in-place` for newly Python-generated `.xlsx` files, `--output <recalc.xlsx>` when preserving an existing workbook, and confirm `on_disk_uncached_formulas == 0` before reading with `openpyxl(data_only=True)` or running `validate_dcf.py`.)*
+*(Because `recalc_xlsx.py` is **non-destructive by default** / `--check-only`, omitting `--in-place` or `--output <PATH>` leaves `openpyxl`-written files uncached on disk and reports `on_disk_uncached_formulas > 0` with a warning. Always populate cached values directly into the canonical versioned path — use `--in-place` on clean newly Python-generated `.xlsx` files, or stage to `/tmp/<name>_staged.xlsx`, write `--output <canonical.xlsx>`, and delete the temp file — and confirm `uncached_formulas == 0` before reading with `openpyxl(data_only=True)` or running `validate_dcf.py`.)*
 
 This recalculates cached formula values via LibreOffice and scans every sheet for all 7 Excel errors (`#REF!`, `#DIV/0!`, `#VALUE!`, `#NAME?`, `#N/A`, `#NUM!`, `#NULL!`):
 - Exit `0` (`"status": "success"`): zero errors and verified formulas (`uncached_formulas: 0`, `on_disk_uncached_formulas: 0` when persisted via `--in-place` or `--output`).

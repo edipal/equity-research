@@ -8,7 +8,7 @@
 
 ### `status: "unverified"` (Exit Code 2) or Uncached Formulas
 - **Cause:** Either LibreOffice (`soffice`) is not installed on `PATH`, OR `recalc_xlsx.py` was run in its default non-destructive (`--check-only`) mode on an `openpyxl`-written file so cached values were never written back to disk before `validate_dcf.py` ran.
-- **Fix:** Ensure LibreOffice is installed (`sudo apt-get install libreoffice-calc` or macOS `brew install --cask libreoffice`) and run `python3 scripts/recalc_xlsx.py <model.xlsx> 30 --in-place` (for newly generated `.xlsx` files) or `--output <recalc.xlsx>` (when preserving the original file), then run `validate_dcf.py` on that recalculated file. Only pass `--allow-unrecalculated` when the analyst explicitly accepts unverified cached values, and disclose `recalculated_with_libreoffice: false`.
+- **Fix:** Ensure LibreOffice is installed (`sudo apt-get install libreoffice-calc` or macOS `brew install --cask libreoffice`) and populate cached values directly into the canonical versioned path via `python3 scripts/recalc_xlsx.py <canonical.xlsx> 30 --in-place` (for clean newly generated `.xlsx` files) or stage to `/tmp/<name>_staged.xlsx`, write `--output <canonical.xlsx>`, and delete the staging file — then run `validate_dcf.py` on that canonical recalculated file. Only pass `--allow-unrecalculated` when the analyst explicitly accepts unverified cached values, and disclose `recalculated_with_libreoffice: false`.
 
 ### `Refusing to overwrite ... Excel What-If data table(s)` or LibreOffice-Lossy Features (Exit Code 1)
 - **Cause:** `--in-place` (or `--output` pointing to the same file) was passed on an existing workbook containing Excel What-If data tables (`<f t="dataTable">`) or other Excel features that LibreOffice re-export can drop or alter (`lossy_features` + `lossy_feature_details`, such as charts, pivot tables, slicers/timelines, drawings/shapes, form/ActiveX controls, sparklines, VBA macros, or worksheet extensions).
@@ -32,7 +32,7 @@
 ## 2. Valuation Seems Unreasonable
 
 ### Implied Share Price Far Too High
-- Check **TV `%` of EV** (`DCF!C113`): target `50%–70%` (`validate_dcf.py` warns if `< 50%` or `> 70%`). If `> 70%`, review `g` (must be `<= 3.5%` and `< WACC`) or extend explicit projection horizon to 7–10 years.
+- Check **TV `%` of EV** (`DCF!C113`): `50%–70%` is a **mature-company diagnostic benchmark, NOT a valuation target** (`validate_dcf.py` warns if `< 50%` or `> 70%`). Confirm `g <= 3.5%` and `< WACC`, but **NEVER artificially tune WACC, `g`, or operating assumptions just to clear a `> 70%` warning** — `70%–85%+` is normal for high-growth companies on a 5-year DCF; retain fundamental assumptions, disclose the TV concentration, and cross-check via Exit Multiple TV and trading comps. *(Selecting a 7–10 year explicit horizon is an upfront modeling choice based on time-to-steady-state, not a post-hoc fix.)*
 - Confirm Exit Multiple TV is discounted strictly at `(1 + WACC)^N` (NOT `N - 0.5`; only mid-year Perpetuity Growth TV uses `N - 0.5`).
 - Confirm SBC is NOT added back to UFCF without modeling full dilution/repurchase offset.
 - Check whether `Net Debt / EV` was accidentally used in WACC (must use gross-capitalization weights `E/(E+D+P)`, `D/(E+D+P)`, `P/(E+D+P)`).

@@ -12,12 +12,14 @@ Step-by-step instructions for executing Task 3 (Valuation Analysis) of the `init
 - Verified Task 2 model at `research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx` containing `Revenue Model`, `Income Statement`, `Cash Flow Statement`, `Balance Sheet`, `Scenarios` and passing `scripts/recalc_xlsx.py`.
 - If Task 2 does not exist, STOP and inform the user to complete Task 2 first.
 
-**Core Methodology Delegation:**
-- **DCF Mechanics:** Delegate ALL core DCF methodology, formulas, and layout conventions to the **`dcf-model`** skill (`.agents/skills/dcf-model/SKILL.md`, `references/wacc-and-valuation-bridge.md`, `references/dcf-layout-and-formulas.md`, and `scripts/build_dcf_skeleton.py`). Do NOT deviate from:
+**Core Methodology Delegation (Integrated 9-Tab Initiation Workbook):**
+- **DCF Mechanics:** Follow the **`dcf-model`** skill (`.agents/skills/dcf-model/SKILL.md`, `references/wacc-and-valuation-bridge.md`, `references/dcf-layout-and-formulas.md`) for **all valuation methodology, discounting, equity bridge, sensitivity, and QA conventions**, while adapting the `DCF` tab's input block to link live to Task 2's 3-statement tabs rather than duplicating `build_dcf_skeleton.py`'s standalone hardcoded driver blocks (which are designed only for standalone 2-tab DCF workbooks built without a 3-statement model):
+  - **Single Scenario Selector (NEVER duplicate):** Maintain **ONE** workbook-wide scenario selector — named range `Case` (`1=Bear, 2=Base, 3=Bull`, guarded by `1..3` Excel `DataValidation`) on Task 2's `Scenarios` tab, referenced by `DCF` via live green cross-sheet link (`=Scenarios!<case_cell>`). Never create a second independent scenario switch on `DCF`.
+  - **Live Cross-Sheet Links to Task 2 (NEVER re-key Task 2 drivers):** Pull 5-year explicit UFCF lines (Revenue, EBIT, Tax Rate / Cash Taxes / NOPAT, D&A, EBITDA, CapEx, ΔNWC) and balance-sheet bridge items via live green cross-sheet formulas directly from `Income Statement`, `Cash Flow Statement`, and `Balance Sheet`. Drive terminal parameters (Bear/Base/Bull terminal growth `g` and exit multiple) from the single `Case` selector and bind the canonical workbook named ranges (`Case` on `Scenarios`, `DCF_WACC` on `WACC`, `TerminalGrowth`, `TerminalGrowth_Bear/Base/Bull` where used, `PV_TerminalValue`, `EnterpriseValue`) so `validate_dcf.py` validates the integrated workbook cleanly.
   - **Gross-capitalization WACC weights:** `Total Capital = Market Cap (E) + Total Gross Debt (D) + Preferred Stock (P)`; `Equity Weight = E/(E+D+P)`, `Debt Weight = D/(E+D+P)`, `Preferred Weight = P/(E+D+P)` (all bounded `0%–100%`, sum `= 100%`; NCI excluded from parent WACC and deducted in the equity bridge).
   - **Mid-year explicit UFCF & Perpetuity TV discounting:** Discount explicit annual UFCFs at `t - 0.5` (`0.5, 1.5, ..., N - 0.5`) and **Perpetuity Growth TV** consistently at **`(1 + WACC)^(N - 0.5)`** (`4.5` for a 5-year model). Discount **Exit Multiple TV** strictly at **end-of-year `(1 + WACC)^N`** (`5.0` — NEVER `N - 0.5` for exit multiple).
   - **Terminal growth `g`:** Strictly `< WACC` and `<= long-term nominal GDP / Rf` (typically `2.0%–3.5%`).
-  - **TV `%` of EV:** Target `50%–70%` (`validate_dcf.py` warns if `< 50%` or `> 70%`).
+  - **TV `%` of EV (Mature-Company Diagnostic / Disclosure Check — NOT a Valuation Target):** `50%–70%` is a mature-company diagnostic benchmark (`validate_dcf.py` warns if `< 50%` or `> 70%`). **NEVER adjust WACC, terminal growth `g`, or operating assumptions just to force TV/EV inside `50%–70%`.** When TV/EV falls outside `50%–70%` (e.g., `70%–85%+` for high-growth/reinvestment-heavy companies, or `< 50%` for mature/declining cash cows), retain fundamental assumptions, disclose the TV concentration and economic driver explicitly, and cross-check via Exit Multiple TV and trading comps. *(Selecting a 7–10 year explicit forecast horizon for an early-stage/high-growth company is an upfront modeling choice based on time-to-steady-state, NOT a post-hoc fix to silence a warning.)*
   - **Complete Equity Bridge & Diluted Shares:** `EV - Total Gross Debt - Preferred Stock - NCI + Cash & Marketable Securities + Equity Investments ÷ Fully Diluted Shares (Basic + Unvested RSUs + ITM Option TSM + if-converted)`. Never deduct ASC 842 operating lease liabilities when UFCF already expenses lease rent. Keep SBC as a real economic expense in UFCF.
   - **Centered Odd Sensitivity Grid (5×5):** Formula-driven axes centered on live `WACC` and `Terminal Growth`, horizon-independent `=IF(WACC<=g,"NM", ... SUMPRODUCT(...) ...)` full DCF recalculation in all 25 cells, highlighted center cell matching Base DCF price.
 - **Comps Mechanics:** Follow **`comps-analysis`** for EV construction, NTM calendarization, `"NM"` error handling (`IFERROR(..., "NM")`), and mandatory Max / 75th / Median / 25th / Min statistics.
@@ -39,15 +41,16 @@ Step-by-step instructions for executing Task 3 (Valuation Analysis) of the `init
 
 ## Step-by-Step Valuation Workflow
 
-### Step 1: Link Model Projections from Task 2
+### Step 1: Link Model Projections from Task 2 (No Duplicated Driver Blocks)
 
-Pull live cross-sheet links from Task 2's workbook (`Income Statement`, `Cash Flow Statement`, `Balance Sheet`, `Scenarios`):
-- 5-year projected Revenue, EBIT, Tax Rate, D&A, EBITDA, CapEx, and ΔNWC (`[FY+1]E–[FY+5]E`)
-- Latest balance sheet Gross Debt, Preferred Stock, Non-Controlling Interest, Cash & Marketable Securities, Equity Investments
-- Diluted share count inputs (basic shares + ITM options/RSUs for TSM + convertibles if-converted test)
-- Bear / Base / Bull scenario trajectories
+Pull live green cross-sheet links directly from Task 2's workbook (`Income Statement`, `Cash Flow Statement`, `Balance Sheet`, `Scenarios`) into `DCF` and `WACC` — **never re-key Task 2's Bear/Base/Bull operating driver blocks** from `build_dcf_skeleton.py`:
+- **Single scenario selector:** Reference `Scenarios`'s named `Case` cell (`1=Bear, 2=Base, 3=Bull`) from `DCF` so toggling `Case` once updates Task 2 statements and Task 3 valuation simultaneously.
+- **Explicit UFCF inputs (`[FY+1]E–[FY+5]E`):** Link Revenue, EBIT, Effective/Marginal Tax Rate (for Cash Taxes / NOPAT), D&A, EBITDA, CapEx, and ΔNWC directly to `Income Statement`, `Cash Flow Statement`, and `Balance Sheet`.
+- **Balance-sheet bridge items:** Link latest Gross Debt, Preferred Stock, Non-Controlling Interest, Cash & Marketable Securities, and Equity Investments directly to `Balance Sheet`.
+- **Diluted share count inputs:** Basic shares + unvested RSUs (`$0` strike) + ITM options (TSM) + convertibles if-converted test.
+- **Named ranges for `validate_dcf.py`:** Define `Case` (on `Scenarios`), `DCF_WACC` (on `WACC`), `TerminalGrowth` (and `TerminalGrowth_Bear`/`Base`/`Bull` where used), `PV_TerminalValue`, and `EnterpriseValue`.
 
-### Step 2: Build `WACC` and `DCF` Tabs (Per `dcf-model` Spec)
+### Step 2: Build `WACC` and `DCF` Tabs (Per `dcf-model` Methodology)
 
 **Worked Illustrative Example (Every figure mathematically reconciled):**
 Assume illustrative current share price `$42.00`, fully diluted shares `100.0M`, Total Gross Debt `$500.0M`, Cash & Marketable Securities `$50.0M` (`Net Debt = $450.0M`), Preferred `$0`, NCI `$0`, Equity Investments `$0`:
@@ -67,7 +70,7 @@ Assume illustrative current share price `$42.00`, fully diluted shares `100.0M`,
    - Perpetuity Growth Terminal Value (`g = 2.50%`, mid-year `N - 0.5 = 4.5` discounting):
      - `Undiscounted TV = $500.0M × (1.025) / (0.1066 - 0.025) = $6,280.6M`
      - `PV of TV (mid-year perpetuity, t = 4.5) = $6,280.6M / (1.1066)^4.5 = $3,981.5M`
-   - `Enterprise Value = $1,447.9M + $3,981.5M = $5,429.4M` (`TV % of EV = 73.3%` — slightly above the `50%–70%` target band; flag in narrative and consider extending the explicit forecast horizon to 7–10 years)
+   - `Enterprise Value = $1,447.9M + $3,981.5M = $5,429.4M` (`TV % of EV = 73.3%` — above the `50%–70%` mature-company diagnostic benchmark; do **not** tune WACC or `g` to clear the warning — disclose the growth-weighted TV concentration in narrative and cross-check via Exit Multiple TV and trading comps)
    - Complete Equity Bridge:
      - `EV $5,429.4M - Gross Debt $500.0M + Cash $50.0M = Implied Equity Value $4,979.4M`
      - `Implied Share Price (Base DCF) = $4,979.4M / 100.0M = $49.79` (`+18.6%` vs. `$42.00`)
@@ -150,10 +153,11 @@ Include 3–5 dated catalysts and 3–5 quantified upside/downside risks in `<TI
 After adding the 4 canonical valuation tabs (`WACC`, `DCF`, `Comparable Companies`, `Valuation Summary` — plus inline 5×5 sensitivity on `DCF` or optional `Sensitivity` tab) to `<TICKER>_Financial_Model_<Date>.xlsx`, run BOTH QA scripts:
 
 ```bash
-# 1. Recalculate via LibreOffice (--in-place populates cached values on disk; or use --output <recalc.xlsx>)
+# 1. Recalculate via LibreOffice so cached values are populated directly in the canonical file
+#    (use --in-place on clean openpyxl output, or stage to /tmp/<name>_staged.xlsx, write --output directly to the canonical path, and delete the temp file)
 python3 scripts/recalc_xlsx.py research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx 30 --in-place
 
-# 2. Validate DCF sheet structure, WACC range, g < WACC, TV % of EV, and cached values
+# 2. Validate DCF sheet structure, WACC range, g < WACC, TV % of EV diagnostic, and cached values
 python3 .agents/skills/dcf-model/scripts/validate_dcf.py research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx
 ```
 
@@ -166,13 +170,14 @@ Both commands MUST exit `0` (`"status": "success"` and `"status": "PASS"`) befor
 1. `research/companies/<TICKER>/reports/<TICKER>_Valuation_Analysis_YYYY-MM-DD.md` (target ~4–6 pages, draft notice included)
 2. Canonical tabs added to Task 2's existing workbook (`research/companies/<TICKER>/models/<TICKER>_Financial_Model_YYYY-MM-DD.xlsx`):
    - `WACC`
-   - `DCF` *(with inline 5×5 live sensitivity table per `dcf-model`, or optional dedicated `Sensitivity` tab)*
+   - `DCF` *(linked live to Task 2 statements and `Scenarios`'s single `Case` selector, with inline 5×5 live sensitivity table per `dcf-model` or optional dedicated `Sensitivity` tab)*
    - `Comparable Companies`
    - `Valuation Summary` *(+ optional `Precedent Transactions` cross-check tab)*
 
 **Checklist before proceeding to Task 4:**
-- [ ] `scripts/recalc_xlsx.py <model.xlsx> 30 --in-place` (or `--output <recalc.xlsx>`) exits `0` (`"status": "success"`) and `validate_dcf.py` exits `0` (`"status": "PASS"`)
-- [ ] Gross-capitalization (`E + D + P`) WACC, mid-year explicit FCF (`t - 0.5`) and mid-year perpetuity TV (`N - 0.5`) discounting, strict end-of-year `(1+WACC)^N` exit-multiple TV discounting, `g <= 3.5%` and `< WACC`, centered `IF(WACC<=g,"NM", SUMPRODUCT(...))` 5×5 live sensitivity grid
+- [ ] `scripts/recalc_xlsx.py` populates cached formula values directly into the canonical `<TICKER>_Financial_Model_<Date>.xlsx` (`"status": "success"`, `uncached_formulas: 0`) and `validate_dcf.py` exits `0` (`"status": "PASS"`)
+- [ ] Single `Case` selector on `Scenarios` linked by `DCF`; explicit UFCF and bridge items linked live to `Income Statement`, `Cash Flow Statement`, and `Balance Sheet` (zero duplicated hardcoded operating driver blocks)
+- [ ] Gross-capitalization (`E + D + P`) WACC, mid-year explicit FCF (`t - 0.5`) and mid-year perpetuity TV (`N - 0.5`) discounting, strict end-of-year `(1+WACC)^N` exit-multiple TV discounting, `g <= 3.5%` and `< WACC`, TV `%` of EV disclosed (never assumption-tuned), centered `IF(WACC<=g,"NM", SUMPRODUCT(...))` 5×5 live sensitivity grid
 - [ ] Comps table includes Max / 75th / Median / 25th / Min statistical summary
 - [ ] Precedent M&A assigned `0%` weight (cross-check only) when M&A is unlikely
 - [ ] Standardized `Buy / Hold / Sell` rating consistent with upside/downside threshold

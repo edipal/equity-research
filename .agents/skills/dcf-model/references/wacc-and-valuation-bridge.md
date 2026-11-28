@@ -137,7 +137,7 @@ PV of Terminal Value         = Undiscounted TV × Terminal Discount Factor
 **Terminal Growth Rate (`g`) Guardrails:**
 - **Mathematical requirement:** Strictly `g < WACC` (`validate_dcf.py` fails otherwise).
 - **Economic ceiling:** `g <= long-term nominal GDP growth / 10Y risk-free rate` — typically **`2.0%–3.5%`** across scenarios (e.g., Bear `2.0%`, Base `2.25%–2.5%`, Bull `2.5%–3.0%`).
-- **Never** set perpetuity `g` to `3.5%–5.0%+`: a company growing faster than nominal GDP forever mathematically exceeds the global economy. If a company has a longer high-growth runway, extend the explicit projection horizon to 7–10 years rather than inflating `g`.
+- **Never** set perpetuity `g` to `3.5%–5.0%+`: a company growing faster than nominal GDP forever mathematically exceeds the global economy. For a company with a longer high-growth runway to steady state, choose a 7–10 year explicit projection horizon **upfront** rather than inflating `g`.
 
 ### 3.3 Terminal Value — Exit Multiple Method (Cross-Check)
 
@@ -149,9 +149,10 @@ PV of Exit Multiple TV          = Undiscounted TV / (1 + WACC)^N
 - **CRITICAL DISCOUNTING RULE:** An exit multiple (`EBITDA_N × Multiple`) values the business at the **end of Year `N`** (point-in-time exit transaction). It MUST ALWAYS be discounted by **`(1 + WACC)^N`** (`N = 5.0` in a 5-year model, e.g., `^($G$87+0.5)`) — **NEVER `(1 + WACC)^(N - 0.5)`**, even when explicit FCFs and Perpetuity Growth TV use the mid-year convention.
 - Always display **Implied Exit EV / Terminal EBITDA** from the Perpetuity Growth TV on an apples-to-apples end-of-year `t = N` basis: when Perpetuity TV is valued at mid-year `t = N - 0.5`, compound it half a year to `t = N` before dividing by Year `N` EBITDA (`= Undiscounted Perpetuity TV × (1 + WACC)^0.5 / EBITDA_N`, i.e., `=C95*(1+$C$21)^0.5/G83` in `build_dcf_skeleton.py`) and cross-check against peer trading multiples from `comps-analysis`.
 
-### 3.4 Terminal Value Sanity Checks
-- **TV % of Enterprise Value:** Target **`50%–70%`** (`validate_dcf.py` warns if `< 50%` or `> 70%`).
-- If `> 70%`, review terminal growth `g` or extend the explicit forecast horizon to 7–10 years; if `< 50%`, verify terminal assumptions are not overly conservative.
+### 3.4 Terminal Value Diagnostic & Disclosure Check (NOT a Valuation Target)
+- **TV % of Enterprise Value:** `50%–70%` is a **mature-company diagnostic / disclosure benchmark**, NOT a valuation target (`validate_dcf.py` warns if `< 50%` or `> 70%`).
+- **NEVER adjust WACC, terminal growth `g`, or operating assumptions just to force TV/EV inside `50%–70%`.**
+- When TV/EV is `> 70%` (e.g., `70%–85%+` is mathematically normal for high-growth or reinvestment-heavy companies on a 5-year mid-year DCF) or `< 50%` (e.g., mature/declining cash cows with front-loaded cash flows): retain fundamental assumptions, disclose the TV concentration and its economic driver explicitly in narrative, and cross-check via Exit Multiple TV and trading comps. *(Choosing a 7–10 year explicit forecast horizon for an early-stage/high-growth company is an upfront modeling choice based on time-to-steady-state, NOT a post-hoc fix to silence a warning.)*
 
 ---
 

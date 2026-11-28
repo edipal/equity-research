@@ -32,9 +32,10 @@ Build institutional-grade, two-sheet (`DCF` + `WACC`) Excel valuation models pro
    - **ASC 842 warning:** Do NOT deduct operating lease liabilities from EV when UFCF already expenses operating lease rent (double-counting).
    - **Diluted shares:** Separate **Unvested RSUs (`$0` strike — always 100% dilutive)** from **Options Outstanding** (`Basic Shares + Unvested RSUs + IF(Price > Strike, Options - (Options * Strike / Price), 0)`) and apply the **if-converted test** for convertibles (avoid double-counting convertible face value in debt if treated as converted).
    - **SBC:** Treat Stock-Based Compensation as a real economic expense in GAAP EBIT / UFCF (do not add back SBC; if an adjusted view is requested, reconcile explicitly alongside dilution).
-5. **Single canonical layout (aligned with `build_dcf_skeleton.py`):**
+5. **Single canonical layout (aligned with `build_dcf_skeleton.py` for standalone 2-tab DCF workbooks):**
    - Named `Case` cell at `DCF!B4` (`1=Bear, 2=Base, 3=Bull`) guarded by whole-number `1..3` Excel `DataValidation`, with display label `=CHOOSE(INT(Case),"Bear Case","Base Case","Bull Case")` in `DCF!C4`.
    - Vertically stacked Bear / Base / Bull assumption blocks (uniform 12-row stride, explicit projection year headers) consolidated via `=INDEX(..., (INT($B$4)-1)*12 + offset)` into an Active Case block — zero scattered nested `IF`s, zero hardcoded OpEx percentages in formulas.
+   - *(Integrated 3-statement + DCF workbooks, such as `initiating-coverage` Tasks 2–3: link explicit UFCF lines and balance-sheet bridge items directly from `Income Statement`, `Cash Flow Statement`, and `Balance Sheet` via live cross-sheet formulas and reference the single workbook `Case` selector on `Scenarios` instead of duplicating standalone hardcoded driver blocks — while preserving all WACC, discounting, bridge, 5×5 sensitivity, and workbook named-range conventions.)*
    - Live horizon-independent 5×5 `WACC × Terminal Growth` sensitivity table at the bottom of `DCF` (`B124:G129`) using `=IF($B{row}<={col}${hdr},"NM", ...)` around `SUMPRODUCT` over the UFCF and Period ranges, with formula-driven axes centered on live `WACC` (`C21`) and live `Terminal Growth` (`C69`), full DCF recalculation in all 25 cells, and highlighted center cell (`E127`) matching `DCF!C108`.
 6. **Cell comments on creation:** Attach `"Source: [System/Document], [Date], [Reference]"` to every blue hardcoded input as it is written; tag analyst assumptions `[ASSUMPTION]` and unverified items `[UNSOURCED]`.
 7. **Lock row layout before writing formulas:** Define every section's row constants before writing any formula cell to eliminate off-by-one and `#REF!` bugs.
@@ -85,7 +86,7 @@ Follow [references/dcf-layout-and-formulas.md](references/dcf-layout-and-formula
 - **Primary (Perpetuity Growth):** `Undiscounted TV = UFCF_N * (1 + g) / (WACC - g)`, discounted consistently at mid-year `1 / (1 + WACC)^(N - 0.5)` (`=1/(1+$C$21)^$G$87`).
 - **Cross-check (Exit Multiple):** `Undiscounted TV = EBITDA_N * Exit Multiple`, strictly discounted at end-of-year `1 / (1 + WACC)^N` (`=C116/(1+$C$21)^($G$87+0.5)`).
 - **Bridge to Implied Share Price:** `EV - Gross Debt - Preferred - NCI + Cash & Marketable Securities + Equity Investments = Implied Equity Value ÷ Diluted Shares (Basic + RSUs + ITM Option TSM)`.
-- **Cross-check against `comps-analysis`:** Compare implied Year 1 EV/EBITDA, implied exit EV/EBITDA, and implied P/E against peer median and 25th–75th quartiles. Verify **TV `%` of EV** sits inside the institutional **`50%–70%`** target band (`validate_dcf.py` warns if `<50%` or `>70%`).
+- **Cross-check against `comps-analysis` & TV `%` of EV diagnostic:** Compare implied Year 1 EV/EBITDA, implied exit EV/EBITDA, and implied P/E against peer median and 25th–75th quartiles. Treat **TV `%` of EV** (`50%–70%`) strictly as a **mature-company diagnostic / disclosure check, NOT a valuation target** (`validate_dcf.py` warns if `< 50%` or `> 70%`). **NEVER adjust WACC, terminal growth `g`, or operating assumptions just to force TV/EV inside `50%–70%`.** When TV/EV is outside `50%–70%` (e.g., `70%–85%+` for high-growth/reinvestment-heavy companies, or `< 50%` for mature/declining cash cows), retain fundamental assumptions, disclose the TV concentration and economic driver explicitly, and cross-check via Exit Multiple TV and trading comps. *(Selecting a 7–10 year explicit forecast horizon for an early-stage/high-growth company is an upfront modeling choice based on time-to-steady-state, NOT a post-hoc fix to silence a warning.)*
 
 ### Step 6: Build Live-Formula 5×5 Sensitivity Table(s)
 - Place at the bottom of `DCF` (starting Row `122` in the canonical layout — do NOT split to a separate sheet unless requested).
@@ -106,7 +107,7 @@ python3 scripts/recalc_xlsx.py research/companies/<TICKER>/models/<TICKER>_DCF_Y
 python3 .agents/skills/dcf-model/scripts/validate_dcf.py research/companies/<TICKER>/models/<TICKER>_DCF_YYYY-MM-DD.xlsx
 ```
 
-*(Note: `recalc_xlsx.py` is **non-destructive by default** — running it without `--in-place` or `--output` checks a temporary copy and leaves an `openpyxl`-saved file uncached on disk, which would cause `validate_dcf.py` to fail on uncached formulas. Always pass `--in-place` for newly Python-generated `.xlsx` files or `--output <recalc.xlsx>` when preserving an original workbook, then run `validate_dcf.py` on that recalculated file.)*
+*(Note: `recalc_xlsx.py` is **non-destructive by default** — running it without `--in-place` or `--output` checks a temporary copy and leaves an `openpyxl`-saved file uncached on disk, which causes `validate_dcf.py` to fail on uncached formulas. Always populate cached values directly into the canonical versioned path via `--in-place` on newly Python-generated `.xlsx` files — or stage to `/tmp/<name>_staged.xlsx`, write `--output <canonical.xlsx>`, and delete the temp file — then run `validate_dcf.py` on that canonical recalculated file.)*
 
 #### `scripts/recalc_xlsx.py` Exit Codes, Statuses & Flags
 
@@ -130,8 +131,8 @@ python3 .agents/skills/dcf-model/scripts/validate_dcf.py research/companies/<TIC
 - **Starter skeleton test:** You can bootstrap or compare against `python3 .agents/skills/dcf-model/scripts/build_dcf_skeleton.py --output <path.xlsx> --case 2`.
 
 Before handing off the model, confirm:
-- [ ] `scripts/recalc_xlsx.py <file.xlsx> 30 --in-place` (or `--output <recalc.xlsx>`) exits `0` (`"status": "success"`, `total_errors: 0`, `uncached_formulas: 0`)
-- [ ] `validate_dcf.py` exits `0` (`"status": "PASS"`)
+- [ ] `scripts/recalc_xlsx.py` populates cached values directly into the canonical `<TICKER>_DCF_YYYY-MM-DD.xlsx` (`--in-place`, or temp staging → `--output` to canonical path + delete temp file) and exits `0` (`"status": "success"`, `total_errors: 0`, `uncached_formulas: 0`)
+- [ ] `validate_dcf.py` exits `0` (`"status": "PASS"`); any TV `%` of EV outside `50%–70%` is disclosed and cross-checked vs. Exit Multiple TV / comps without tuning WACC or `g`
 - [ ] Two sheets (`DCF` + `WACC`), named `Case` at `DCF!B4` with `1..3` `DataValidation`, working Bear/Base/Bull toggle
 - [ ] Gross-capitalization WACC weights (`E + D + P`, all `0%–100%`, sum `= 100%`), `g < WACC`, `g <= 3.5%`
 - [ ] Mid-year explicit FCF (`t - 0.5`) and mid-year perpetuity TV (`N - 0.5`) discounting; strict end-of-year `(1 + WACC)^N` exit-multiple TV discounting

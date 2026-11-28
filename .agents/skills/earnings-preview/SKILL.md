@@ -22,6 +22,7 @@ Draft concise pre-earnings setup notes staged as `DRAFT — FOR INTERNAL ANALYST
   - **NEVER** fabricate or cite unverified "whisper numbers", and **NEVER** reuse post-print Yahoo Finance consensus snapshots as pre-print expectations.
   - **Fallback:** If verified pre-print consensus is unavailable, anchor the preview on **prior management guidance** and **internal model estimates**, marking Street consensus **`[UNSOURCED]`**.
 - Review the prior quarter's earnings release, 10-Q/10-K, and earnings call transcript for active guidance ranges and management commentary.
+- **Standalone first-time preview (no prior coverage model under `research/companies/<TICKER>/models/`):** Do **not** block or redirect into `/initiating-coverage`; build the baseline directly from the latest `10-K`, prior `10-Q`s, active management guidance, and verified pre-print consensus, and tag the header **`[NO PRIOR COVERAGE MODEL — STANDALONE EARNINGS PREVIEW]`**.
 
 ### Step 2: Key Metrics Framework
 

@@ -58,20 +58,20 @@ When a user says *"Create a coverage initiation report for [Company]"* or *"Run 
   2. `Income Statement` (full P&L matching filing granularity)
   3. `Cash Flow Statement` (CFO, CFI, CFF, FCF)
   4. `Balance Sheet` (full BS with balance check `= 0` every period)
-  5. `Scenarios` (Bear / Base / Bull drivers & outputs)
-- **QA Gate (MANDATORY):** Run `python3 scripts/recalc_xlsx.py research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx 30 --in-place` (or `--output <recalc.xlsx>`) to populate cached formula values on disk and confirm exit `0` (`"status": "success"`, zero errors, zero uncached formulas, zero balance-check failures).
+  5. `Scenarios` (single workbook-wide `Case` selector + Bear / Base / Bull drivers & outputs)
+- **QA Gate (MANDATORY):** Run `python3 scripts/recalc_xlsx.py research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx 30 --in-place` (or stage to `/tmp` → `--output` directly to the canonical path and delete the temp file) to populate cached formula values directly in the canonical file on disk and confirm exit `0` (`"status": "success"`, zero errors, zero uncached formulas, zero balance-check failures).
 - **Full workflow:** [references/task2-financial-modeling.md](references/task2-financial-modeling.md).
 
 ### Task 3: Valuation Analysis
-- **Scope:** Delegate DCF mechanics to `dcf-model` (gross-debt WACC, mid-year explicit UFCF (`t - 0.5`) and mid-year perpetuity TV (`(1 + WACC)^(N - 0.5)`), strict end-of-year `(1 + WACC)^N` exit-multiple TV discounting, complete equity bridge, TSM diluted shares, SBC as real expense, centered 5×5 live sensitivity grid, TV `%` of EV target `50%–70%`). Add **4 canonical tabs** to Task 2's existing `.xlsx`:
+- **Scope:** Follow `dcf-model` methodology (gross-debt WACC, mid-year explicit UFCF (`t - 0.5`) and mid-year perpetuity TV (`(1 + WACC)^(N - 0.5)`), strict end-of-year `(1 + WACC)^N` exit-multiple TV discounting, complete equity bridge, TSM diluted shares, SBC as real expense, centered 5×5 live sensitivity grid, TV `%` of EV mature-company `50%–70%` diagnostic disclosure — never tune assumptions to clear warnings), while linking explicit UFCF and bridge items live from Task 2's statements and sharing `Scenarios`'s single `Case` selector (no duplicated hardcoded driver blocks). Add **4 canonical tabs** to Task 2's existing `.xlsx`:
   1. `WACC`
-  2. `DCF` *(with inline 5×5 sensitivity table per `dcf-model`, or optional dedicated `Sensitivity` tab)*
+  2. `DCF` *(linked live to Task 2 statements and `Scenarios`'s `Case` selector, with inline 5×5 sensitivity table per `dcf-model`, or optional dedicated `Sensitivity` tab)*
   3. `Comparable Companies` *(5–10 peers + Max / 75th / Median / 25th / Min summary)*
   4. `Valuation Summary` *(reconciliation, weighting, football field inputs; Precedent Transactions tab optional and used as cross-check only unless M&A is an active catalyst)*
 - **Rating Scale (Standardized):** `Buy` (`>= +15%` 12M expected return), `Hold` (`-10%` to `+15%`), `Sell` (`<= -10%`).
 - **QA Gate (MANDATORY):** Run BOTH:
-  - `python3 scripts/recalc_xlsx.py research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx 30 --in-place` (or `--output <recalc.xlsx>`, exit `0`, `"status": "success"`)
-  - `python3 .agents/skills/dcf-model/scripts/validate_dcf.py research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx` on the recalculated file (exit `0`, `"status": "PASS"`)
+  - `python3 scripts/recalc_xlsx.py research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx 30 --in-place` (or stage to `/tmp` → `--output` directly to the canonical path and delete the temp file; exit `0`, `"status": "success"`, `uncached_formulas: 0`)
+  - `python3 .agents/skills/dcf-model/scripts/validate_dcf.py research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx` on the canonical recalculated file (exit `0`, `"status": "PASS"`)
 - **Full workflow:** [references/task3-valuation.md](references/task3-valuation.md) & [references/valuation-methodologies.md](references/valuation-methodologies.md).
 
 ### Task 4: Chart Generation

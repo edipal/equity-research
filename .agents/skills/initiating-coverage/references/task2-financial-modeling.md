@@ -17,9 +17,9 @@ Step-by-step instructions for executing Task 2 (Financial Modeling) of the `init
 2. `Income Statement` — Full P&L (3–5 years historical + LTM stub if mid-year + 5 years projected)
 3. `Cash Flow Statement` — Operating, Investing, Financing activities + Free Cash Flow
 4. `Balance Sheet` — Full Assets, Liabilities, Equity + Balance Check (`= 0` every period)
-5. `Scenarios` — Bear / Base / Bull assumption drivers and summary outputs
+5. `Scenarios` — Single workbook-wide `Case` selector (`1=Bear, 2=Base, 3=Bull`, named range `Case`, `1..3` `DataValidation`), Bear / Base / Bull assumption drivers, and summary outputs
 
-*(All assumption inputs are placed directly as blue hardcoded cells with source comments on their respective tabs — do NOT assume a separate `Assumptions` tab unless explicitly requested. Unlevered FCF lines flow directly from `Income Statement`, `Cash Flow Statement`, and `Balance Sheet` into Task 3's `DCF` and `WACC` tabs.)*
+*(All assumption inputs are placed directly as blue hardcoded cells with source comments on their respective tabs — do NOT assume a separate `Assumptions` tab unless explicitly requested. `Scenarios` holds the single workbook `Case` selector referenced across Tasks 2 and 3; Unlevered FCF lines and balance-sheet bridge items flow via live cross-sheet formulas directly from `Income Statement`, `Cash Flow Statement`, and `Balance Sheet` into Task 3's `DCF` and `WACC` tabs — never duplicated as standalone driver blocks.)*
 
 > **No-Fabrication & Tagging Rule:** Match the granularity disclosed in primary 10-K/10-Q filings. Target ranges below (e.g., ~20–30 product rows, ~15–20 geography rows, ~40–50 P&L rows) apply **where disclosed in primary filings** — never invent sub-products, countries, or headcount splits that are not reported. Tag every forward estimate `[ASSUMPTION]` and any unverified historical/private-company input `[UNSOURCED]`.
 
@@ -98,19 +98,20 @@ Build an integrated Balance Sheet (target ~30–45 line items matching 10-K stru
 
 ### Step 6: Build `Scenarios` Tab
 
-Create structured **Bear / Base / Bull** parameter and output comparisons (linked to model formulas or cleanly reconciled with Task 3's `DCF` scenario blocks):
+Create the **single workbook-wide scenario control** and structured **Bear / Base / Bull** parameter and output comparisons that drive Task 2's active projections AND are referenced via live cross-sheet link by Task 3's `DCF` tab (ensuring there is never a second independent scenario switch or duplicated operating driver block in Task 3):
+- **Single `Case` selector:** Place `Case` (`1=Bear, 2=Base, 3=Bull`, guarded by whole-number `1..3` Excel `DataValidation`, workbook defined name `Case`) with an active-label formula (`=CHOOSE(INT(Case),"Bear Case","Base Case","Bull Case")`) driving active model assumptions across `Revenue Model`, `Income Statement`, `Cash Flow Statement`, and `Balance Sheet`.
 - Key driver comparison table: `[FY+1]E–[FY+5]E` Revenue CAGR, Terminal Gross Margin, Terminal EBITDA Margin, CapEx `% of Revenue`, NWC `% of ΔRev`.
 - Key output comparison table: Terminal-Year Revenue, EBITDA, EBITDA Margin, Net Income, Diluted EPS, Free Cash Flow, Cumulative 5Y FCF.
 - Concise written scenario rationale (bull catalysts, base trajectory, bear downside triggers — all tagged `[ASSUMPTION]`).
 
 ### Step 7: Recalculate & Audit Workbook (MANDATORY QA GATE)
 
-Before handing off Task 2, run the LibreOffice recalculation & formula audit gate:
+Before handing off Task 2, run the LibreOffice recalculation & formula audit gate so cached formula values are populated directly into the canonical versioned workbook on disk:
 
 ```bash
 python3 scripts/recalc_xlsx.py research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx 30 --in-place
 ```
-*(Or pass `--output <recalc.xlsx>` to write a recalculated copy without modifying the input file; default mode without flags is non-destructive `--check-only` and does not populate cached values on disk.)*
+*(Or if staging is needed, write the uncached `openpyxl` output to `/tmp/<TICKER>_Financial_Model_<Date>_staged.xlsx`, run `--output` directly to `research/companies/<TICKER>/models/<TICKER>_Financial_Model_<Date>.xlsx`, and delete the temp file; default mode without flags is non-destructive `--check-only` and does not populate cached values on disk.)*
 
 - **Required result:** Exit code `0`, `"status": "success"`, `"total_errors": 0`, `"uncached_formulas": 0`.
 - If `"status": "errors_found"` or `"error"` (exit `1`), fix every error and re-run.

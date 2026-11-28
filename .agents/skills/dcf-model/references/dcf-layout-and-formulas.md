@@ -144,7 +144,7 @@ Column `B` holds the historical anchor year (`B74 = C20`); columns `C:G` hold pr
 - `C109` Implied Upside / (Downside) `%`: `=C108/C8-1`
 
 ### Section 6 — Cross-Checks & Exit Multiple Method (Rows 111–119)
-- `C113` TV % of Enterprise Value: `=C99/C100` (target `50%–70%`)
+- `C113` TV % of Enterprise Value: `=C99/C100` (mature-company diagnostic benchmark `50%–70%`; disclose concentration if outside — never tune WACC/`g` to clear warning)
 - `C114` Implied EV / Year 1 EBITDA: `=C100/C83`
 - `C115` Implied Exit EV / Year 5 EBITDA (from Perpetuity): `=C95*(1+$C$21)^0.5/G83` *(compounds mid-year Perpetuity TV at `t = N - 0.5` by `(1 + WACC)^0.5` to end-of-year `t = N` so it is apples-to-apples with an end-of-year exit multiple)*
 - `C116` Undiscounted Exit Multiple TV: `=G83*C70`

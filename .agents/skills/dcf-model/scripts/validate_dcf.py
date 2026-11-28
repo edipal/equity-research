@@ -1473,7 +1473,7 @@ class DCFModelValidator:
             self.errors.append(f"Could not validate WACC range: {str(e)}")
 
     def _check_terminal_value_proportion(self):
-        """Check if terminal value is within the institutional 50%-70% of EV target range."""
+        """Check terminal value proportion of EV against the 50%-70% mature-company diagnostic benchmark."""
         try:
             if self._dcf_grid is None:
                 # Missing DCF sheet already recorded as error in check_sheet_structure()
@@ -1579,13 +1579,13 @@ class DCFModelValidator:
                 proportion = terminal_value / enterprise_value
                 if proportion > 0.70:
                     self.warnings.append(
-                        f"Terminal value is {proportion:.1%} of EV (typically should be 50-70%). "
-                        "Model may be over-reliant on terminal assumptions."
+                        f"Terminal value is {proportion:.1%} of EV (mature-company benchmark is 50-70%; "
+                        "disclose TV concentration and cross-check vs. Exit Multiple/comps rather than tuning WACC or g)."
                     )
                 elif proportion < 0.50:
                     self.warnings.append(
-                        f"Terminal value is {proportion:.1%} of EV (typically should be 50-70%). "
-                        "Check if terminal assumptions are too conservative."
+                        f"Terminal value is {proportion:.1%} of EV (mature-company benchmark is 50-70%; "
+                        "disclose front-loaded cash flows or terminal drivers rather than arbitrarily tuning WACC or g)."
                     )
                 else:
                     self.info.append(f"✓ Terminal value is {proportion:.1%} of EV")
@@ -1625,7 +1625,7 @@ def main():
         print("  - Formula errors (#REF!, #DIV/0!, etc.) and uncached formulas")
         print("  - Terminal growth < WACC (critical)")
         print("  - WACC in reasonable range (5-20%)")
-        print("  - Terminal value proportion of EV (50-70%)")
+        print("  - Terminal value proportion of EV (mature-company 50-70% diagnostic)")
         print("\nReturns JSON with errors, warnings, and info")
         print("\nExample: python validate_dcf.py model.xlsx")
         print("Example: python validate_dcf.py model.xlsx results.json")
