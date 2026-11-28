@@ -16,15 +16,27 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: "pip"
-          cache-dependency-path: requirements.txt
+
+      - name: Compute rolling weekly cache key
+        id: cache-meta
+        run: echo "week=$(date -u +%Y-%W)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-ci-${{ runner.os }}-py3.12-${{ steps.cache-meta.outputs.week }}-${{ hashFiles('.github/workflows/validate.yml') }}
+          restore-keys: |
+            pip-ci-${{ runner.os }}-py3.12-
 
       - name: Cache LibreOffice apt packages
         id: cache-apt
         uses: actions/cache@v4
         with:
           path: ~/.cache/apt-archives
-          key: apt-libreoffice-${{ runner.os }}-${{ hashFiles('.github/workflows/validate.yml') }}
+          key: apt-libreoffice-${{ runner.os }}-${{ steps.cache-meta.outputs.week }}-${{ hashFiles('.github/workflows/validate.yml') }}
+          restore-keys: |
+            apt-libreoffice-${{ runner.os }}-
 
       - name: Install LibreOffice Calc (headless)
         run: |
@@ -37,6 +49,8 @@ jobs:
             -o APT::Keep-Downloaded-Packages=true \
             libreoffice-calc-nogui
           if [ "${{ steps.cache-apt.outputs.cache-hit }}" != "true" ]; then
+            sudo apt-get autoclean
+            rm -f "$HOME/.cache/apt-archives/"*.deb
             sudo cp -n /var/cache/apt/archives/*.deb "$HOME/.cache/apt-archives/" || true
             sudo chown -R "$(id -u):$(id -g)" "$HOME/.cache/apt-archives"
           fi

@@ -43,7 +43,7 @@ python3 .agents/skills/dcf-model/scripts/build_dcf_skeleton.py \
 - **Standard Workbook-Level Named Ranges (defined in `build_dcf_skeleton.py`, resolved first by `validate_dcf.py`):**
   - `Case` → `DCF!$B$4` (Active scenario selector: `1` = Bear, `2` = Base, `3` = Bull)
   - `DCF_WACC` → `WACC!$C$30` (Weighted Average Cost of Capital output)
-  - `TerminalGrowth` → `DCF!$C$69` (Active Case Terminal Growth Rate)
+  - `TerminalGrowth` → `DCF!$C$94` (Active Terminal Growth Rate `g` feeding Perpetuity TV; linked via `=C69`)
   - `TerminalGrowth_Bear` → `DCF!$C$33` (Bear Case Terminal Growth Rate)
   - `TerminalGrowth_Base` → `DCF!$C$45` (Base Case Terminal Growth Rate)
   - `TerminalGrowth_Bull` → `DCF!$C$57` (Bull Case Terminal Growth Rate)

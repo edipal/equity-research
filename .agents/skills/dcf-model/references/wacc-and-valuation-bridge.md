@@ -8,7 +8,7 @@ Reference guide for the `dcf-model` skill. Every formula and convention here mat
 
 ## 1. Weighted Average Cost of Capital (WACC)
 
-Build WACC on a dedicated `WACC` worksheet and link `DCF!C21 = WACC!C30` as the single source of truth (`WACC!C20 = DCF!C14` for Market Cap, `WACC!C21 = DCF!C15` for Total Gross Debt, and `WACC!C22 = DCF!C16` for Preferred Stock). `build_dcf_skeleton.py` also defines 8 workbook-level named ranges (`Case` → `DCF!$B$4`, `DCF_WACC` → `WACC!$C$30`, `TerminalGrowth` → `DCF!$C$69`, `TerminalGrowth_Bear` → `DCF!$C$33`, `TerminalGrowth_Base` → `DCF!$C$45`, `TerminalGrowth_Bull` → `DCF!$C$57`, `PV_TerminalValue` → `DCF!$C$99`, `EnterpriseValue` → `DCF!$C$100`) that `validate_dcf.py` resolves first alongside label-scanned rates.
+Build WACC on a dedicated `WACC` worksheet and link `DCF!C21 = WACC!C30` as the single source of truth (`WACC!C20 = DCF!C14` for Market Cap, `WACC!C21 = DCF!C15` for Total Gross Debt, and `WACC!C22 = DCF!C16` for Preferred Stock). `build_dcf_skeleton.py` also defines 8 workbook-level named ranges (`Case` → `DCF!$B$4`, `DCF_WACC` → `WACC!$C$30`, `TerminalGrowth` → `DCF!$C$94`, `TerminalGrowth_Bear` → `DCF!$C$33`, `TerminalGrowth_Base` → `DCF!$C$45`, `TerminalGrowth_Bull` → `DCF!$C$57`, `PV_TerminalValue` → `DCF!$C$99`, `EnterpriseValue` → `DCF!$C$100`) that `validate_dcf.py` resolves first alongside label-scanned rates.
 
 ### 1.1 Cost of Equity (CAPM)
 

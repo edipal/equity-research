@@ -102,8 +102,25 @@ TG_EXCLUDE_RE = re.compile(
     r'share\s+price|equity\s+value|ufcf|fcf|revenue|sales|ebitda|ebit|'
     r'margin|wacc|discount\s+rate|spread|table|tables|note|notes|'
     r'check|checks|method|factor|factors|weight|weights|delta|change|'
-    r'vs|versus|gdp|inflation|benchmark|consensus|peer|peers'
+    r'vs|versus|benchmark|consensus|peer|peers'
     r')\b)'
+)
+TG_BRACKET_TAG_RE = re.compile(r'\s*\[[^\]]*\]\s*')
+TG_TRAILING_FOOTNOTE_RE = re.compile(r'[\s*†‡§¶¹²³⁴⁵⁶⁷⁸⁹⁰]+$')
+TG_TRAILING_PAREN_RE = re.compile(r'\s*\([^()]*\)\s*$')
+TG_TRAILING_UNIT_RE = re.compile(
+    r'(?:'
+    r'\s*[\-\u2013\u2014:/|,]?\s*%'
+    r'|(?:\s*[\-\u2013\u2014:/|,]\s*|\s+)(?:in\s+%|pct\.?|percent|bps)'
+    r'|\s*[:;\-\u2013\u2014/|]+'
+    r')\s*$'
+)
+TG_TRAILING_SCENARIO_RE = re.compile(
+    r'(?:\s*[\-\u2013\u2014:/|,]\s*|\s+)'
+    r'(?:'
+    r'(?:bear|base|bull|upside|downside|best|worst|active)(?:[\s-]+(?:case|scenario))?'
+    r'|(?:scenario|case)\s+(?:[0-9]+[a-z]?|[a-z])'
+    r')\s*$'
 )
 TG_ALLOWED_PAREN_RE = re.compile(
     r'\s*\((?:'
@@ -118,6 +135,8 @@ TG_LEAD_ENUM_RE = re.compile(
 TG_PREFIX_RE = re.compile(
     r'^(?:(?:bear|base|bull|upside|downside|best|worst|active)(?:[\s-]+(?:case|scenario))?|memo)\s*[:\-\u2013\u2014]?\s*'
 )
+TG_LIKE_TERM_RE = re.compile(r'\b(?:terminal|perpetuity|perpetual)\b')
+TG_LIKE_GROWTH_RE = re.compile(r'\bgrowth\b')
 GENUINE_TG_CORES = frozenset({
     'terminal growth rate',
     'terminal growth',
@@ -366,9 +385,24 @@ def _is_terminal_growth_label(text: str) -> bool:
     if TG_EXCLUDE_RE.search(low):
         return False
 
-    # Strip recognized unit/symbol/scenario parentheticals (e.g., "(g)", "(%)", "(Perpetuity)")
-    core = TG_ALLOWED_PAREN_RE.sub(' ', low)
-    core = ' '.join(core.split()).rstrip(':').strip()
+    # Strip bracketed tags anywhere (e.g., "[ASSUMPTION]", "[E]", "[1]", "[UNSOURCED]")
+    # and recognized mid-label parentheticals (safe because TG_EXCLUDE_RE ran on raw text first)
+    core = TG_BRACKET_TAG_RE.sub(' ', low)
+    core = TG_ALLOWED_PAREN_RE.sub(' ', core)
+    core = ' '.join(core.split())
+    if not core:
+        return False
+
+    # Repeatedly strip trailing footnote markers, parentheticals, unit suffixes, and scenario suffixes
+    # until stable so combined forms like "Terminal Growth Rate - Bull (%) [ASSUMPTION]*" normalize cleanly.
+    for _ in range(8):
+        prev = core
+        core = TG_TRAILING_FOOTNOTE_RE.sub('', core).strip()
+        core = TG_TRAILING_PAREN_RE.sub('', core).strip()
+        core = TG_TRAILING_UNIT_RE.sub('', core).strip()
+        core = TG_TRAILING_SCENARIO_RE.sub('', core).strip()
+        if core == prev or not core:
+            break
     if not core:
         return False
 
@@ -381,6 +415,16 @@ def _is_terminal_growth_label(text: str) -> bool:
             break
         core = nxt
     return core in GENUINE_TG_CORES
+
+
+def _is_unrecognized_tg_like_label(text: str) -> bool:
+    """Return True for non-excluded labels containing terminal/perpetuity + growth that miss TG matching."""
+    low = ' '.join(text.lower().strip().split())
+    if not low or _is_sensitivity_header(low) or TG_EXCLUDE_RE.search(low):
+        return False
+    if _is_terminal_growth_label(text):
+        return False
+    return bool(TG_LIKE_TERM_RE.search(low) and TG_LIKE_GROWTH_RE.search(low))
 
 
 def _is_ratio_or_multiple_label(text: str) -> bool:
@@ -541,6 +585,7 @@ class DCFModelValidator:
                 list[tuple[int, int, Optional[str], list[tuple[int, float, str]]]],
             ]
         ] = None
+        self._dcf_unrecognized_tg_labels: list[tuple[str, str]] = []
         self._named_metrics: dict[str, tuple[float, str, str, int, int]] = {}
         self._named_scenario_tg: dict[str, tuple[float, str, str, int, int]] = {}
         self._named_scenario_wacc: dict[str, tuple[float, str, str, int, int]] = {}
@@ -658,10 +703,12 @@ class DCFModelValidator:
         """Extract DCF sheet TG and WACC rows once per validator instance and cache the result."""
         if self._cached_dcf_rate_rows is None:
             if self._dcf_grid is None:
+                self._dcf_unrecognized_tg_labels = []
                 self._cached_dcf_rate_rows = ([], [])
             else:
                 self._cached_dcf_rate_rows = self._extract_rate_rows(
-                    self._dcf_sheet_name or 'DCF', self._dcf_grid
+                    self._dcf_sheet_name or 'DCF',
+                    self._dcf_grid,
                 )
         return self._cached_dcf_rate_rows
 
@@ -895,6 +942,9 @@ class DCFModelValidator:
         """
         tg_rows: list[tuple[int, int, Optional[str], list[tuple[int, float, str]]]] = []
         wacc_rows: list[tuple[int, int, Optional[str], list[tuple[int, float, str]]]] = []
+        is_dcf_sheet = sheet_grid is self._dcf_grid
+        if is_dcf_sheet:
+            self._dcf_unrecognized_tg_labels = []
 
         block_id = 0
         block_tag: Optional[str] = None
@@ -945,6 +995,18 @@ class DCFModelValidator:
                     )
                     if entries:
                         row_matches.append(('wacc', val, entries))
+                elif is_dcf_sheet and _is_unrecognized_tg_like_label(val):
+                    entries = self._collect_adjacent_rates(
+                        sheet_title,
+                        row_map,
+                        col_idx,
+                        allow_zero=True,
+                        allow_negative=True,
+                    )
+                    if entries:
+                        label_clean = ' '.join(val.strip().split())
+                        for _, _, coord in entries:
+                            self._dcf_unrecognized_tg_labels.append((label_clean, coord))
 
             if not row_matches:
                 detected_tags = {
@@ -1105,6 +1167,20 @@ class DCFModelValidator:
                 ),
                 skip_empty_when_uncached=True,
             )
+
+            # Warn on unrecognized terminal-growth-like labels whose rate cells are not owned by a TG named range
+            seen_unrecognized_tg: set[tuple[str, str]] = set()
+            for label_text, coord in self._dcf_unrecognized_tg_labels:
+                if coord in owned_tg_coords:
+                    continue
+                key = (label_text, coord)
+                if key in seen_unrecognized_tg:
+                    continue
+                seen_unrecognized_tg.add(key)
+                self.warnings.append(
+                    f"Unrecognized terminal-growth-like label '{label_text}' at {coord} — "
+                    "define a TerminalGrowth* named range if this is a DCF terminal growth assumption."
+                )
 
             has_any_tg = bool(self._named_scenario_tg) or named_tg is not None or bool(unnamed_tg_rows)
             has_any_wacc = bool(all_waccs)
@@ -1429,13 +1505,13 @@ class DCFModelValidator:
             )
             enterprise_value: Optional[float] = named_ev[0] if named_ev is not None else None
 
-            # When explicitly bound named ranges are non-positive, warn directly instead of
-            # falling through to label-scan unrelated rows (e.g., Exit Multiple TV).
+            # When explicitly bound named EnterpriseValue is non-positive, record a CRITICAL error
+            # instead of only warning or falling through to label-scan unrelated rows.
             if enterprise_value is not None and enterprise_value <= 0:
                 ev_loc = f" at {named_ev[1]}" if named_ev is not None else ""
-                self.warnings.append(
-                    f"Enterprise Value ({enterprise_value:,.2f}{ev_loc}) is non-positive — "
-                    "skipping TV % of EV ratio check (verify cash flows, WACC, and terminal growth)."
+                self.errors.append(
+                    f"CRITICAL: Named EnterpriseValue ({enterprise_value:,.2f}{ev_loc}) is non-positive — "
+                    "check DCF assumptions, terminal value, and WACC > g."
                 )
                 return
             if terminal_value is not None and terminal_value <= 0:

@@ -4552,13 +4552,17 @@ class TestValidateDcf(unittest.TestCase):
                 any("Terminal growth (250.00% at DCF!C57) >= WACC" in e for e in res_c3["errors"]),
                 res_c3["errors"],
             )
+            self.assertTrue(
+                any("Terminal growth (250.00% at DCF!C94) >= WACC" in e for e in res_c3["errors"]),
+                res_c3["errors"],
+            )
             self.assertFalse(
                 any("typically should be 50-70%" in w for w in res_c3["warnings"]),
                 f"Bogus Exit Multiple TV % of EV warning emitted: {res_c3['warnings']}",
             )
             self.assertTrue(
-                any("is non-positive" in w for w in res_c3["warnings"]),
-                f"Expected explicit non-positive TV/EV warning, got: {res_c3['warnings']}",
+                any("PV of Terminal Value" in w and "is non-positive" in w for w in res_c3["warnings"]),
+                f"Expected explicit non-positive PV of Terminal Value warning, got: {res_c3['warnings']}",
             )
 
     def test_named_invalid_wacc_negative_tv_ev_and_non_numeric_named_cells(self) -> None:
@@ -4669,12 +4673,29 @@ class TestValidateDcf(unittest.TestCase):
                         f"Should not cross-pair Bull TG against another scenario's WACC: {res_bw['info']}",
                     )
 
-            # 5. Non-positive or non-numeric named PV_TerminalValue / EnterpriseValue (including partial naming)
-            #    must warn cleanly and NEVER fall back to pair Exit Multiple TV (2500) with EV (1000) -> 250%
+            # 5. Non-positive named EnterpriseValue MUST FAIL with CRITICAL error; non-positive named PV_TerminalValue
+            #    (when EV > 0 / unnamed) or non-numeric PV_TV/EV warns cleanly, and NONE may fall back to mis-pair
+            #    Exit Multiple TV (2500) with EV (1000) -> 250%
             for label, kwargs in (
-                ("neg_pv_tv_only_named", {"pv_tv": -500.0, "define_ev": False}),
                 ("neg_ev_both_named", {"pv_tv": -500.0, "ev": -200.0}),
                 ("zero_ev_only_named", {"ev": 0.0, "define_pv_tv": False}),
+            ):
+                with self.subTest(case=label):
+                    p_ev = Path(tmp) / f"tv_{label}.xlsx"
+                    _make_named_wb(p_ev, **kwargs)
+                    res_ev = validate_dcf_mod.validate_dcf_model(str(p_ev))
+                    self.assertEqual(res_ev["status"], "FAIL", res_ev)
+                    self.assertFalse(
+                        any("typically should be 50-70%" in w for w in res_ev["warnings"]),
+                        f"Mis-paired Exit Multiple TV on {label}: {res_ev['warnings']}",
+                    )
+                    self.assertTrue(
+                        any("CRITICAL: Named EnterpriseValue" in e and "is non-positive" in e for e in res_ev["errors"]),
+                        res_ev["errors"],
+                    )
+
+            for label, kwargs in (
+                ("neg_pv_tv_only_named", {"pv_tv": -500.0, "define_ev": False}),
                 ("nm_pv_tv", {"pv_tv": "NM"}),
             ):
                 with self.subTest(case=label):
@@ -6363,6 +6384,197 @@ class TestValidateDcf(unittest.TestCase):
                 res["errors"],
             )
 
+    def test_tg_trailing_suffixes_and_unrecognized_tg_like_label_warning(self) -> None:
+        from openpyxl.workbook.defined_name import DefinedName
+
+        is_tg = validate_dcf_mod._is_terminal_growth_label
+        tag_of = validate_dcf_mod.DCFModelValidator._single_scenario_tag
+
+        for positive in (
+            "Terminal Growth Rate - Bull",
+            "Terminal Growth Rate - Bull Case",
+            "Terminal Growth Rate — Bear",
+            "Terminal Growth Rate: Base Case",
+            "Terminal Growth Rate Bull",
+            "Terminal Growth Rate Bull Case",
+            "Terminal Growth Rate Upside",
+            "Terminal Growth Rate Downside",
+            "Terminal Growth Rate Active Case",
+            "Terminal Growth Rate %",
+            "Terminal Growth Rate*",
+            "Terminal Growth Rate [ASSUMPTION]",
+            "Terminal Growth Rate (long-run GDP)",
+            "Terminal Growth Rate (g, %)",
+            "Terminal Growth Rate - Bull (%) [ASSUMPTION]*",
+            "Terminal Growth Rate in %",
+            "Terminal Growth Rate bps",
+            "Perpetuity Growth Rate (perpetuity)†",
+        ):
+            with self.subTest(positive=positive):
+                self.assertTrue(is_tg(positive), f"Expected TG label match for {positive!r}")
+
+        self.assertEqual(tag_of("Terminal Growth Rate - Bull"), "bull")
+        self.assertEqual(tag_of("Terminal Growth Rate - Bull (%) [ASSUMPTION]*"), "bull")
+        self.assertEqual(tag_of("Terminal Growth Rate — Bear"), "bear")
+        self.assertEqual(tag_of("Terminal Growth Rate: Base Case"), "base")
+
+        # Excluded ratio/implied/sensitivity labels MUST stay rejected
+        for excluded in (
+            "Terminal Value % of EV (Perpetuity Growth)",
+            "PV of Terminal Value (Perpetuity Growth)",
+            "Terminal Value (Perpetuity Growth Method)",
+            "Implied Terminal Growth Rate",
+            "Terminal Growth Rate (Implied)",
+            "Terminal Growth Sensitivity",
+            "Terminal Growth vs. GDP",
+        ):
+            with self.subTest(excluded=excluded):
+                self.assertFalse(is_tg(excluded), f"Unexpected TG label match for {excluded!r}")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # 1. Exact repro: "Terminal Growth Rate - Bull" = 12% with WACC = 9% -> MUST FAIL
+            p_bull = Path(tmp) / "tg_suffix_bull_fail.xlsx"
+            wb = openpyxl.Workbook()
+            ws_dcf = wb.active
+            ws_dcf.title = "DCF"
+            ws_dcf["A2"] = "Terminal Growth Rate - Bull"
+            ws_dcf["B2"] = 0.12
+            ws_dcf["A5"] = "PV of Terminal Value"
+            ws_dcf["B5"] = 600.0
+            ws_dcf["A6"] = "Enterprise Value"
+            ws_dcf["B6"] = 1000.0
+            ws_dcf["A10"] = "Sensitivity Analysis"
+            ws_wacc = wb.create_sheet("WACC")
+            ws_wacc["A2"] = "WACC"
+            ws_wacc["B2"] = 0.09
+            wb.save(p_bull)
+            wb.close()
+
+            res_bull = validate_dcf_mod.validate_dcf_model(str(p_bull))
+            self.assertEqual(res_bull["status"], "FAIL", res_bull)
+            self.assertTrue(
+                any("CRITICAL: Terminal growth (12.00% at DCF!B2) >= WACC (9.00% at WACC!B2)" in e for e in res_bull["errors"]),
+                res_bull["errors"],
+            )
+
+            # 2. Scenario tag pairing: "Terminal Growth Rate - Bull" (12%) pairs with Bull WACC (11%) even when Base WACC is 15%
+            p_pair = Path(tmp) / "tg_suffix_bull_pair.xlsx"
+            wb_p = openpyxl.Workbook()
+            ws_dp = wb_p.active
+            ws_dp.title = "DCF"
+            ws_dp["A2"] = "Terminal Growth Rate - Bull"
+            ws_dp["B2"] = 0.12
+            ws_dp["A3"] = "Terminal Growth Rate - Base"
+            ws_dp["B3"] = 0.025
+            ws_dp["A5"] = "PV of Terminal Value"
+            ws_dp["B5"] = 600.0
+            ws_dp["A6"] = "Enterprise Value"
+            ws_dp["B6"] = 1000.0
+            ws_dp["A10"] = "Sensitivity Analysis"
+            ws_wp = wb_p.create_sheet("WACC")
+            ws_wp["A2"] = "Bull WACC"
+            ws_wp["B2"] = 0.11
+            ws_wp["A3"] = "Base WACC"
+            ws_wp["B3"] = 0.15
+            wb_p.save(p_pair)
+            wb_p.close()
+
+            res_pair = validate_dcf_mod.validate_dcf_model(str(p_pair))
+            self.assertEqual(res_pair["status"], "FAIL", res_pair)
+            self.assertTrue(
+                any("Terminal growth (12.00% at DCF!B2) >= WACC (11.00% at WACC!B2)" in e for e in res_pair["errors"]),
+                res_pair["errors"],
+            )
+
+            # 3. Excluded labels ("Terminal Value % of EV (Perpetuity Growth)", "Implied Terminal Growth Rate")
+            #    MUST STILL PASS with 0 errors and 0 warnings (no unrecognized-label warning!)
+            p_excl = Path(tmp) / "tg_excluded_zero_warnings.xlsx"
+            self._build_compliant_two_sheet_dcf(p_excl, with_formula=False)
+            wb_e = openpyxl.load_workbook(p_excl)
+            wb_e["DCF"]["A8"] = "Terminal Value % of EV (Perpetuity Growth)"
+            wb_e["DCF"]["B8"] = 0.65
+            wb_e["DCF"]["A9"] = "Implied Terminal Growth Rate"
+            wb_e["DCF"]["B9"] = 0.04
+            wb_e.save(p_excl)
+            wb_e.close()
+
+            res_excl = validate_dcf_mod.validate_dcf_model(str(p_excl))
+            self.assertEqual(res_excl["status"], "PASS", res_excl)
+            self.assertEqual(res_excl["error_count"], 0, res_excl["errors"])
+            self.assertEqual(res_excl["warning_count"], 0, res_excl["warnings"])
+
+            # 4. Novel non-excluded label containing "terminal" + "growth" emits an unrecognized-label warning;
+            #    defining a TerminalGrowth named range on that cell suppresses the warning.
+            p_unrec = Path(tmp) / "tg_unrecognized_label.xlsx"
+            self._build_compliant_two_sheet_dcf(p_unrec, with_formula=False)
+            wb_u = openpyxl.load_workbook(p_unrec)
+            wb_u["DCF"]["A8"] = "Management Guidance Terminal Growth Floor"
+            wb_u["DCF"]["B8"] = 0.03
+            wb_u.save(p_unrec)
+            wb_u.close()
+
+            res_unrec = validate_dcf_mod.validate_dcf_model(str(p_unrec))
+            self.assertEqual(res_unrec["status"], "PASS", res_unrec)
+            self.assertEqual(res_unrec["error_count"], 0, res_unrec["errors"])
+            self.assertTrue(
+                any(
+                    "Unrecognized terminal-growth-like label 'Management Guidance Terminal Growth Floor' at DCF!B8" in w
+                    for w in res_unrec["warnings"]
+                ),
+                res_unrec["warnings"],
+            )
+
+            # Once owned by a TerminalGrowth named range, the unrecognized-label warning is suppressed
+            wb_u2 = openpyxl.load_workbook(p_unrec)
+            wb_u2.defined_names["TerminalGrowth"] = DefinedName("TerminalGrowth", attr_text="DCF!$B$8")
+            wb_u2.save(p_unrec)
+            wb_u2.close()
+
+            res_owned = validate_dcf_mod.validate_dcf_model(str(p_unrec))
+            self.assertEqual(res_owned["status"], "PASS", res_owned)
+            self.assertFalse(
+                any("Unrecognized terminal-growth-like label" in w for w in res_owned["warnings"]),
+                res_owned["warnings"],
+            )
+
+    def test_non_positive_named_enterprise_value_fails_even_with_valid_tg_wacc(self) -> None:
+        from openpyxl.workbook.defined_name import DefinedName
+
+        with tempfile.TemporaryDirectory() as tmp:
+            for ev_val, ev_fmt in ((-500.0, "-500.00"), (0.0, "0.00")):
+                with self.subTest(ev_val=ev_val):
+                    path = Path(tmp) / f"non_positive_ev_{str(ev_val).replace('-', 'neg_').replace('.', '_')}.xlsx"
+                    wb = openpyxl.Workbook()
+                    ws_dcf = wb.active
+                    ws_dcf.title = "DCF"
+                    ws_dcf["A2"] = "Terminal Growth Rate"
+                    ws_dcf["B2"] = 0.025
+                    ws_dcf["A4"] = "PV of Terminal Value"
+                    ws_dcf["B4"] = 600.0
+                    ws_dcf["A5"] = "Enterprise Value"
+                    ws_dcf["B5"] = ev_val
+                    ws_dcf["A10"] = "Sensitivity Analysis"
+                    ws_wacc = wb.create_sheet("WACC")
+                    ws_wacc["A2"] = "WACC"
+                    ws_wacc["B2"] = 0.095
+
+                    wb.defined_names["DCF_WACC"] = DefinedName("DCF_WACC", attr_text="WACC!$B$2")
+                    wb.defined_names["TerminalGrowth"] = DefinedName("TerminalGrowth", attr_text="DCF!$B$2")
+                    wb.defined_names["PV_TerminalValue"] = DefinedName("PV_TerminalValue", attr_text="DCF!$B$4")
+                    wb.defined_names["EnterpriseValue"] = DefinedName("EnterpriseValue", attr_text="DCF!$B$5")
+                    wb.save(path)
+                    wb.close()
+
+                    res = validate_dcf_mod.validate_dcf_model(str(path))
+                    self.assertEqual(res["status"], "FAIL", res)
+                    self.assertTrue(
+                        any(
+                            f"CRITICAL: Named EnterpriseValue ({ev_fmt} at DCF!B5) is non-positive" in e
+                            for e in res["errors"]
+                        ),
+                        res["errors"],
+                    )
+
 
 @_skip_unless_required(openpyxl is None, "openpyxl is required for DCF skeleton tests")
 class TestBuildDcfSkeleton(unittest.TestCase):
@@ -6499,7 +6711,7 @@ class TestBuildDcfSkeleton(unittest.TestCase):
                     expected_names = {
                         "Case": ("DCF", "$B$4"),
                         "DCF_WACC": ("WACC", "$C$30"),
-                        "TerminalGrowth": ("DCF", "$C$69"),
+                        "TerminalGrowth": ("DCF", "$C$94"),
                         "TerminalGrowth_Bear": ("DCF", "$C$33"),
                         "TerminalGrowth_Base": ("DCF", "$C$45"),
                         "TerminalGrowth_Bull": ("DCF", "$C$57"),
@@ -6742,6 +6954,49 @@ class TestBuildDcfSkeleton(unittest.TestCase):
                 self.assertAlmostEqual(float(ws_w0["C30"].value), expected_wacc0, places=8)
             finally:
                 wb0_v.close()
+
+    @_skip_unless_required(
+        recalc_xlsx_mod.find_soffice() is None,
+        "LibreOffice (soffice) is required for DCF!C94 override integration test",
+    )
+    def test_overriding_c94_terminal_growth_above_wacc_fails_with_critical_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            model_path = Path(tmp) / "skeleton_c94_override.xlsx"
+            build_proc = subprocess.run(
+                [sys.executable, str(BUILD_DCF_SKELETON_PATH), "--output", str(model_path), "--case", "2"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(build_proc.returncode, 0, build_proc.stdout + build_proc.stderr)
+
+            # Exact repro: overwrite DCF!C94 (Active Terminal Growth feeding TV formula C95) to 12% > WACC
+            wb = openpyxl.load_workbook(model_path)
+            wb["DCF"]["C94"] = 0.12
+            wb.save(model_path)
+            wb.close()
+
+            recalc_proc = subprocess.run(
+                [sys.executable, str(RECALC_XLSX_PATH), str(model_path), "30", "--in-place"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(recalc_proc.returncode, 0, recalc_proc.stdout + recalc_proc.stderr)
+
+            res = validate_dcf_mod.validate_dcf_model(str(model_path))
+            self.assertEqual(res["status"], "FAIL", res)
+            self.assertTrue(
+                any("CRITICAL: Terminal growth (12.00% at DCF!C94) >= WACC" in e for e in res["errors"]),
+                res["errors"],
+            )
+            self.assertTrue(
+                any(
+                    "CRITICAL: Named EnterpriseValue" in e and "DCF!C100" in e and "is non-positive" in e
+                    for e in res["errors"]
+                ),
+                res["errors"],
+            )
 
 
 if __name__ == "__main__":

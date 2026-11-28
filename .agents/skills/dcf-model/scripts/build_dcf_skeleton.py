@@ -835,7 +835,7 @@ def _build_dcf_sheet(ws, wb: openpyxl.Workbook, default_case: int = 2) -> None:
     ROW_TG_BASE = scenario_specs[1][0] + 2 + TG_OFFSET  # 45
     ROW_TG_BULL = scenario_specs[2][0] + 2 + TG_OFFSET  # 57
     wb.defined_names["DCF_WACC"] = DefinedName("DCF_WACC", attr_text=f"WACC!$C${WACC_OUTPUT_ROW}")
-    wb.defined_names["TerminalGrowth"] = DefinedName("TerminalGrowth", attr_text=f"DCF!$C${ROW_ACT_TG}")
+    wb.defined_names["TerminalGrowth"] = DefinedName("TerminalGrowth", attr_text=f"DCF!$C${ROW_TERM_G}")
     wb.defined_names["TerminalGrowth_Bear"] = DefinedName("TerminalGrowth_Bear", attr_text=f"DCF!$C${ROW_TG_BEAR}")
     wb.defined_names["TerminalGrowth_Base"] = DefinedName("TerminalGrowth_Base", attr_text=f"DCF!$C${ROW_TG_BASE}")
     wb.defined_names["TerminalGrowth_Bull"] = DefinedName("TerminalGrowth_Bull", attr_text=f"DCF!$C${ROW_TG_BULL}")
