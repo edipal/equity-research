@@ -6575,6 +6575,83 @@ class TestValidateDcf(unittest.TestCase):
                         res["errors"],
                     )
 
+    def test_tg_macro_benchmark_and_eps_labels_excluded_without_warnings(self) -> None:
+        is_tg = validate_dcf_mod._is_terminal_growth_label
+        is_unrec = validate_dcf_mod._is_unrecognized_tg_like_label
+
+        # Explanatory parenthetical/bracket macro references remain valid TG labels (not unrecognized)
+        for valid_tg in (
+            "Terminal Growth Rate (long-run GDP)",
+            "Terminal Growth Rate [long-run GDP]",
+            "Terminal Growth Rate (Long-Run Inflation)",
+            "Terminal Growth Rate (CPI)",
+            "Terminal Growth Rate (long-run GDP) - Bull",
+        ):
+            with self.subTest(valid_tg=valid_tg):
+                self.assertTrue(is_tg(valid_tg), f"Expected TG match for {valid_tg!r}")
+                self.assertFalse(is_unrec(valid_tg), f"Unexpected unrecognized warning for {valid_tg!r}")
+
+        # Macro GDP/inflation/CPI benchmark rows and EPS growth rows must be rejected by BOTH matchers
+        macro_and_eps_rows = (
+            "US GDP Terminal Growth",
+            "Nominal GDP Growth (Terminal)",
+            "US Terminal GDP Growth Rate",
+            "Long-Run Inflation (Perpetuity Growth)",
+            "Global GDP Perpetual Growth",
+            "CPI Inflation Terminal Growth",
+            "Terminal Year EPS Growth",
+        )
+        for excluded_row in macro_and_eps_rows:
+            with self.subTest(excluded_row=excluded_row):
+                self.assertFalse(is_tg(excluded_row), f"Unexpected TG match for {excluded_row!r}")
+                self.assertFalse(
+                    is_unrec(excluded_row),
+                    f"Unexpected unrecognized-TG-like warning for {excluded_row!r}",
+                )
+
+        # Control: genuine novel unrecognized TG-like label still triggers the warning helper
+        self.assertFalse(is_tg("Management Guidance Terminal Growth Floor"))
+        self.assertTrue(is_unrec("Management Guidance Terminal Growth Floor"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # 1. Clean DCF workbook containing macro benchmark & EPS rows ABOVE the sensitivity banner
+            #    emits 0 errors and 0 warnings
+            p_clean = Path(tmp) / "tg_macro_benchmarks_clean.xlsx"
+            self._build_compliant_two_sheet_dcf(p_clean, with_formula=False)
+            wb = openpyxl.load_workbook(p_clean)
+            ws = wb["DCF"]
+            ws["A4"] = "Terminal Growth Rate (long-run GDP)"
+            ws["B4"] = 0.025
+            ws["A10"] = None
+            ws["A11"] = None
+            for offset, label in enumerate(macro_and_eps_rows, start=8):
+                ws[f"A{offset}"] = label
+                ws[f"B{offset}"] = 0.15  # High numeric value proves row is ignored, not treated as TG
+            ws["A20"] = "Sensitivity Analysis (WACC vs Terminal Growth)"
+            wb.save(p_clean)
+            wb.close()
+
+            res_clean = validate_dcf_mod.validate_dcf_model(str(p_clean))
+            self.assertEqual(res_clean["status"], "PASS", res_clean)
+            self.assertEqual(res_clean["error_count"], 0, res_clean["errors"])
+            self.assertEqual(res_clean["warning_count"], 0, res_clean["warnings"])
+
+            # 2. Parenthetical macro qualifier on a genuine TG row still enforces TG >= WACC check
+            p_fail = Path(tmp) / "tg_paren_gdp_high_fails.xlsx"
+            self._build_compliant_two_sheet_dcf(p_fail, with_formula=False)
+            wb_f = openpyxl.load_workbook(p_fail)
+            wb_f["DCF"]["A4"] = "Terminal Growth Rate (long-run GDP)"
+            wb_f["DCF"]["B4"] = 0.12
+            wb_f.save(p_fail)
+            wb_f.close()
+
+            res_fail = validate_dcf_mod.validate_dcf_model(str(p_fail))
+            self.assertEqual(res_fail["status"], "FAIL", res_fail)
+            self.assertTrue(
+                any("CRITICAL: Terminal growth (12.00% at DCF!B4) >= WACC" in e for e in res_fail["errors"]),
+                res_fail["errors"],
+            )
+
 
 @_skip_unless_required(openpyxl is None, "openpyxl is required for DCF skeleton tests")
 class TestBuildDcfSkeleton(unittest.TestCase):

@@ -99,13 +99,15 @@ TG_EXCLUDE_RE = re.compile(
     r'|\b(?:'
     r'terminal\s+value|percent\s+of|proportion|of\s+ev|of\s+enterprise|'
     r'pv\s+of|present\s+value|enterprise\s+value|implied|multiple|'
-    r'share\s+price|equity\s+value|ufcf|fcf|revenue|sales|ebitda|ebit|'
+    r'share\s+price|equity\s+value|ufcf|fcf|revenue|sales|ebitda|ebit|eps|'
     r'margin|wacc|discount\s+rate|spread|table|tables|note|notes|'
     r'check|checks|method|factor|factors|weight|weights|delta|change|'
     r'vs|versus|benchmark|consensus|peer|peers'
     r')\b)'
 )
+TG_CORE_MACRO_EXCLUDE_RE = re.compile(r'\b(?:gdp|inflation|cpi)\b')
 TG_BRACKET_TAG_RE = re.compile(r'\s*\[[^\]]*\]\s*')
+TG_PAREN_RE = re.compile(r'\s*\([^()]*\)\s*')
 TG_TRAILING_FOOTNOTE_RE = re.compile(r'[\s*†‡§¶¹²³⁴⁵⁶⁷⁸⁹⁰]+$')
 TG_TRAILING_PAREN_RE = re.compile(r'\s*\([^()]*\)\s*$')
 TG_TRAILING_UNIT_RE = re.compile(
@@ -377,12 +379,18 @@ def _is_wacc_label(text: str) -> bool:
     return False
 
 
+def _has_core_macro_exclude(low: str) -> bool:
+    """Return True when macro benchmark tokens (GDP/inflation/CPI) appear outside parens/brackets."""
+    unwrapped = TG_PAREN_RE.sub(' ', TG_BRACKET_TAG_RE.sub(' ', low))
+    return bool(TG_CORE_MACRO_EXCLUDE_RE.search(unwrapped))
+
+
 def _is_terminal_growth_label(text: str) -> bool:
     """Match genuine terminal/perpetuity growth rate labels while rejecting value/ratio outputs."""
     low = ' '.join(text.lower().strip().split())
     if not low or _is_sensitivity_header(low):
         return False
-    if TG_EXCLUDE_RE.search(low):
+    if TG_EXCLUDE_RE.search(low) or _has_core_macro_exclude(low):
         return False
 
     # Strip bracketed tags anywhere (e.g., "[ASSUMPTION]", "[E]", "[1]", "[UNSOURCED]")
@@ -420,7 +428,7 @@ def _is_terminal_growth_label(text: str) -> bool:
 def _is_unrecognized_tg_like_label(text: str) -> bool:
     """Return True for non-excluded labels containing terminal/perpetuity + growth that miss TG matching."""
     low = ' '.join(text.lower().strip().split())
-    if not low or _is_sensitivity_header(low) or TG_EXCLUDE_RE.search(low):
+    if not low or _is_sensitivity_header(low) or TG_EXCLUDE_RE.search(low) or _has_core_macro_exclude(low):
         return False
     if _is_terminal_growth_label(text):
         return False
