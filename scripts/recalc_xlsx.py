@@ -350,10 +350,6 @@ def _format_lossy_feature_summary(
     return f"{features_str}; details: {preview}"
 
 
-def scan_workbook(xlsx_path: Path) -> dict:
-    return scan_workbook_formulas(xlsx_path)
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -388,6 +384,7 @@ def main(argv: list[str] | None = None) -> int:
                 "Use the default non-destructive check (--check-only) for read-only auditing, "
                 "or pass --output <new.xlsx> to write a converted .xlsx copy."
             ),
+            extra={"lossy_features_inspected": False},
         )
 
     # Validate --output path (extension and parent directory) before invoking LibreOffice
@@ -452,6 +449,8 @@ def main(argv: list[str] | None = None) -> int:
     data_table_locs: list[str] = []
     lossy_features: list[str] = []
     lossy_feature_details: dict[str, list[str]] = {}
+    lossy_features_inspected = False
+    xml_inspection_failed = False
     pre_scan_uncached: int | None = None
     try:
         xml_info = inspect_workbook_xml(xlsx_path)
@@ -459,11 +458,28 @@ def main(argv: list[str] | None = None) -> int:
         pre_scan_uncached = xml_info["uncached_formulas"]
         lossy_features = xml_info.get("lossy_features", [])
         lossy_feature_details = xml_info.get("lossy_feature_details", {})
+        lossy_features_inspected = bool(
+            xml_info.get("lossy_features_inspected", xlsx_path.suffix.lower() in OOXML_ZIP_SUFFIXES)
+        )
     except WorkbookLoadError as exc:
+        xml_inspection_failed = True
         if is_in_place:
-            return _fail(xlsx_path, str(exc), source_file=err_source_file)
+            return _fail(
+                xlsx_path,
+                str(exc),
+                source_file=err_source_file,
+                extra={"lossy_features_inspected": False},
+            )
         warnings.append(
             f"Could not inspect input XML for Excel What-If data tables or uncached formulas: {exc}"
+        )
+
+    if not lossy_features_inspected and not xml_inspection_failed:
+        ext_label = xlsx_path.suffix.lower() or "(no extension)"
+        warnings.append(
+            f"Input format '{ext_label}' cannot be pre-inspected for lossy Excel features "
+            "(charts, pivot tables, VBA macros, controls); review output carefully or ask the user "
+            "before overwriting/editing."
         )
 
     if data_table_locs:
@@ -471,7 +487,10 @@ def main(argv: list[str] | None = None) -> int:
         if len(data_table_locs) > 5:
             locs_preview += f" (+{len(data_table_locs) - 5} more)"
         if is_in_place:
-            extra_dt: dict = {"data_tables": data_table_locs}
+            extra_dt: dict = {
+                "data_tables": data_table_locs,
+                "lossy_features_inspected": lossy_features_inspected,
+            }
             if lossy_features:
                 extra_dt["lossy_features"] = lossy_features
             if lossy_feature_details:
@@ -503,7 +522,10 @@ def main(argv: list[str] | None = None) -> int:
     if lossy_features:
         feature_summary = _format_lossy_feature_summary(lossy_features, lossy_feature_details)
         if is_in_place:
-            extra_lossy: dict = {"lossy_features": lossy_features}
+            extra_lossy: dict = {
+                "lossy_features": lossy_features,
+                "lossy_features_inspected": lossy_features_inspected,
+            }
             if lossy_feature_details:
                 extra_lossy["lossy_feature_details"] = lossy_feature_details
             return _fail(
@@ -582,7 +604,7 @@ def main(argv: list[str] | None = None) -> int:
             reported_file = xlsx_path
 
         try:
-            scan = scan_workbook(scan_target)
+            scan = scan_workbook_formulas(scan_target)
         except WorkbookLoadError as exc:
             return _fail(
                 reported_file,
@@ -625,6 +647,7 @@ def main(argv: list[str] | None = None) -> int:
         "uncached_formulas": scan["uncached_formulas"],
         "on_disk_uncached_formulas": on_disk_uncached,
         "data_table_formulas": max(scan["data_table_formulas"], len(data_table_locs)),
+        "lossy_features_inspected": lossy_features_inspected,
         "error_summary": scan["error_summary"],
     }
     if data_table_locs:

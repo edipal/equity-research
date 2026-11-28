@@ -177,10 +177,6 @@ _SAFE_REGEX_PARTS = (
     re.compile(r"^xl/tables/_rels/table\d+\.xml\.rels$"),
 )
 
-# Verified-safe worksheet <extLst><ext uri="..."> URIs (empty: neither openpyxl nor
-# LibreOffice 24.2 emits worksheet <extLst> elements on clean workbooks).
-_SAFE_WORKSHEET_EXT_URIS: frozenset[str] = frozenset()
-
 _LOSSY_WORKSHEET_EXT_URIS: dict[str, str] = {
     "{05C60535-1F16-4FD2-B633-F4F36F0B64E0}": "sparklines",
     "{78C0D931-6437-407D-A8EE-F0AAD7539E65}": "x14_conditional_formatting",
@@ -317,6 +313,9 @@ def inspect_workbook_xml(xlsx_path: Path) -> dict[str, Any]:
           ``lossy_features`` to the sorted list of exact offending zip member paths or
           ``<sheet_xml>:<ext_uri>`` / ``<sheet_xml>:sparklineGroups`` /
           ``<sheet_xml>:<missing-uri>`` identifiers.
+        - ``"lossy_features_inspected"``: ``True`` when the workbook is an OOXML archive
+          whose manifest and worksheet XML were pre-inspected, or ``False`` for non-OOXML
+          formats (e.g., ``.xls``, ``.ods``) that cannot be pre-inspected.
 
     Fails closed by raising ``WorkbookLoadError`` on corrupt OOXML archives or malformed XML.
     """
@@ -326,6 +325,7 @@ def inspect_workbook_xml(xlsx_path: Path) -> dict[str, Any]:
             "uncached_formulas": None,
             "lossy_features": [],
             "lossy_feature_details": {},
+            "lossy_features_inspected": False,
         }
     try:
         locations: list[str] = []
@@ -378,14 +378,13 @@ def inspect_workbook_xml(xlsx_path: Path) -> dict[str, Any]:
                                 ext_lst_depth += 1
                             elif ext_lst_depth > 0 and local == "ext":
                                 uri = (elem.attrib.get("uri") or "").strip().upper()
-                                if uri not in _SAFE_WORKSHEET_EXT_URIS:
-                                    category = _LOSSY_WORKSHEET_EXT_URIS.get(
-                                        uri, "worksheet_extensions"
-                                    )
-                                    uri_label = uri or "<missing-uri>"
-                                    lossy_details.setdefault(category, set()).add(
-                                        f"{entry}:{uri_label}"
-                                    )
+                                category = _LOSSY_WORKSHEET_EXT_URIS.get(
+                                    uri, "worksheet_extensions"
+                                )
+                                uri_label = uri or "<missing-uri>"
+                                lossy_details.setdefault(category, set()).add(
+                                    f"{entry}:{uri_label}"
+                                )
                             elif local == "sparklineGroups":
                                 lossy_details.setdefault("sparklines", set()).add(
                                     f"{entry}:sparklineGroups"
@@ -420,6 +419,7 @@ def inspect_workbook_xml(xlsx_path: Path) -> dict[str, Any]:
                 category: sorted(details)
                 for category, details in sorted(lossy_details.items())
             },
+            "lossy_features_inspected": True,
         }
     except (zipfile.BadZipFile, ET.ParseError, KeyError, OSError) as exc:
         raise WorkbookLoadError(
@@ -427,23 +427,11 @@ def inspect_workbook_xml(xlsx_path: Path) -> dict[str, Any]:
         ) from exc
 
 
-def workbook_has_data_tables(xlsx_path: Path) -> list[str]:
-    """Return list of Excel What-If data table locations (<f t="dataTable">) in an OOXML workbook.
-
-    Thin wrapper around ``inspect_workbook_xml`` so existing callers share the same
-    fail-closed streaming XML inspection.
-    """
-    return inspect_workbook_xml(xlsx_path)["data_tables"]
-
-
-_DEFAULT_CAPTURED_GRID_SHEETS = frozenset({"dcf", "wacc", "sensitivity"})
-
-
 def scan_workbook_formulas(
     xlsx_path: Path,
     *,
     capture_sheet_grids: bool = False,
-    grid_sheet_names: Iterable[str] | None = _DEFAULT_CAPTURED_GRID_SHEETS,
+    grid_sheet_names: Iterable[str] | None = None,
     capture_defined_names: bool = False,
 ) -> dict[str, Any]:
     """Scan all worksheets in lockstep using openpyxl read_only=True streaming mode.
@@ -453,13 +441,14 @@ def scan_workbook_formulas(
 
     When *capture_sheet_grids* is True, also includes ``sheetnames`` (worksheet titles only,
     excluding chartsheets) and ``sheet_grids`` (sparse ``row -> col -> (value, coord)`` maps)
-    collected during the same single streaming pass. Full grids are captured only for sheets
-    matching *grid_sheet_names* (default: DCF / WACC / Sensitivity; pass ``None`` for all
-    sheets); non-target sheets referenced by captured single-cell defined names are
+    collected during the same single streaming pass. Full grids are captured for all sheets
+    when *grid_sheet_names* is ``None``, or only for sheets matching *grid_sheet_names*
+    case-insensitively; non-target sheets referenced by captured single-cell defined names are
     point-captured (storing only the targeted ``(row, col)`` cells, or ``{}`` when blank).
 
-    When *capture_defined_names* is True, also includes ``defined_names`` mapping workbook
-    defined name strings to resolved single-cell ``(sheet_name, row, col)`` tuples.
+    When *capture_defined_names* is True, also includes ``defined_names`` mapping workbook-
+    and worksheet-scoped defined name strings to resolved single-cell ``(sheet_name, row, col)``
+    tuples (precedence: workbook-global > DCF/WACC sheets > remaining sheets).
     """
     try:
         import openpyxl
@@ -512,30 +501,60 @@ def scan_workbook_formulas(
         )
         named_coords_by_sheet_lower: dict[str, set[tuple[int, int]]] = {}
         if capture_defined_names:
-            for dn_name, dn in wb_values.defined_names.items():
-                try:
-                    destinations = list(dn.destinations)
-                except Exception:
-                    continue
-                for sheet_title, ref in destinations:
-                    if not ref or ":" in ref:
+            resolved_names_lower: set[str] = set()
+
+            def _collect_defined_names(dn_container, owner_sheet_title: str | None = None) -> None:
+                if dn_container is None:
+                    return
+                for dn_name, dn in dn_container.items():
+                    dn_lower = dn_name.lower()
+                    if dn_lower in resolved_names_lower:
                         continue
-                    ref_clean = ref.replace("$", "").strip()
+                    destinations: list[tuple[str, str]] = []
                     try:
-                        r_idx, c_idx = coordinate_to_tuple(ref_clean)
+                        destinations = list(dn.destinations)
                     except Exception:
-                        continue
-                    unescaped_title = sheet_title.replace("''", "'")
-                    canon_title = (
-                        title_by_lower.get(unescaped_title.lower())
-                        or title_by_lower.get(sheet_title.lower())
-                        or unescaped_title
-                    )
-                    defined_names_map[dn_name] = (canon_title, r_idx, c_idx)
-                    canon_lower = canon_title.lower()
-                    if full_grid_sheets_lower is not None and canon_lower not in full_grid_sheets_lower:
-                        named_coords_by_sheet_lower.setdefault(canon_lower, set()).add((r_idx, c_idx))
-                    break
+                        attr_text = getattr(dn, "attr_text", None)
+                        if owner_sheet_title and isinstance(attr_text, str):
+                            raw_ref = attr_text.strip().lstrip("=")
+                            if (
+                                raw_ref
+                                and "!" not in raw_ref
+                                and "," not in raw_ref
+                                and ":" not in raw_ref
+                            ):
+                                destinations = [(owner_sheet_title, raw_ref)]
+                    for sheet_title, ref in destinations:
+                        if not ref or ":" in ref:
+                            continue
+                        ref_clean = ref.replace("$", "").strip()
+                        try:
+                            r_idx, c_idx = coordinate_to_tuple(ref_clean)
+                        except Exception:
+                            continue
+                        unescaped_title = sheet_title.replace("''", "'")
+                        canon_title = (
+                            title_by_lower.get(unescaped_title.lower())
+                            or title_by_lower.get(sheet_title.lower())
+                            or unescaped_title
+                        )
+                        defined_names_map[dn_name] = (canon_title, r_idx, c_idx)
+                        resolved_names_lower.add(dn_lower)
+                        canon_lower = canon_title.lower()
+                        if full_grid_sheets_lower is not None and canon_lower not in full_grid_sheets_lower:
+                            named_coords_by_sheet_lower.setdefault(canon_lower, set()).add((r_idx, c_idx))
+                        break
+
+            # Precedence: workbook-global > DCF/WACC sheet-scoped > other sheet-scoped
+            _collect_defined_names(wb_values.defined_names)
+            priority_sheets = [
+                ws for ws in wb_values.worksheets if ws.title.lower() in ("dcf", "wacc")
+            ]
+            other_sheets = [
+                ws for ws in wb_values.worksheets if ws.title.lower() not in ("dcf", "wacc")
+            ]
+            for ws in priority_sheets + other_sheets:
+                _collect_defined_names(getattr(ws, "defined_names", None), owner_sheet_title=ws.title)
 
         for ws_f in wb_formulas.worksheets:
             sheet_name = ws_f.title

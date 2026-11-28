@@ -16,8 +16,9 @@ out/
 *.bak
 
 # Office lock files & OS artifacts
-~$*.xlsx
+~$*.xls*
 ~$*.docx
 ~$*.pptx
+.~lock.*#
 .DS_Store
 Thumbs.db

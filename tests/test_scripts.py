@@ -49,6 +49,19 @@ xlsx_scan_mod = load_module("xlsx_scan", XLSX_SCAN_PATH)
 recalc_xlsx_mod = load_module("recalc_xlsx", RECALC_XLSX_PATH)
 validate_dcf_mod = load_module("validate_dcf", VALIDATE_DCF_PATH)
 
+REQUIRE_FULL_TEST_SUITE = os.environ.get("REQUIRE_FULL_TEST_SUITE", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
+
+def _skip_unless_required(condition: bool, reason: str):
+    """Skip test when condition is True unless REQUIRE_FULL_TEST_SUITE is enabled."""
+    if condition and not REQUIRE_FULL_TEST_SUITE:
+        return unittest.skip(reason)
+    return lambda obj: obj
+
 
 def create_minimal_valid_harness(base: Path) -> None:
     """Scaffold a minimal valid Antigravity harness in a temp directory."""
@@ -436,8 +449,64 @@ class TestValidateHarness(unittest.TestCase):
                 errors_fb, _, _ = validate_harness_mod.validate_harness(base)
                 self.assertEqual(errors_fb, [], f"CRLF fallback failed: {errors_fb}")
 
+    def test_full_test_suite_prerequisites_present_when_required(self) -> None:
+        if not REQUIRE_FULL_TEST_SUITE:
+            return
+        self.assertIsNotNone(openpyxl, "REQUIRE_FULL_TEST_SUITE=1 requires openpyxl")
+        self.assertIsNotNone(validate_harness_mod.yaml, "REQUIRE_FULL_TEST_SUITE=1 requires PyYAML")
+        self.assertIsNotNone(
+            recalc_xlsx_mod.find_soffice(),
+            "REQUIRE_FULL_TEST_SUITE=1 requires LibreOffice (soffice) on PATH",
+        )
 
-@unittest.skipIf(openpyxl is None, "openpyxl is required for Excel script tests")
+    def test_command_execution_policy_off_passes_under_pyyaml_and_fallback_while_true_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            create_minimal_valid_harness(base)
+            agent_md = base / ".agents" / "agents" / "sample-agent.md"
+            agent_md.write_text(
+                "---\nname: sample-agent\ndescription: Sample agent.\nmainAgent: true\n"
+                "subagent: true\nmodel: inherit\ncommandExecutionPolicy: off\n---\n\n# Prompt\n",
+                encoding="utf-8",
+            )
+
+            # 1. Under active parser (PyYAML when installed, else fallback) -> PASS
+            errors_default, _, _ = validate_harness_mod.validate_harness(base)
+            self.assertEqual(errors_default, [], f"Unquoted policy 'off' failed: {errors_default}")
+
+            # 2. Explicitly under stdlib fallback -> PASS
+            with mock.patch.object(validate_harness_mod, "yaml", None):
+                errors_fb, _, _ = validate_harness_mod.validate_harness(base)
+            self.assertEqual(errors_fb, [], f"Unquoted policy 'off' failed under fallback: {errors_fb}")
+
+            # 3. Explicitly verify PyYAML parses unquoted `off` as False and validator normalizes it
+            if validate_harness_mod.yaml is not None:
+                fm_pyyaml, _, fm_errs = validate_harness_mod.parse_frontmatter(agent_md, root=base)
+                self.assertEqual(fm_errs, [])
+                self.assertIs(fm_pyyaml["commandExecutionPolicy"], False)
+
+            # 4. Invalid boolean/on values (true, on) MUST fail under both PyYAML and fallback
+            for bad_val in ("true", "on"):
+                with self.subTest(bad_policy=bad_val):
+                    agent_md.write_text(
+                        "---\nname: sample-agent\ndescription: Sample agent.\nmainAgent: true\n"
+                        f"subagent: true\nmodel: inherit\ncommandExecutionPolicy: {bad_val}\n---\n\n# Prompt\n",
+                        encoding="utf-8",
+                    )
+                    errs_active, _, _ = validate_harness_mod.validate_harness(base)
+                    self.assertTrue(
+                        any("invalid commandExecutionPolicy" in e for e in errs_active),
+                        f"Expected rejection for {bad_val!r}, got: {errs_active}",
+                    )
+                    with mock.patch.object(validate_harness_mod, "yaml", None):
+                        errs_fallback, _, _ = validate_harness_mod.validate_harness(base)
+                    self.assertTrue(
+                        any("invalid commandExecutionPolicy" in e for e in errs_fallback),
+                        f"Expected fallback rejection for {bad_val!r}, got: {errs_fallback}",
+                    )
+
+
+@_skip_unless_required(openpyxl is None, "openpyxl is required for Excel script tests")
 class TestRecalcXlsx(unittest.TestCase):
     def _run_main(self, argv: list[str]) -> tuple[int, dict]:
         buf = io.StringIO()
@@ -1033,7 +1102,7 @@ class TestRecalcXlsx(unittest.TestCase):
                         break
                 self.assertFalse(alive, f"Orphaned child PID {child_pid} survived timeout!")
 
-    @unittest.skipIf(
+    @_skip_unless_required(
         recalc_xlsx_mod.find_soffice() is None,
         "LibreOffice (soffice) is required for real recalculation integration test",
     )
@@ -1140,7 +1209,7 @@ class TestRecalcXlsx(unittest.TestCase):
             orig_bytes = path.read_bytes()
 
             # 1. XML detector finds the data table location accurately
-            locs = xlsx_scan_mod.workbook_has_data_tables(path)
+            locs = xlsx_scan_mod.inspect_workbook_xml(path)["data_tables"]
             self.assertEqual(locs, ["Sensitivity!C3:D4"])
 
             # 2. Scan-only (no soffice): counts DataTableFormula in total_formulas and data_table_formulas
@@ -1463,9 +1532,9 @@ class TestRecalcXlsx(unittest.TestCase):
 
             corrupt_bytes = path.read_bytes()
 
-            # 1. workbook_has_data_tables MUST fail closed by raising WorkbookLoadError
+            # 1. inspect_workbook_xml MUST fail closed by raising WorkbookLoadError
             with self.assertRaises(xlsx_scan_mod.WorkbookLoadError):
-                xlsx_scan_mod.workbook_has_data_tables(path)
+                xlsx_scan_mod.inspect_workbook_xml(path)
 
             # 2. recalc_xlsx.py --in-place MUST exit 1 without invoking LibreOffice or modifying the file
             with (
@@ -1579,7 +1648,7 @@ class TestRecalcXlsx(unittest.TestCase):
             self.assertEqual(payload_ref["total_errors"], 1)
             self.assertEqual(payload_ref["error_summary"]["#REF!"]["locations"], ["BrokenRef!A1"])
 
-    @unittest.skipIf(
+    @_skip_unless_required(
         recalc_xlsx_mod.find_soffice() is None,
         "LibreOffice (soffice) is required for on_disk_uncached_formulas integration test",
     )
@@ -1624,7 +1693,7 @@ class TestRecalcXlsx(unittest.TestCase):
             self.assertEqual(payload_after["on_disk_uncached_formulas"], 0)
             self.assertNotIn("Input file on disk still has", payload_after.get("warning", ""))
 
-    @unittest.skipIf(
+    @_skip_unless_required(
         recalc_xlsx_mod.find_soffice() is None,
         "LibreOffice (soffice) is required for real What-If data table pre-scan test",
     )
@@ -1745,7 +1814,7 @@ class TestRecalcXlsx(unittest.TestCase):
     def test_scan_workbook_missing_openpyxl_raises_workbook_load_error(self) -> None:
         with mock.patch.dict(sys.modules, {"openpyxl": None}):
             with self.assertRaises(recalc_xlsx_mod.WorkbookLoadError) as ctx:
-                recalc_xlsx_mod.scan_workbook(Path("dummy.xlsx"))
+                recalc_xlsx_mod.scan_workbook_formulas(Path("dummy.xlsx"))
         self.assertIn("openpyxl is required", str(ctx.exception))
 
     def test_inspect_workbook_xml_matches_scan_workbook_formulas_across_formula_types(self) -> None:
@@ -1836,15 +1905,12 @@ class TestRecalcXlsx(unittest.TestCase):
             self.assertEqual(xml_info["uncached_formulas"], 5, xml_info)
             self.assertEqual(xml_info["uncached_formulas"], scan_info["uncached_formulas"])
             self.assertEqual(xml_info["data_tables"], ["Model!E1:F2"])
-            self.assertEqual(
-                xlsx_scan_mod.workbook_has_data_tables(path),
-                xml_info["data_tables"],
-            )
-
+            self.assertTrue(xml_info["lossy_features_inspected"])
             self.assertEqual(xml_info["lossy_features"], [])
             self.assertEqual(xml_info["lossy_feature_details"], {})
 
-            # Non-OOXML legacy .xls returns empty data_tables, lossy_features, lossy_feature_details, and uncached_formulas=None
+            # Non-OOXML legacy .xls returns empty data_tables, lossy_features, lossy_feature_details,
+            # lossy_features_inspected=False, and uncached_formulas=None
             legacy_xls = Path(tmp) / "legacy.xls"
             legacy_xls.write_bytes(b"not-a-zip-legacy-xls")
             self.assertEqual(
@@ -1854,6 +1920,7 @@ class TestRecalcXlsx(unittest.TestCase):
                     "uncached_formulas": None,
                     "lossy_features": [],
                     "lossy_feature_details": {},
+                    "lossy_features_inspected": False,
                 },
             )
 
@@ -1863,7 +1930,7 @@ class TestRecalcXlsx(unittest.TestCase):
             with self.assertRaises(xlsx_scan_mod.WorkbookLoadError):
                 xlsx_scan_mod.inspect_workbook_xml(corrupt_xlsx)
 
-    @unittest.skipIf(
+    @_skip_unless_required(
         recalc_xlsx_mod.find_soffice() is None,
         "LibreOffice (soffice) is required for single-scan check-only regression test",
     )
@@ -1880,12 +1947,12 @@ class TestRecalcXlsx(unittest.TestCase):
             wb.close()
 
             orig_bytes = path.read_bytes()
-            real_scan = recalc_xlsx_mod.scan_workbook
+            real_scan = recalc_xlsx_mod.scan_workbook_formulas
 
             for flags in ([], ["--check-only"]):
                 with self.subTest(flags=flags):
                     with mock.patch.object(
-                        recalc_xlsx_mod, "scan_workbook", wraps=real_scan
+                        recalc_xlsx_mod, "scan_workbook_formulas", wraps=real_scan
                     ) as spy_scan:
                         rc, payload = self._run_main([str(path), "30", *flags])
 
@@ -1899,7 +1966,7 @@ class TestRecalcXlsx(unittest.TestCase):
                         "Input file on disk still has 2 uncached formula(s)",
                         payload.get("warning", ""),
                     )
-                    # Must call scan_workbook() EXACTLY ONCE (on LibreOffice temp copy, NEVER on input path)
+                    # Must call scan_workbook_formulas() EXACTLY ONCE (on LibreOffice temp copy, NEVER on input path)
                     self.assertEqual(spy_scan.call_count, 1)
                     scanned_target = spy_scan.call_args[0][0]
                     self.assertNotEqual(Path(scanned_target).resolve(), path.resolve())
@@ -2224,13 +2291,13 @@ class TestRecalcXlsx(unittest.TestCase):
             self.assertEqual(payload_copy.get("source_file"), expected_src)
             self.assertEqual(Path(payload_copy["file"]), out_path.resolve())
 
-            # 4. Post-recalc scan_workbook WorkbookLoadError under --output
+            # 4. Post-recalc scan_workbook_formulas WorkbookLoadError under --output
             with (
                 mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value="/usr/bin/soffice"),
                 mock.patch.object(recalc_xlsx_mod.subprocess, "Popen", side_effect=ok_popen),
                 mock.patch.object(
                     recalc_xlsx_mod,
-                    "scan_workbook",
+                    "scan_workbook_formulas",
                     side_effect=recalc_xlsx_mod.WorkbookLoadError("Corrupt output"),
                 ),
             ):
@@ -2886,9 +2953,99 @@ class TestRecalcXlsx(unittest.TestCase):
             self.assertIn("(+2 more)", payload_m["message"])
             self.assertIn("xl/webExtensions/webExtension1.xml", payload_m["message"])
             self.assertNotIn("xl/webExtensions/webExtension7.xml", payload_m["message"])
+            self.assertTrue(payload_m["lossy_features_inspected"])
+
+    def test_non_ooxml_xls_and_ods_report_lossy_features_inspected_false_with_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_p = Path(tmp)
+            # Clean .xlsx reference workbook to convert/copy in tests
+            clean_xlsx = tmp_p / "clean.xlsx"
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Model"
+            ws["A1"] = 10
+            ws["A2"] = "=A1*3"
+            wb.save(clean_xlsx)
+            wb.close()
+
+            # 1. Mocked .xls input -> check-only and --output report lossy_features_inspected=False + warning;
+            #    --in-place refuses cleanly with lossy_features_inspected=False.
+            legacy_xls = tmp_p / "legacy.xls"
+            legacy_xls.write_bytes(b"dummy-binary-xls-bytes")
+            out_xls_xlsx = tmp_p / "converted_from_xls.xlsx"
+
+            def fake_popen(cmd, **kwargs):
+                outdir = Path(cmd[cmd.index("--outdir") + 1])
+                src_arg = Path(cmd[-1])
+                shutil.copyfile(clean_xlsx, outdir / f"{src_arg.stem}.xlsx")
+                proc = mock.MagicMock()
+                proc.returncode = 0
+                proc.communicate.return_value = ("", "")
+                return proc
+
+            with (
+                mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value="/usr/bin/soffice"),
+                mock.patch.object(recalc_xlsx_mod.subprocess, "Popen", side_effect=fake_popen),
+            ):
+                rc_chk, payload_chk = self._run_main([str(legacy_xls)])
+                self.assertEqual(rc_chk, 0, payload_chk)
+                self.assertIs(payload_chk["lossy_features_inspected"], False)
+                self.assertIn("cannot be pre-inspected for lossy Excel features", payload_chk.get("warning", ""))
+                self.assertIn(".xls", payload_chk.get("warning", ""))
+
+                rc_out, payload_out = self._run_main([str(legacy_xls), "--output", str(out_xls_xlsx)])
+                self.assertEqual(rc_out, 0, payload_out)
+                self.assertIs(payload_out["lossy_features_inspected"], False)
+                self.assertIn("cannot be pre-inspected for lossy Excel features", payload_out.get("warning", ""))
+
+                rc_ip, payload_ip = self._run_main([str(legacy_xls), "--in-place"])
+                self.assertEqual(rc_ip, 1, payload_ip)
+                self.assertEqual(payload_ip["status"], "error")
+                self.assertIs(payload_ip["lossy_features_inspected"], False)
+
+            # 2. OOXML .xlsx reports lossy_features_inspected=True
+            with mock.patch.object(recalc_xlsx_mod, "find_soffice", return_value=None):
+                rc_xlsx, payload_xlsx = self._run_main([str(clean_xlsx), "--allow-unrecalculated"])
+            self.assertEqual(rc_xlsx, 0, payload_xlsx)
+            self.assertIs(payload_xlsx["lossy_features_inspected"], True)
+
+            # 3. Real LibreOffice .ods integration test when soffice is available
+            soffice = recalc_xlsx_mod.find_soffice()
+            if soffice is not None:
+                ods_dir = tmp_p / "ods_src"
+                ods_dir.mkdir()
+                lo_profile = tmp_p / "lo_ods_profile"
+                recalc_xlsx_mod.write_libreoffice_recalc_profile(lo_profile)
+                conv = subprocess.run(
+                    [
+                        soffice,
+                        f"-env:UserInstallation={lo_profile.as_uri()}",
+                        "--headless",
+                        "--norestore",
+                        "--nolockcheck",
+                        "--convert-to",
+                        "ods",
+                        "--outdir",
+                        str(ods_dir),
+                        str(clean_xlsx),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(conv.returncode, 0, conv.stdout + conv.stderr)
+                ods_path = ods_dir / "clean.ods"
+                self.assertTrue(ods_path.exists())
+
+                rc_ods, payload_ods = self._run_main([str(ods_path), "30", "--check-only"])
+                self.assertEqual(rc_ods, 0, payload_ods)
+                self.assertEqual(payload_ods["status"], "success")
+                self.assertIs(payload_ods["lossy_features_inspected"], False)
+                self.assertIn(".ods", payload_ods.get("warning", ""))
+                self.assertIn("cannot be pre-inspected for lossy Excel features", payload_ods.get("warning", ""))
 
 
-@unittest.skipIf(openpyxl is None, "openpyxl is required for DCF validation tests")
+@_skip_unless_required(openpyxl is None, "openpyxl is required for DCF validation tests")
 class TestValidateDcf(unittest.TestCase):
     def _build_compliant_two_sheet_dcf(self, path: Path, with_formula: bool = False) -> None:
         wb = openpyxl.Workbook()
@@ -2945,14 +3102,19 @@ class TestValidateDcf(unittest.TestCase):
             wb.save(path)
 
             results = validate_dcf_mod.validate_dcf_model(str(path))
-            # Missing required WACC sheet MUST cause FAIL (eliminating vacuous PASS)
-            self.assertEqual(results["status"], "FAIL", results)
-            self.assertTrue(any("Required sheet missing: WACC" in e for e in results["errors"]), results["errors"])
+            # Single-tab DCF with valid inline WACC passes without failing on missing separate WACC tab
+            self.assertEqual(results["status"], "PASS", results)
+            self.assertEqual(results["error_count"], 0, results["errors"])
+            self.assertEqual(results["warning_count"], 0, results["warnings"])
+            self.assertTrue(
+                any("No separate WACC sheet found; using WACC from DCF sheet / named range" in i for i in results["info"]),
+                results["info"],
+            )
             self.assertFalse(
                 any("AttributeError" in w or "has no attribute" in w for w in results["warnings"]),
                 results["warnings"],
             )
-            # WACC range check still falls back cleanly to DCF sheet
+            # WACC range check still evaluates cleanly from the DCF sheet
             self.assertTrue(any("WACC (10.00%) in reasonable range" in i for i in results["info"]))
 
     def test_uncached_formulas_cause_fail(self) -> None:
@@ -3243,7 +3405,7 @@ class TestValidateDcf(unittest.TestCase):
             res1 = validate_dcf_mod.validate_dcf_model(str(empty_default))
             self.assertEqual(res1["status"], "FAIL", res1)
             self.assertTrue(any("Required sheet missing: DCF" in e for e in res1["errors"]), res1["errors"])
-            self.assertTrue(any("Required sheet missing: WACC" in e for e in res1["errors"]), res1["errors"])
+            self.assertTrue(any("No dedicated WACC sheet found" in w for w in res1["warnings"]), res1["warnings"])
 
             # 2. Empty DCF + empty WACC sheets (missing critical DCF components)
             empty_tabs = Path(tmp) / "empty_tabs.xlsx"
@@ -3859,7 +4021,7 @@ class TestValidateDcf(unittest.TestCase):
                 res2["errors"],
             )
 
-    @unittest.skipIf(
+    @_skip_unless_required(
         recalc_xlsx_mod.find_soffice() is None,
         "LibreOffice (soffice) is required to evaluate build_dcf_skeleton.py",
     )
@@ -4322,6 +4484,8 @@ class TestValidateDcf(unittest.TestCase):
 
     def test_named_out_of_bounds_tg_and_negative_pv_tv_caught_without_exit_multiple_mis_pairing(self) -> None:
         if recalc_xlsx_mod.find_soffice() is None:
+            if REQUIRE_FULL_TEST_SUITE:
+                self.fail("REQUIRE_FULL_TEST_SUITE=1 requires LibreOffice (soffice)")
             self.skipTest("LibreOffice (soffice) is required for end-to-end DCF skeleton named-range repro")
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -5307,10 +5471,385 @@ class TestValidateDcf(unittest.TestCase):
                 res_bad["errors"],
             )
 
+    def test_terminal_growth_label_matcher_rejects_tv_pct_of_ev_and_accepts_valid_labels(self) -> None:
+        is_tg = validate_dcf_mod._is_terminal_growth_label
+        for positive in (
+            "Terminal Growth Rate",
+            "Terminal Growth",
+            "Terminal Growth Rate (g)",
+            "Terminal Growth (%)",
+            "Perpetuity Growth Rate",
+            "Perpetuity Growth",
+            "Long-Term Growth Rate",
+            "Long Term Growth Rate",
+            "Long-Term Growth",
+            "LTG",
+            "PGR",
+            "Bull Case Terminal Growth",
+            "Bear Case Terminal Growth Rate",
+            "Base Terminal Growth (g)",
+            "Upside Case Terminal Growth",
+            "Active Terminal Growth Rate (g)",
+            "Memo Long-Term Growth",
+        ):
+            with self.subTest(positive=positive):
+                self.assertTrue(is_tg(positive), f"Expected TG label match for {positive!r}")
 
-@unittest.skipIf(openpyxl is None, "openpyxl is required for DCF skeleton tests")
+        for negative in (
+            "Terminal Value % of EV (Perpetuity Growth)",
+            "PV of Terminal Value (Perpetuity Growth)",
+            "Terminal Value (Perpetuity Growth Method)",
+            "Terminal Value % of EV",
+            "Implied Terminal Growth Rate",
+            "Terminal Growth Sensitivity",
+            "Terminal Year Revenue Growth",
+            "Terminal Growth vs. GDP",
+            "Terminal Growth Spread",
+            "Terminal Growth Table",
+        ):
+            with self.subTest(negative=negative):
+                self.assertFalse(is_tg(negative), f"Unexpected TG label match for {negative!r}")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # 1. Without named ranges: TV % of EV (Perpetuity Growth) = 0.65 MUST PASS (0 errors, 0 warnings)
+            plain_path = Path(tmp) / "tv_pct_perpetuity_no_names.xlsx"
+            self._build_compliant_two_sheet_dcf(plain_path, with_formula=False)
+            wb = openpyxl.load_workbook(plain_path)
+            wb["DCF"]["A8"] = "Terminal Value % of EV (Perpetuity Growth)"
+            wb["DCF"]["B8"] = 0.65
+            wb.save(plain_path)
+            wb.close()
+
+            res_plain = validate_dcf_mod.validate_dcf_model(str(plain_path))
+            self.assertEqual(res_plain["status"], "PASS", res_plain)
+            self.assertEqual(res_plain["error_count"], 0, res_plain["errors"])
+            self.assertEqual(res_plain["warning_count"], 0, res_plain["warnings"])
+
+            # 2. With full named ranges on build_dcf_skeleton.py (real LibreOffice when available) -> PASS (0 errors, 0 warnings)
+            if recalc_xlsx_mod.find_soffice() is not None:
+                skel_path = Path(tmp) / "tv_pct_perpetuity_skeleton.xlsx"
+                build_proc = subprocess.run(
+                    [sys.executable, str(BUILD_DCF_SKELETON_PATH), "--output", str(skel_path), "--case", "2"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(build_proc.returncode, 0, build_proc.stdout + build_proc.stderr)
+
+                wb_s = openpyxl.load_workbook(skel_path)
+                wb_s["DCF"]["A113"] = "Terminal Value % of EV (Perpetuity Growth)"
+                wb_s.save(skel_path)
+                wb_s.close()
+
+                recalc_proc = subprocess.run(
+                    [sys.executable, str(RECALC_XLSX_PATH), str(skel_path), "30", "--in-place"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(recalc_proc.returncode, 0, recalc_proc.stdout + recalc_proc.stderr)
+
+                res_skel = validate_dcf_mod.validate_dcf_model(str(skel_path))
+                self.assertEqual(res_skel["status"], "PASS", res_skel)
+                self.assertEqual(res_skel["error_count"], 0, res_skel["errors"])
+                self.assertEqual(res_skel["warning_count"], 0, res_skel["warnings"])
+
+    def test_case_insensitive_dcf_wacc_tabs_and_optional_wacc_sheet_behavior(self) -> None:
+        from openpyxl.workbook.defined_name import DefinedName
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # 1. Lowercase "dcf" + "wacc" sheets -> PASS (0 errors, 0 warnings)
+            lower_path = Path(tmp) / "lowercase_tabs.xlsx"
+            wb_l = openpyxl.Workbook()
+            ws_dcf = wb_l.active
+            ws_dcf.title = "dcf"
+            ws_dcf["A2"] = "WACC"
+            ws_dcf["B2"] = 0.095
+            ws_dcf["A3"] = "Terminal Growth Rate"
+            ws_dcf["B3"] = 0.025
+            ws_dcf["A5"] = "PV of Terminal Value"
+            ws_dcf["B5"] = 600.0
+            ws_dcf["A6"] = "Enterprise Value"
+            ws_dcf["B6"] = 1000.0
+            ws_dcf["A10"] = "Sensitivity Analysis"
+
+            ws_wacc = wb_l.create_sheet("wacc")
+            ws_wacc["A2"] = "WEIGHTED AVERAGE COST OF CAPITAL"
+            ws_wacc["B2"] = 0.095
+            wb_l.save(lower_path)
+            wb_l.close()
+
+            res_lower = validate_dcf_mod.validate_dcf_model(str(lower_path))
+            self.assertEqual(res_lower["status"], "PASS", res_lower)
+            self.assertEqual(res_lower["error_count"], 0, res_lower["errors"])
+            self.assertEqual(res_lower["warning_count"], 0, res_lower["warnings"])
+            self.assertIn("Found sheet: dcf", res_lower["info"])
+            self.assertIn("Found sheet: wacc", res_lower["info"])
+
+            # 2. Single-tab "DCF" workbook with inline WACC (10%) & TG (2.5%) -> PASS (0 errors, 0 warnings)
+            inline_path = Path(tmp) / "single_tab_inline_wacc.xlsx"
+            wb_i = openpyxl.Workbook()
+            ws_i = wb_i.active
+            ws_i.title = "DCF"
+            ws_i["A2"] = "WACC"
+            ws_i["B2"] = 0.10
+            ws_i["A3"] = "Terminal Growth Rate"
+            ws_i["B3"] = 0.025
+            ws_i["A5"] = "PV of Terminal Value"
+            ws_i["B5"] = 600.0
+            ws_i["A6"] = "Enterprise Value"
+            ws_i["B6"] = 1000.0
+            ws_i["A10"] = "Sensitivity Analysis"
+            wb_i.save(inline_path)
+            wb_i.close()
+
+            res_inline = validate_dcf_mod.validate_dcf_model(str(inline_path))
+            self.assertEqual(res_inline["status"], "PASS", res_inline)
+            self.assertEqual(res_inline["error_count"], 0, res_inline["errors"])
+            self.assertEqual(res_inline["warning_count"], 0, res_inline["warnings"])
+            self.assertTrue(
+                any("No separate WACC sheet found; using WACC from DCF sheet / named range" in i for i in res_inline["info"]),
+                res_inline["info"],
+            )
+
+            # 3. Single-tab "DCF" + named DCF_WACC on third tab "Assumptions" -> PASS (0 errors, 0 warnings)
+            named_wacc_path = Path(tmp) / "single_tab_named_wacc.xlsx"
+            wb_n = openpyxl.Workbook()
+            ws_nd = wb_n.active
+            ws_nd.title = "Dcf"
+            ws_nd["A3"] = "Terminal Growth Rate"
+            ws_nd["B3"] = 0.025
+            ws_nd["A5"] = "PV of Terminal Value"
+            ws_nd["B5"] = 600.0
+            ws_nd["A6"] = "Enterprise Value"
+            ws_nd["B6"] = 1000.0
+            ws_nd["A10"] = "Sensitivity Analysis"
+            ws_assump = wb_n.create_sheet("Assumptions")
+            ws_assump["C4"] = 0.095
+            wb_n.defined_names["DCF_WACC"] = DefinedName("DCF_WACC", attr_text="Assumptions!$C$4")
+            wb_n.save(named_wacc_path)
+            wb_n.close()
+
+            res_named = validate_dcf_mod.validate_dcf_model(str(named_wacc_path))
+            self.assertEqual(res_named["status"], "PASS", res_named)
+            self.assertEqual(res_named["error_count"], 0, res_named["errors"])
+            self.assertEqual(res_named["warning_count"], 0, res_named["warnings"])
+
+            # 4. Single-tab "DCF" with NO WACC anywhere -> FAIL (missing WACC error + missing WACC sheet warning)
+            no_wacc_path = Path(tmp) / "single_tab_no_wacc.xlsx"
+            wb_nw = openpyxl.Workbook()
+            ws_nw = wb_nw.active
+            ws_nw.title = "DCF"
+            ws_nw["A3"] = "Terminal Growth Rate"
+            ws_nw["B3"] = 0.025
+            ws_nw["A5"] = "PV of Terminal Value"
+            ws_nw["B5"] = 600.0
+            ws_nw["A6"] = "Enterprise Value"
+            ws_nw["B6"] = 1000.0
+            ws_nw["A10"] = "Sensitivity Analysis"
+            wb_nw.save(no_wacc_path)
+            wb_nw.close()
+
+            res_nw = validate_dcf_mod.validate_dcf_model(str(no_wacc_path))
+            self.assertEqual(res_nw["status"], "FAIL", res_nw)
+            self.assertTrue(
+                any("Could not locate WACC value" in e for e in res_nw["errors"]),
+                res_nw["errors"],
+            )
+            self.assertTrue(
+                any("No dedicated WACC sheet found" in w for w in res_nw["warnings"]),
+                res_nw["warnings"],
+            )
+
+    def test_supplementary_unnamed_rates_warn_under_full_named_coverage_while_named_and_partial_still_fail(self) -> None:
+        from openpyxl.workbook.defined_name import DefinedName
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # 1. Skeleton (all 3 scenario TGs named) + extra unnamed memo TG = 15% -> PASS with warning;
+            #    making named TerminalGrowth_Bull = 15% -> FAIL!
+            if recalc_xlsx_mod.find_soffice() is not None:
+                skel_path = Path(tmp) / "skeleton_memo_tg.xlsx"
+                build_proc = subprocess.run(
+                    [sys.executable, str(BUILD_DCF_SKELETON_PATH), "--output", str(skel_path), "--case", "2"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(build_proc.returncode, 0, build_proc.stdout + build_proc.stderr)
+
+                wb = openpyxl.load_workbook(skel_path)
+                wb["DCF"]["A120"] = "Memo Long-Term Growth"
+                wb["DCF"]["C120"] = 0.15
+                wb.save(skel_path)
+                wb.close()
+
+                recalc_proc = subprocess.run(
+                    [sys.executable, str(RECALC_XLSX_PATH), str(skel_path), "30", "--in-place"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(recalc_proc.returncode, 0, recalc_proc.stdout + recalc_proc.stderr)
+
+                res_memo = validate_dcf_mod.validate_dcf_model(str(skel_path))
+                self.assertEqual(res_memo["status"], "PASS", res_memo)
+                self.assertEqual(res_memo["error_count"], 0, res_memo["errors"])
+                self.assertTrue(
+                    any("Supplementary unnamed terminal growth (15.00% at DCF!C120)" in w for w in res_memo["warnings"]),
+                    res_memo["warnings"],
+                )
+
+                # Now break named TerminalGrowth_Bull (DCF!C57) = 15% -> MUST still FAIL
+                wb_bad = openpyxl.load_workbook(skel_path)
+                wb_bad["DCF"]["C57"] = 0.15
+                wb_bad.save(skel_path)
+                wb_bad.close()
+
+                recalc_bad = subprocess.run(
+                    [sys.executable, str(RECALC_XLSX_PATH), str(skel_path), "30", "--in-place"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(recalc_bad.returncode, 0, recalc_bad.stdout + recalc_bad.stderr)
+
+                res_bad = validate_dcf_mod.validate_dcf_model(str(skel_path))
+                self.assertEqual(res_bad["status"], "FAIL", res_bad)
+                self.assertTrue(
+                    any("Terminal growth (15.00% at DCF!C57) >= WACC" in e for e in res_bad["errors"]),
+                    res_bad["errors"],
+                )
+
+            # 2. Full named coverage for BOTH scenario TGs AND scenario WACCs + extra unnamed WACC row = 1% ->
+            #    downgrades to warning (PASS with warning), while invalid named WACC_Base still FAILS.
+            full_named_path = Path(tmp) / "full_named_with_extra_unnamed_wacc.xlsx"
+            wb_f = openpyxl.Workbook()
+            ws_d = wb_f.active
+            ws_d.title = "DCF"
+            ws_d["A1"] = "Bear TG"
+            ws_d["B1"] = 0.02
+            ws_d["A2"] = "Base TG"
+            ws_d["B2"] = 0.025
+            ws_d["A3"] = "Bull TG"
+            ws_d["B3"] = 0.03
+            ws_d["A4"] = "PV of Terminal Value"
+            ws_d["B4"] = 600.0
+            ws_d["A5"] = "Enterprise Value"
+            ws_d["B5"] = 1000.0
+            ws_d["A7"] = "Base Case WACC"
+            ws_d["B7"] = 0.01  # Extra unnamed memo row (< Base TG 2.5%), while WACC_Bear/Base/Bull are all named
+            ws_d["A12"] = "Sensitivity Analysis"
+
+            ws_w = wb_f.create_sheet("WACC")
+            ws_w["A1"] = "Bear Rate"
+            ws_w["B1"] = 0.11
+            ws_w["A2"] = "Base Rate"
+            ws_w["B2"] = 0.09
+            ws_w["A3"] = "Bull Rate"
+            ws_w["B3"] = 0.08
+
+            wb_f.defined_names["DCF_WACC"] = DefinedName("DCF_WACC", attr_text="WACC!$B$2")
+            wb_f.defined_names["TerminalGrowth_Bear"] = DefinedName("TerminalGrowth_Bear", attr_text="DCF!$B$1")
+            wb_f.defined_names["TerminalGrowth_Base"] = DefinedName("TerminalGrowth_Base", attr_text="DCF!$B$2")
+            wb_f.defined_names["TerminalGrowth_Bull"] = DefinedName("TerminalGrowth_Bull", attr_text="DCF!$B$3")
+            wb_f.defined_names["WACC_Bear"] = DefinedName("WACC_Bear", attr_text="WACC!$B$1")
+            wb_f.defined_names["WACC_Base"] = DefinedName("WACC_Base", attr_text="WACC!$B$2")
+            wb_f.defined_names["WACC_Bull"] = DefinedName("WACC_Bull", attr_text="WACC!$B$3")
+            wb_f.defined_names["PV_TerminalValue"] = DefinedName("PV_TerminalValue", attr_text="DCF!$B$4")
+            wb_f.defined_names["EnterpriseValue"] = DefinedName("EnterpriseValue", attr_text="DCF!$B$5")
+            wb_f.save(full_named_path)
+            wb_f.close()
+
+            res_full = validate_dcf_mod.validate_dcf_model(str(full_named_path))
+            self.assertEqual(res_full["status"], "PASS", res_full)
+            self.assertEqual(res_full["error_count"], 0, res_full["errors"])
+            self.assertTrue(
+                any("supplementary unnamed WACC (1.00% at DCF!B7)" in w for w in res_full["warnings"]),
+                res_full["warnings"],
+            )
+
+    def test_sheet_scoped_defined_names_resolve_with_precedence_and_point_capture(self) -> None:
+        from openpyxl.workbook.defined_name import DefinedName
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # 1. Sheet-scoped DCF_WACC on DCF + unqualified sheet-scoped TerminalGrowth on DCF +
+            #    sheet-scoped name pointing to non-target "Assumptions" sheet + lower-precedence "Other" duplicate
+            path = Path(tmp) / "sheet_scoped_names.xlsx"
+            wb = openpyxl.Workbook()
+            ws_dcf = wb.active
+            ws_dcf.title = "DCF"
+            ws_dcf["A5"] = "Custom Discount"
+            ws_dcf["C5"] = 0.095
+            ws_dcf["A6"] = "Custom Growth"
+            ws_dcf["C6"] = 0.025
+            ws_dcf["A7"] = "Custom PV TV"
+            ws_dcf["C7"] = 600.0
+            ws_dcf["A8"] = "Custom EV"
+            ws_dcf["C8"] = 1000.0
+            ws_dcf["A12"] = "Sensitivity Analysis"
+
+            ws_assump = wb.create_sheet("Assumptions")
+            ws_assump["D4"] = 0.03
+
+            ws_other = wb.create_sheet("Other")
+            ws_other["B2"] = 0.50  # Must lose to DCF-scoped DCF_WACC
+
+            ws_dcf.defined_names["DCF_WACC"] = DefinedName("DCF_WACC", attr_text="DCF!$C$5")
+            ws_dcf.defined_names["TerminalGrowth_Bear"] = DefinedName("TerminalGrowth_Bear", attr_text="$C$6")
+            ws_dcf.defined_names["TerminalGrowth_Base"] = DefinedName("TerminalGrowth_Base", attr_text="DCF!$C$6")
+            ws_dcf.defined_names["TerminalGrowth_Bull"] = DefinedName(
+                "TerminalGrowth_Bull", attr_text="Assumptions!$D$4"
+            )
+            ws_dcf.defined_names["PV_TerminalValue"] = DefinedName("PV_TerminalValue", attr_text="DCF!$C$7")
+            ws_dcf.defined_names["EnterpriseValue"] = DefinedName("EnterpriseValue", attr_text="DCF!$C$8")
+            ws_other.defined_names["DCF_WACC"] = DefinedName("DCF_WACC", attr_text="Other!$B$2")
+            wb.save(path)
+            wb.close()
+
+            scan = xlsx_scan_mod.scan_workbook_formulas(
+                path,
+                capture_sheet_grids=True,
+                grid_sheet_names=("DCF", "WACC"),
+                capture_defined_names=True,
+            )
+            self.assertEqual(scan["defined_names"]["DCF_WACC"], ("DCF", 5, 3))
+            self.assertEqual(scan["defined_names"]["TerminalGrowth_Bear"], ("DCF", 6, 3))
+            self.assertEqual(scan["defined_names"]["TerminalGrowth_Bull"], ("Assumptions", 4, 4))
+            # Non-target Assumptions sheet is point-captured cleanly
+            self.assertEqual(scan["sheet_grids"]["Assumptions"], {4: {4: (0.03, "D4")}})
+            self.assertNotIn("Other", scan["sheet_grids"])
+
+            res_ok = validate_dcf_mod.validate_dcf_model(str(path))
+            self.assertEqual(res_ok["status"], "PASS", res_ok)
+            self.assertEqual(res_ok["error_count"], 0, res_ok["errors"])
+            self.assertEqual(res_ok["warning_count"], 0, res_ok["warnings"])
+
+            # 2. Workbook-global DCF_WACC takes precedence over DCF-scoped DCF_WACC
+            wb2 = openpyxl.load_workbook(path)
+            wb2["DCF"]["C9"] = 0.02  # Low global WACC (< 3.0% Bull TG -> FAIL)
+            wb2.defined_names["DCF_WACC"] = DefinedName("DCF_WACC", attr_text="DCF!$C$9")
+            wb2.save(path)
+            wb2.close()
+
+            scan2 = xlsx_scan_mod.scan_workbook_formulas(
+                path,
+                capture_sheet_grids=True,
+                grid_sheet_names=("DCF", "WACC"),
+                capture_defined_names=True,
+            )
+            self.assertEqual(scan2["defined_names"]["DCF_WACC"], ("DCF", 9, 3))
+
+            res_prec = validate_dcf_mod.validate_dcf_model(str(path))
+            self.assertEqual(res_prec["status"], "FAIL", res_prec)
+            self.assertTrue(
+                any("WACC (2.00% at DCF!C9)" in e for e in res_prec["errors"]),
+                res_prec["errors"],
+            )
+
+
+@_skip_unless_required(openpyxl is None, "openpyxl is required for DCF skeleton tests")
 class TestBuildDcfSkeleton(unittest.TestCase):
-    @unittest.skipIf(
+    @_skip_unless_required(
         recalc_xlsx_mod.find_soffice() is None,
         "LibreOffice (soffice) is required for end-to-end DCF skeleton verification",
     )
@@ -5518,7 +6057,7 @@ class TestBuildDcfSkeleton(unittest.TestCase):
             finally:
                 wb_otm_v.close()
 
-    @unittest.skipIf(
+    @_skip_unless_required(
         recalc_xlsx_mod.find_soffice() is None,
         "LibreOffice (soffice) is required for sensitivity WACC <= g guard integration test",
     )
@@ -5600,7 +6139,7 @@ class TestBuildDcfSkeleton(unittest.TestCase):
             finally:
                 wb_lt_v.close()
 
-    @unittest.skipIf(
+    @_skip_unless_required(
         recalc_xlsx_mod.find_soffice() is None,
         "LibreOffice (soffice) is required for Preferred Stock WACC integration test",
     )

@@ -428,6 +428,9 @@ def validate_harness(root: Path = ROOT) -> tuple[list[str], list[str], dict[str,
                 f"{af.relative_to(root)}: invalid model '{raw_model}' (expected one of {sorted(VALID_MODELS)})"
             )
         raw_policy = fm.get("commandExecutionPolicy", "sandbox")
+        # YAML 1.1 (PyYAML safe_load) parses unquoted `off` as boolean False.
+        if raw_policy is False:
+            raw_policy = "off"
         if not isinstance(raw_policy, str) or raw_policy not in VALID_CMD_POLICIES:
             errors.append(f"{af.relative_to(root)}: invalid commandExecutionPolicy '{raw_policy}'")
         if not body:

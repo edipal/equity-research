@@ -113,13 +113,13 @@ python3 .agents/skills/dcf-model/scripts/validate_dcf.py research/companies/<TIC
 | Exit Code | JSON `status` | Meaning & Required Action |
 |---|---|---|
 | `0` | `"success"` | Zero formula errors; all formulas recalculated and verified via LibreOffice (or `--allow-unrecalculated` explicitly passed). Safe to proceed. |
-| `1` | `"errors_found"` or `"error"` | One or more Excel errors (`#REF!`, `#DIV/0!`, `#VALUE!`, `#NAME?`, `#N/A`, `#NUM!`, `#NULL!`), corrupt/missing file, or LibreOffice timeout/failure. Inspect `error_summary`, consult [TROUBLESHOOTING.md](TROUBLESHOOTING.md), fix, and re-run. |
+| `1` | `"errors_found"` or `"error"` | One or more Excel errors (`#REF!`, `#DIV/0!`, `#VALUE!`, `#NAME?`, `#N/A`, `#NUM!`, `#NULL!`), `--in-place` refusal (non-`.xlsx`, What-If data tables, or LibreOffice-lossy Excel features), corrupt/missing file, or LibreOffice timeout/failure. Inspect `error_summary` / `lossy_features` / `lossy_feature_details`, consult [TROUBLESHOOTING.md](TROUBLESHOOTING.md), fix, and re-run. |
 | `2` | `"unverified"` (or CLI usage error) | LibreOffice (`soffice`) is not installed and the workbook has uncached formula values. Install LibreOffice to recalculate, or pass `--allow-unrecalculated` only if the user explicitly accepts unverified cached values. |
 
 `recalc_xlsx.py` mode flags:
-- *(default)* / `--check-only` — Non-destructive read-only check: recalculates in a temp directory and audits without mutating the file on disk (ideal for read-only audits of untouched workbooks).
-- `--in-place` — Atomically replaces a newly generated `.xlsx` file with its LibreOffice-recalculated copy so cached formula values are populated on disk for `validate_dcf.py` and `openpyxl(data_only=True)` reads (refuses non-`.xlsx` files and What-If data tables).
-- `--output <PATH>` — Writes the recalculated `.xlsx` workbook to a new path without modifying the original input.
+- *(default)* / `--check-only` — Non-destructive read-only check: recalculates in a temp directory and audits without mutating the file on disk (ideal for read-only audits of untouched workbooks; warns and reports `lossy_features`, `lossy_feature_details`, `data_tables`, and `lossy_features_inspected`).
+- `--in-place` — Atomically replaces a newly generated `.xlsx` file with its LibreOffice-recalculated copy so cached formula values are populated on disk for `validate_dcf.py` and `openpyxl(data_only=True)` reads (refuses non-`.xlsx` files, What-If data tables, and LibreOffice-lossy Excel features, returning `lossy_features` and `lossy_feature_details`).
+- `--output <PATH>` — Writes the recalculated `.xlsx` workbook to a new path without modifying the original input (warns if `data_tables`, `lossy_features`, or non-OOXML `lossy_features_inspected: false` are detected).
 - `--allow-unrecalculated` — Opt-in override returning exit `0` when LibreOffice is unavailable (always disclose `recalculated_with_libreoffice: false` to the analyst).
 
 ---
