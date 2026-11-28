@@ -22,6 +22,8 @@ from xml.etree import ElementTree as ET
 EXCEL_ERRORS = ("#REF!", "#DIV/0!", "#VALUE!", "#NAME?", "#N/A", "#NUM!", "#NULL!")
 OOXML_ZIP_SUFFIXES = (".xlsx", ".xlsm", ".xltx", ".xltm")
 STRING_LITERAL_RE = re.compile(r'"(?:""|[^"])*"')
+SINGLE_CELL_REF_RE = re.compile(r"^\$?[A-Za-z]{1,3}\$?[1-9][0-9]*$")
+UNQUOTED_SHEET_REF_RE = re.compile(r"^[^\s!'\"()+\-*/=<>&^%,:;\[\]?\\]+$")
 
 
 class WorkbookLoadError(RuntimeError):
@@ -514,20 +516,46 @@ def scan_workbook_formulas(
                     try:
                         destinations = list(dn.destinations)
                     except Exception:
+                        destinations = []
+                    if not destinations:
                         attr_text = getattr(dn, "attr_text", None)
-                        if owner_sheet_title and isinstance(attr_text, str):
-                            raw_ref = attr_text.strip().lstrip("=")
-                            if (
-                                raw_ref
-                                and "!" not in raw_ref
-                                and "," not in raw_ref
-                                and ":" not in raw_ref
-                            ):
-                                destinations = [(owner_sheet_title, raw_ref)]
+                        if isinstance(attr_text, str):
+                            raw_ref = attr_text.strip()
+                            if raw_ref.startswith("="):
+                                raw_ref = raw_ref[1:].strip()
+                            if raw_ref and ":" not in raw_ref:
+                                if "!" in raw_ref:
+                                    sheet_part, cell_part = raw_ref.rsplit("!", 1)
+                                    sheet_part = sheet_part.strip()
+                                    cell_part = cell_part.strip()
+                                    if SINGLE_CELL_REF_RE.fullmatch(cell_part):
+                                        if (
+                                            len(sheet_part) >= 2
+                                            and sheet_part[0] == "'"
+                                            and sheet_part[-1] == "'"
+                                        ):
+                                            inner_sheet = sheet_part[1:-1]
+                                            if (
+                                                inner_sheet
+                                                and "[" not in inner_sheet
+                                                and "'" not in inner_sheet.replace("''", "")
+                                            ):
+                                                destinations = [(inner_sheet, cell_part)]
+                                        elif (
+                                            sheet_part
+                                            and "[" not in sheet_part
+                                            and UNQUOTED_SHEET_REF_RE.fullmatch(sheet_part)
+                                        ):
+                                            destinations = [(sheet_part, cell_part)]
+                                elif owner_sheet_title and SINGLE_CELL_REF_RE.fullmatch(raw_ref):
+                                    destinations = [(owner_sheet_title, raw_ref)]
                     for sheet_title, ref in destinations:
-                        if not ref or ":" in ref:
+                        if not ref or ":" in ref or "[" in sheet_title:
                             continue
-                        ref_clean = ref.replace("$", "").strip()
+                        ref_stripped = ref.strip()
+                        if not SINGLE_CELL_REF_RE.fullmatch(ref_stripped):
+                            continue
+                        ref_clean = ref_stripped.replace("$", "")
                         try:
                             r_idx, c_idx = coordinate_to_tuple(ref_clean)
                         except Exception:

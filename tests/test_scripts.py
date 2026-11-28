@@ -5846,6 +5846,202 @@ class TestValidateDcf(unittest.TestCase):
                 res_prec["errors"],
             )
 
+    def test_leading_equals_defined_names_resolve_single_cells_and_skip_formulas_and_external_refs(self) -> None:
+        from openpyxl.workbook.defined_name import DefinedName
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "leading_equals_defined_names.xlsx"
+            wb = openpyxl.Workbook()
+            ws_dcf = wb.active
+            ws_dcf.title = "DCF"
+            ws_dcf["A5"] = "Custom Rate"
+            ws_dcf["C5"] = 0.095
+            ws_dcf["A6"] = "Custom Growth"
+            ws_dcf["C6"] = 0.025
+            ws_dcf["A7"] = "Custom PV TV"
+            ws_dcf["C7"] = 600.0
+            ws_dcf["A8"] = "Custom EV"
+            ws_dcf["C8"] = 1000.0
+            ws_dcf["A12"] = "Sensitivity Analysis"
+
+            ws_obrien = wb.create_sheet("O'Brien Inputs")
+            ws_obrien["D12"] = 0.03
+
+            # Valid leading-= single-cell refs (sheet-scoped unqualified, qualified, and apostrophe-quoted)
+            ws_dcf.defined_names["ScopedAbs"] = DefinedName("ScopedAbs", attr_text="=$C$5")
+            ws_dcf.defined_names["ScopedRel"] = DefinedName("ScopedRel", attr_text="=C5")
+            ws_dcf.defined_names["ScopedQual"] = DefinedName("ScopedQual", attr_text="=DCF!$C$5")
+            ws_dcf.defined_names["ScopedApostrophe"] = DefinedName(
+                "ScopedApostrophe", attr_text="='O''Brien Inputs'!$D$12"
+            )
+            wb.defined_names["DCF_WACC"] = DefinedName("DCF_WACC", attr_text="=DCF!$C$5")
+            wb.defined_names["TerminalGrowth_Bear"] = DefinedName(
+                "TerminalGrowth_Bear", attr_text="=DCF!$C$6"
+            )
+            ws_dcf.defined_names["TerminalGrowth_Base"] = DefinedName(
+                "TerminalGrowth_Base", attr_text="=$C$6"
+            )
+            wb.defined_names["TerminalGrowth_Bull"] = DefinedName(
+                "TerminalGrowth_Bull", attr_text="='O''Brien Inputs'!$D$12"
+            )
+            wb.defined_names["PV_TerminalValue"] = DefinedName(
+                "PV_TerminalValue", attr_text="=DCF!$C$7"
+            )
+            wb.defined_names["EnterpriseValue"] = DefinedName(
+                "EnterpriseValue", attr_text="=DCF!$C$8"
+            )
+
+            # Formula expressions, multi-cell ranges, double-=, unqualified global, and external refs -> MUST skip
+            wb.defined_names["FormulaAddRight"] = DefinedName("FormulaAddRight", attr_text="=DCF!$C$5+1")
+            wb.defined_names["FormulaAddLeft"] = DefinedName("FormulaAddLeft", attr_text="=1+DCF!$C$5")
+            wb.defined_names["FormulaSumRange"] = DefinedName(
+                "FormulaSumRange", attr_text="=SUM(DCF!$C$5:$C$10)"
+            )
+            wb.defined_names["FormulaSumSingle"] = DefinedName(
+                "FormulaSumSingle", attr_text="=SUM(DCF!$C$5)"
+            )
+            ws_dcf.defined_names["FormulaLocalAdd"] = DefinedName("FormulaLocalAdd", attr_text="=A1+B1")
+            wb.defined_names["DoubleEquals"] = DefinedName("DoubleEquals", attr_text="==DCF!$C$5")
+            wb.defined_names["GlobalUnqualified"] = DefinedName("GlobalUnqualified", attr_text="=$C$5")
+            wb.defined_names["ExternalPlain"] = DefinedName("ExternalPlain", attr_text="[1]DCF!$C$5")
+            wb.defined_names["ExternalLeadEq"] = DefinedName("ExternalLeadEq", attr_text="=[1]DCF!$C$5")
+            wb.defined_names["ExternalQuoted"] = DefinedName(
+                "ExternalQuoted", attr_text="='[Book1.xlsx]O''Brien Inputs'!$D$12"
+            )
+            wb.save(path)
+            wb.close()
+
+            scan = xlsx_scan_mod.scan_workbook_formulas(
+                path,
+                capture_sheet_grids=True,
+                grid_sheet_names=("DCF", "WACC"),
+                capture_defined_names=True,
+            )
+            dn = scan["defined_names"]
+            self.assertEqual(dn["ScopedAbs"], ("DCF", 5, 3))
+            self.assertEqual(dn["ScopedRel"], ("DCF", 5, 3))
+            self.assertEqual(dn["ScopedQual"], ("DCF", 5, 3))
+            self.assertEqual(dn["ScopedApostrophe"], ("O'Brien Inputs", 12, 4))
+            self.assertEqual(dn["DCF_WACC"], ("DCF", 5, 3))
+            self.assertEqual(dn["TerminalGrowth_Bear"], ("DCF", 6, 3))
+            self.assertEqual(dn["TerminalGrowth_Base"], ("DCF", 6, 3))
+            self.assertEqual(dn["TerminalGrowth_Bull"], ("O'Brien Inputs", 12, 4))
+            # Non-target apostrophe-named sheet is point-captured cleanly via leading-= defined name
+            self.assertEqual(scan["sheet_grids"]["O'Brien Inputs"], {12: {4: (0.03, "D12")}})
+
+            for skipped_name in (
+                "FormulaAddRight",
+                "FormulaAddLeft",
+                "FormulaSumRange",
+                "FormulaSumSingle",
+                "FormulaLocalAdd",
+                "DoubleEquals",
+                "GlobalUnqualified",
+                "ExternalPlain",
+                "ExternalLeadEq",
+                "ExternalQuoted",
+            ):
+                self.assertNotIn(skipped_name, dn, f"{skipped_name} should not resolve as a single cell")
+
+            res = validate_dcf_mod.validate_dcf_model(str(path))
+            self.assertEqual(res["status"], "PASS", res)
+            self.assertEqual(res["error_count"], 0, res["errors"])
+            self.assertEqual(res["warning_count"], 0, res["warnings"])
+
+    def test_named_negative_tg_with_unnamed_wacc_emits_single_critical_and_no_supplementary_warning(self) -> None:
+        from openpyxl.workbook.defined_name import DefinedName
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # 1. Named TerminalGrowth_Bear = -150% (DCF!B2) with Base/Bull TG unnamed (all_scenario_tg_named=False),
+            #    all WACC_Bear/Base/Bull named (10%), plus an unnamed "Bear Case WACC" = 12% on DCF ->
+            #    MUST FAIL with exactly ONE CRITICAL error and ZERO "Supplementary unnamed terminal growth" warnings.
+            path = Path(tmp) / "named_neg_tg_unnamed_wacc.xlsx"
+            wb = openpyxl.Workbook()
+            ws_dcf = wb.active
+            ws_dcf.title = "DCF"
+            ws_dcf["A2"] = "Bear Case Terminal Growth Rate"
+            ws_dcf["B2"] = -1.50
+            ws_dcf["A3"] = "Base Case Terminal Growth Rate"
+            ws_dcf["B3"] = 0.025
+            ws_dcf["A4"] = "Bull Case Terminal Growth Rate"
+            ws_dcf["B4"] = 0.03
+            ws_dcf["A5"] = "PV of Terminal Value"
+            ws_dcf["B5"] = 600.0
+            ws_dcf["A6"] = "Enterprise Value"
+            ws_dcf["B6"] = 1000.0
+            ws_dcf["A7"] = "Bear Case WACC"
+            ws_dcf["B7"] = 0.12
+            ws_dcf["A12"] = "Sensitivity Analysis"
+
+            ws_wacc = wb.create_sheet("WACC")
+            ws_wacc["A1"] = "Bear Case WACC"
+            ws_wacc["B1"] = 0.10
+            ws_wacc["A2"] = "Base Case WACC"
+            ws_wacc["B2"] = 0.10
+            ws_wacc["A3"] = "Bull Case WACC"
+            ws_wacc["B3"] = 0.10
+
+            wb.defined_names["TerminalGrowth_Bear"] = DefinedName("TerminalGrowth_Bear", attr_text="DCF!$B$2")
+            wb.defined_names["WACC_Bear"] = DefinedName("WACC_Bear", attr_text="WACC!$B$1")
+            wb.defined_names["WACC_Base"] = DefinedName("WACC_Base", attr_text="WACC!$B$2")
+            wb.defined_names["WACC_Bull"] = DefinedName("WACC_Bull", attr_text="WACC!$B$3")
+            wb.defined_names["PV_TerminalValue"] = DefinedName("PV_TerminalValue", attr_text="DCF!$B$5")
+            wb.defined_names["EnterpriseValue"] = DefinedName("EnterpriseValue", attr_text="DCF!$B$6")
+            wb.save(path)
+            wb.close()
+
+            res = validate_dcf_mod.validate_dcf_model(str(path))
+            self.assertEqual(res["status"], "FAIL", res)
+            neg_tg_errors = [
+                e for e in res["errors"] if "CRITICAL: Terminal growth (-150.00% at DCF!B2) is <= -100%" in e
+            ]
+            self.assertEqual(len(neg_tg_errors), 1, res["errors"])
+            self.assertFalse(
+                any("Supplementary unnamed terminal growth" in w for w in res["warnings"]),
+                res["warnings"],
+            )
+
+            # 2. When all_scenario_wacc_named=False and named TerminalGrowth_Bear = -150% pairs against
+            #    multiple WACCs (10% + 12%), CRITICAL error is still deduplicated to exactly ONE entry.
+            dedupe_path = Path(tmp) / "named_neg_tg_multi_wacc_dedupe.xlsx"
+            wb2 = openpyxl.load_workbook(path)
+            del wb2.defined_names["WACC_Bull"]
+            wb2.save(dedupe_path)
+            wb2.close()
+
+            res2 = validate_dcf_mod.validate_dcf_model(str(dedupe_path))
+            self.assertEqual(res2["status"], "FAIL", res2)
+            neg_tg_errors2 = [
+                e for e in res2["errors"] if "CRITICAL: Terminal growth (-150.00% at DCF!B2) is <= -100%" in e
+            ]
+            self.assertEqual(len(neg_tg_errors2), 1, res2["errors"])
+            self.assertFalse(
+                any("Supplementary unnamed terminal growth" in w for w in res2["warnings"]),
+                res2["warnings"],
+            )
+
+            # 3. Direct helper check: unnamed TG <= -100% with all_scenario_tg_named=True paired against
+            #    multiple WACCs emits exactly ONE supplementary warning (deduplicated by tg_coord) and zero errors.
+            validator = validate_dcf_mod.DCFModelValidator(str(path))
+            validator.errors.clear()
+            validator.warnings.clear()
+            validator.info.clear()
+            validator._emit_tg_vs_wacc_results(
+                [
+                    (-1.50, "DCF!B9", 0.10, "WACC!B1", True, False),
+                    (-1.50, "DCF!B9", 0.12, "DCF!B7", True, True),
+                ],
+                all_scenario_tg_named=True,
+                all_scenario_wacc_named=True,
+            )
+            self.assertEqual(validator.errors, [])
+            supp_neg_warnings = [
+                w
+                for w in validator.warnings
+                if "Supplementary unnamed terminal growth (-150.00% at DCF!B9) is <= -100%" in w
+            ]
+            self.assertEqual(len(supp_neg_warnings), 1, validator.warnings)
+
 
 @_skip_unless_required(openpyxl is None, "openpyxl is required for DCF skeleton tests")
 class TestBuildDcfSkeleton(unittest.TestCase):

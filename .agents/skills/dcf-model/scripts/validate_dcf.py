@@ -1251,6 +1251,7 @@ class DCFModelValidator:
         all_scenario_wacc_named: bool = False,
     ) -> None:
         """Record errors, supplementary warnings, and pass checkmarks for resolved (TG, WACC) pairs."""
+        reported_neg_tg_coords: set[str] = set()
         for tg_val, tg_coord, w_val, w_coord, tg_is_unnamed, wacc_is_unnamed in pairs:
             is_supplementary = (tg_is_unnamed and all_scenario_tg_named) or (
                 wacc_is_unnamed and all_scenario_wacc_named
@@ -1276,7 +1277,10 @@ class DCFModelValidator:
                         "This creates infinite value and is mathematically invalid."
                     )
             elif tg_val <= -1.0:
-                if is_supplementary:
+                if tg_coord in reported_neg_tg_coords:
+                    continue
+                reported_neg_tg_coords.add(tg_coord)
+                if tg_is_unnamed and all_scenario_tg_named:
                     self.warnings.append(
                         f"Supplementary unnamed terminal growth ({tg_val:.2%} at {tg_coord}) is <= -100% "
                         "while all scenario TerminalGrowth_* named ranges are defined; verify decimal "
